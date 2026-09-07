@@ -28,6 +28,8 @@ export interface RefreshProgress {
 export function useSyncActions(deps: SyncActionsDependencies) {
   const isRefreshingAll = ref(false);
   const refreshProgress = ref<RefreshProgress>({ current: 0, total: 0 });
+  const syncingCreatorIds = ref<Set<string>>(new Set());
+  const syncingChannelIds = ref<Set<string>>(new Set());
 
   // Refresh all channels using multi-round interleaved round-robin pacing across platforms
   async function handleRefreshAll(restoreDeleted: boolean = false) {
@@ -67,15 +69,22 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       alert('该创作者暂未绑定任何平台账号，请先点击【追加新账号】添加。');
       return;
     }
-    const results = await updateCreator(creatorId, deps.getItemsPerFetch(), { onlyOriginal: deps.getHideReposts() });
-    await deps.reloadData();
-    const safeResults = Array.isArray(results) ? results : [];
-    const totalPosts = safeResults.reduce((acc, r) => acc + (r.posts?.length || 0), 0);
-    const errors = safeResults.filter(r => r.error).map(r => r.error);
-    if (errors.length > 0 && totalPosts === 0) {
-      alert(`【同步提示 - ${creator?.name || '创作者'}】\n${errors.join('\n')}`);
-    } else {
-      alert(`【同步完成】已成功获取到 ${totalPosts} 条作品/动态！`);
+    syncingCreatorIds.value.add(creatorId);
+    syncingCreatorIds.value = new Set(syncingCreatorIds.value);
+    try {
+      const results = await updateCreator(creatorId, deps.getItemsPerFetch(), { onlyOriginal: deps.getHideReposts() });
+      await deps.reloadData();
+      const safeResults = Array.isArray(results) ? results : [];
+      const totalPosts = safeResults.reduce((acc, r) => acc + (r.posts?.length || 0), 0);
+      const errors = safeResults.filter(r => r.error).map(r => r.error);
+      if (errors.length > 0 && totalPosts === 0) {
+        alert(`【同步提示 - ${creator?.name || '创作者'}】\n${errors.join('\n')}`);
+      } else {
+        alert(`【同步完成】已成功获取到 ${totalPosts} 条作品/动态！`);
+      }
+    } finally {
+      syncingCreatorIds.value.delete(creatorId);
+      syncingCreatorIds.value = new Set(syncingCreatorIds.value);
     }
   }
 
@@ -86,18 +95,25 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       alert('【操作过于频繁】该账号在 8 秒内刚执行过同步。为保护账号免受平台限流，请稍等片刻后再试。');
       return;
     }
-    const fetchLimit = forceRefresh ? 100 : deps.getItemsPerFetch();
-    const res = await updateChannel(channel, fetchLimit, true, {
-      onlyOriginal: deps.getHideReposts(),
-      forceRefresh,
-    });
-    await deps.reloadData();
-    if (res.error) {
-      alert(`【同步未成功】${channel.displayName || channel.accountId}：\n${res.error}`);
-    } else if (res.posts && res.posts.length > 0) {
-      alert(`【同步成功】已获取并更新 ${channel.displayName || channel.accountId} 的 ${res.posts.length} 条作品/动态！`);
-    } else {
-      alert(`【同步完成】连接平台成功，但 ${channel.displayName || channel.accountId} 近期暂无公开发布的内容。`);
+    syncingChannelIds.value.add(channel.id);
+    syncingChannelIds.value = new Set(syncingChannelIds.value);
+    try {
+      const fetchLimit = forceRefresh ? 100 : deps.getItemsPerFetch();
+      const res = await updateChannel(channel, fetchLimit, true, {
+        onlyOriginal: deps.getHideReposts(),
+        forceRefresh,
+      });
+      await deps.reloadData();
+      if (res.error) {
+        alert(`【同步未成功】${channel.displayName || channel.accountId}：\n${res.error}`);
+      } else if (res.posts && res.posts.length > 0) {
+        alert(`【同步成功】已获取并更新 ${channel.displayName || channel.accountId} 的 ${res.posts.length} 条作品/动态！`);
+      } else {
+        alert(`【同步完成】连接平台成功，但 ${channel.displayName || channel.accountId} 近期暂无公开发布的内容。`);
+      }
+    } finally {
+      syncingChannelIds.value.delete(channel.id);
+      syncingChannelIds.value = new Set(syncingChannelIds.value);
     }
   }
 
@@ -116,6 +132,8 @@ export function useSyncActions(deps: SyncActionsDependencies) {
   return {
     isRefreshingAll,
     refreshProgress,
+    syncingCreatorIds,
+    syncingChannelIds,
     handleRefreshAll,
     handleRefreshCreator,
     handleRefreshChannel,

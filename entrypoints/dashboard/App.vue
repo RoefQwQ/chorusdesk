@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import {
   PLATFORM_REGISTRY,
   type Creator,
@@ -25,6 +25,7 @@ import DeletedPostsModal from './components/DeletedPostsModal.vue';
 import AddCreatorModal from './components/AddCreatorModal.vue';
 import DeepSyncModal from './components/DeepSyncModal.vue';
 import TagEditorModal from './components/TagEditorModal.vue';
+import ScrollActionToolbar from './components/ScrollActionToolbar.vue';
 import FeedView from './views/FeedView.vue';
 import CreatorsView from './views/CreatorsView.vue';
 import BookmarksView from './views/BookmarksView.vue';
@@ -150,7 +151,7 @@ const {
 } = recycleBin;
 
 // Bookmark / read state actions (feed cards & bookmarks view).
-const { toggleBookmarkPost, markPostRead } = usePostActions({ dbStats });
+const { toggleBookmarkPost, markPostRead } = usePostActions({ dbStats, posts });
 
 // Creator lifecycle controller (add/bind, tags, avatar, cascade deletes, demo).
 const creatorsManager = useCreatorsManager({
@@ -261,10 +262,24 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-watch(activeTab, async (newTab) => {
+// Tab scroll position preservation
+const tabScrollPositions: Record<string, number> = {};
+
+watch(activeTab, async (newTab, oldTab) => {
+  if (oldTab) {
+    tabScrollPositions[oldTab] = window.scrollY || document.documentElement.scrollTop || 0;
+  }
   if (newTab === 'settings') {
     await refreshDeletedPostsList();
   }
+  await nextTick();
+  // Restore saved scroll position for the target tab
+  const targetY = tabScrollPositions[newTab] || 0;
+  window.scrollTo({ top: targetY, behavior: 'instant' });
+  // Double raf to guarantee restoration even if child components recalculate DOM heights
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: targetY, behavior: 'instant' });
+  });
 });
 
 onMounted(async () => {
@@ -365,6 +380,8 @@ const creatorsContext = computed(() => ({
   channels: channels.value,
   creatorPostCountMap: creatorPostCountMap.value,
   creatorCountByPlatform: creatorCountByPlatform.value,
+  syncingCreatorIds: syncActions.syncingCreatorIds.value,
+  syncingChannelIds: syncActions.syncingChannelIds.value,
 }));
 
 const bookmarksContext = computed(() => ({
@@ -485,9 +502,6 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
           >
             <Bookmark class="w-4 h-4" :class="{ 'fill-amber-500 text-amber-500': activeTab === 'bookmarks' }" />
             <span>收藏</span>
-            <span v-if="dbStats.bookmarkedPostsCount" class="text-[10px] px-1.5 py-0.2 bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 font-bold rounded-full">
-              {{ dbStats.bookmarkedPostsCount }}
-            </span>
           </button>
           <button
             @click="activeTab = 'settings'"
@@ -664,6 +678,9 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
       @close="editingTagCreator = null"
       @save="saveCreatorTags"
     />
+
+    <!-- Floating Actions: Scroll to top, mark reading position, jump to mark -->
+    <ScrollActionToolbar />
 
     <MediaLightbox v-if="lightboxMedia" :media="lightboxMedia" @close="lightboxMedia = null" />
   </div>

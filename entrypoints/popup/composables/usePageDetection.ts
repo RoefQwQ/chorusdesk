@@ -126,9 +126,26 @@ export function usePageDetection() {
                 name = titleSpan.textContent.trim();
               }
             }
-            const xAvatarImg = document.querySelector('div[data-testid="UserAvatar-Container-unknown"] img, div[data-testid*="UserAvatar"] img') as HTMLImageElement;
-            if (xAvatarImg?.src) {
-              avatar = xAvatarImg.src;
+
+            // Exclude viewer's own avatar (e.g. in left sidebar [data-testid="SideNav_AccountSwitcher_Button"])
+            // Look specifically within the profile header or primary column
+            const profileHeader = document.querySelector('[data-testid="primaryColumn"], main[role="main"]');
+            if (profileHeader) {
+              // The main profile avatar on X is typically an <a> linking to photo or containing a large avatar
+              const avatarCandidates = Array.from(
+                profileHeader.querySelectorAll<HTMLImageElement>(
+                  'a[href$="/photo"] img, [data-testid="UserAvatar-Container-unknown"] img, [data-testid="UserProfileHeader-avatar"] img, [data-testid*="UserAvatar"] img'
+                )
+              );
+              for (const img of avatarCandidates) {
+                // Ensure it's not the sidebar button avatar
+                if (!img.closest('[data-testid="SideNav_AccountSwitcher_Button"], header[role="banner"]')) {
+                  if (img.src && !img.src.startsWith('data:')) {
+                    avatar = img.src;
+                    break;
+                  }
+                }
+              }
             }
           }
           else if (host.includes('bilibili.com')) {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { CheckCircle2, PlusCircle, Search, X } from 'lucide-vue-next';
 import type { Channel, Creator } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import type { AccountRole, FollowMode } from '../composables/useQuickFollow';
 
-defineProps<{
+const props = defineProps<{
   mode: FollowMode;
   creators: Creator[];
   channels: Channel[];
@@ -34,6 +35,35 @@ const emit = defineEmits<{
   switchNew: [name?: string];
   save: [];
 }>();
+
+const allExistingTags = computed(() => {
+  const set = new Set<string>();
+  props.creators.forEach(c => {
+    c.tags?.forEach(t => {
+      const trimmed = t.trim();
+      if (trimmed) set.add(trimmed);
+    });
+  });
+  return Array.from(set);
+});
+
+const parsedSelectedTags = computed(() => {
+  return (props.newCreatorTags || '')
+    .split(/[,，]/)
+    .map(t => t.trim())
+    .filter(Boolean);
+});
+
+function toggleTag(tag: string) {
+  const current = parsedSelectedTags.value;
+  let next: string[];
+  if (current.includes(tag)) {
+    next = current.filter(t => t !== tag);
+  } else {
+    next = [...current, tag];
+  }
+  emit('update:newCreatorTags', next.join(', '));
+}
 </script>
 
 <template>
@@ -109,7 +139,10 @@ const emit = defineEmits<{
         </div>
       </div>
       <div>
-        <label class="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">标签（逗号分隔）</label>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-[11px] font-medium text-slate-700 dark:text-slate-300">标签（逗号分隔）</label>
+          <span v-if="allExistingTags.length > 0" class="text-[10px] text-slate-400">点击标签快速选择</span>
+        </div>
         <input
           :value="newCreatorTags"
           @input="emit('update:newCreatorTags', ($event.target as HTMLInputElement).value)"
@@ -117,6 +150,23 @@ const emit = defineEmits<{
           placeholder="例如：ASMR, 插画, 游戏"
           class="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
         />
+
+        <!-- Clickable existing tags pill list -->
+        <div v-if="allExistingTags.length > 0" class="mt-2 flex flex-wrap items-center gap-1.5">
+          <button
+            v-for="t in allExistingTags"
+            :key="t"
+            type="button"
+            @click="toggleTag(t)"
+            :class="parsedSelectedTags.includes(t)
+              ? 'bg-indigo-600 text-white font-medium border-indigo-600 shadow-2xs'
+              : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 border-slate-200/60 dark:border-slate-700/60'"
+            class="px-2 py-0.5 rounded-md text-[10px] border transition-all cursor-pointer flex items-center gap-0.5 select-none"
+          >
+            <span v-if="parsedSelectedTags.includes(t)" class="text-[9px] font-bold">✓</span>
+            <span>#{{ t }}</span>
+          </button>
+        </div>
       </div>
     </div>
 

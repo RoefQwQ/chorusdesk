@@ -99,6 +99,35 @@ function selectCreator(c: Creator) {
   creatorSearchQuery.value = '';
 }
 
+const allExistingTags = computed(() => {
+  const set = new Set<string>();
+  props.creators.forEach(c => {
+    c.tags?.forEach(t => {
+      const trimmed = t.trim();
+      if (trimmed) set.add(trimmed);
+    });
+  });
+  return Array.from(set);
+});
+
+const parsedSelectedTags = computed(() => {
+  return (tags.value || '')
+    .split(/[,，]/)
+    .map(t => t.trim())
+    .filter(Boolean);
+});
+
+function toggleTag(tag: string) {
+  const current = parsedSelectedTags.value;
+  let next: string[];
+  if (current.includes(tag)) {
+    next = current.filter(t => t !== tag);
+  } else {
+    next = [...current, tag];
+  }
+  tags.value = next.join(', ');
+}
+
 function switchToNewCreatorWithQuery(q: string) {
   mode.value = 'new';
   if (q) name.value = q;
@@ -400,13 +429,33 @@ function submit() {
         </div>
 
         <div v-if="mode === 'new'">
-          <label class="block font-medium text-slate-700 dark:text-slate-300 mb-1">标签（逗号分隔）</label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block font-medium text-slate-700 dark:text-slate-300">标签（逗号分隔）</label>
+            <span v-if="allExistingTags.length > 0" class="text-[11px] text-slate-400">点击下方标签快速选择</span>
+          </div>
           <input
             v-model="tags"
             type="text"
             placeholder="如：ASMR, 插画, 游戏"
             class="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-1 focus:ring-indigo-500"
           />
+
+          <!-- Clickable existing tags pill list -->
+          <div v-if="allExistingTags.length > 0" class="mt-2 flex flex-wrap items-center gap-1.5">
+            <button
+              v-for="t in allExistingTags"
+              :key="t"
+              type="button"
+              @click="toggleTag(t)"
+              :class="parsedSelectedTags.includes(t)
+                ? 'bg-indigo-600 text-white font-medium border-indigo-600 shadow-2xs'
+                : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'"
+              class="px-2 py-0.5 rounded-lg text-xs border transition-all cursor-pointer flex items-center gap-1 select-none"
+            >
+              <span v-if="parsedSelectedTags.includes(t)" class="text-[10px] font-bold">✓</span>
+              <span>#{{ t }}</span>
+            </button>
+          </div>
         </div>
       </div>
 

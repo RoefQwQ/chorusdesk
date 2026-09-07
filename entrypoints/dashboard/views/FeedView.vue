@@ -368,6 +368,7 @@ onUnmounted(() => {
           :post="post"
           :creators="context.creators"
           :channels="context.channels"
+          :bookmarked="Boolean(post.isBookmarked)"
           @bookmark="context.toggleBookmarkPost"
           @delete="context.handleDeletePost"
           @read="context.markPostRead"
@@ -407,7 +408,7 @@ onUnmounted(() => {
         </div>
         <div v-if="context.hiddenCreatorsInFilterCount > 0" class="flex items-center gap-1.5">
           <span class="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-            隐藏 {{ context.hiddenCreatorsInFilterCount }} 人
+            已隐 {{ context.hiddenCreatorsInFilterCount }} 位创作者
           </span>
           <button
             type="button"
@@ -421,7 +422,7 @@ onUnmounted(() => {
 
       <!-- Hint text -->
       <div class="text-[11px] text-slate-400 px-1 leading-snug">
-        点击展开选择显示/隐藏的平台，点击 👁 隐藏创作者
+        点击卡片展开渠道，点击 👁 隐藏该作者
       </div>
 
       <!-- Empty Creators under filter -->
@@ -429,7 +430,7 @@ onUnmounted(() => {
         v-if="context.visibleCreatorsForFilter.length === 0"
         class="text-center py-6 text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-850/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-800"
       >
-        当前筛选下无创作者
+        当前暂无匹配创作者
       </div>
 
       <!-- Creator Cards List in Right Sidebar -->
@@ -477,7 +478,7 @@ onUnmounted(() => {
                     v-if="context.selectedPlatform === 'all' && context.hiddenCreatorPlatforms[c.id]?.length"
                     class="px-1.5 py-0.2 rounded-full bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 font-medium text-[9px] border border-rose-200/60 dark:border-rose-900/60"
                   >
-                    隐藏 {{ context.hiddenCreatorPlatforms[c.id].length }} 平台
+                    已隐 {{ context.hiddenCreatorPlatforms[c.id].length }} 个渠道
                   </span>
                 </div>
               </div>
@@ -509,7 +510,7 @@ onUnmounted(() => {
             class="p-2.5 pt-2 bg-slate-100/70 dark:bg-slate-900/70 border-t border-slate-200/60 dark:border-slate-800 space-y-2 text-xs animate-in fade-in duration-150"
           >
             <div class="flex items-center justify-between text-[10px] text-slate-400 px-0.5">
-              <span>选择显示的平台：</span>
+              <span>显示的平台渠道：</span>
               <button
                 v-if="context.hiddenCreatorPlatforms[c.id]?.length"
                 type="button"

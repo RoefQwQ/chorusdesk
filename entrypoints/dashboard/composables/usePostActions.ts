@@ -1,4 +1,4 @@
-import type { Ref } from 'vue';
+import { triggerRef, type Ref, type ShallowRef } from 'vue';
 import type { Post } from '../../../src/types';
 import { postService } from '../../../src/application';
 import type { DashboardStats } from './useDashboardData';
@@ -6,6 +6,8 @@ import type { DashboardStats } from './useDashboardData';
 export interface PostActionsDependencies {
   /** Live dashboard stats — bookmark count is adjusted reactively on toggle. */
   dbStats: Ref<DashboardStats>;
+  /** Live posts shallowRef — triggerRef notifies BookmarksView and other computeds immediately. */
+  posts?: ShallowRef<Post[]>;
 }
 
 /**
@@ -18,21 +20,30 @@ export function usePostActions(deps: PostActionsDependencies) {
   async function toggleBookmarkPost(post: Post) {
     const nextState = !post.isBookmarked;
     post.isBookmarked = nextState;
+    if (deps.posts) {
+      triggerRef(deps.posts);
+    }
     try {
       await postService.setBookmarked(post.id, nextState);
       // Update dbStats count reactively
       if (deps.dbStats.value) {
-        deps.dbStats.value.bookmarkedPostsCount = (deps.dbStats.value.bookmarkedPostsCount || 0) + (nextState ? 1 : -1);
+        deps.dbStats.value.bookmarkedPostsCount = Math.max(0, (deps.dbStats.value.bookmarkedPostsCount || 0) + (nextState ? 1 : -1));
       }
     } catch (err: unknown) {
       console.error('Failed to toggle post bookmark', err);
       post.isBookmarked = !nextState; // rollback on failure
+      if (deps.posts) {
+        triggerRef(deps.posts);
+      }
     }
   }
 
   async function markPostRead(post: Post) {
     if (post.isRead) return;
     post.isRead = true;
+    if (deps.posts) {
+      triggerRef(deps.posts);
+    }
     await postService.markRead(post.id);
   }
 

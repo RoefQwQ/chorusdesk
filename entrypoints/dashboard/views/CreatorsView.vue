@@ -14,11 +14,15 @@ export interface CreatorsViewContext {
   creatorPostCountMap: Record<string, number>;
   /** platform key -> 绑定了该平台的创作者数量（平台筛选胶囊角标） */
   creatorCountByPlatform: Record<string, number>;
+  /** 正在执行单人同步中的创作者 ID 集合 */
+  syncingCreatorIds?: Set<string>;
+  /** 正在执行单账号同步中的账号 ID 集合 */
+  syncingChannelIds?: Set<string>;
 }
 </script>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
   PLATFORM_REGISTRY,
   type Platform,
@@ -43,6 +47,11 @@ import {
   History,
   ExternalLink,
   AlertCircle,
+  LayoutGrid,
+  List,
+  LayoutList,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-vue-next';
 
 const props = defineProps<{ context: CreatorsViewContext }>();
@@ -69,6 +78,30 @@ const emit = defineEmits<{
 }>();
 
 // ==================== CREATORS DIRECTORY FILTER & SORT & BATCH STATE ====================
+const VIEW_MODE_STORAGE_KEY = 'creator_feed_creators_view_mode';
+const viewMode = ref<'grid' | 'list' | 'detailed'>(
+  (typeof localStorage !== 'undefined' && (localStorage.getItem(VIEW_MODE_STORAGE_KEY) as any)) || 'grid'
+);
+
+function setViewMode(mode: 'grid' | 'list' | 'detailed') {
+  viewMode.value = mode;
+  try {
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  } catch {}
+}
+
+const isTagsExpanded = ref(false);
+const expandedCreatorIds = ref<Set<string>>(new Set());
+
+function toggleExpandCreator(id: string) {
+  if (expandedCreatorIds.value.has(id)) {
+    expandedCreatorIds.value.delete(id);
+  } else {
+    expandedCreatorIds.value.add(id);
+  }
+  expandedCreatorIds.value = new Set(expandedCreatorIds.value);
+}
+
 const creatorSearch = ref('');
 const creatorPlatformFilter = ref('all');
 const creatorTagFilter = ref('all');
@@ -212,6 +245,53 @@ const filteredCreatorsList = computed(() => {
   return list;
 });
 
+// ==================== RESPONSIVE MASONRY COLUMN STACKS ====================
+// Tracking windowWidth to distribute creators into independent columns,
+// ensuring expanding a card in one column NEVER affects sibling columns.
+const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280);
+function handleResize() {
+  windowWidth.value = window.innerWidth;
+}
+onMounted(() => {
+  window.addEventListener('resize', handleResize);
+});
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize);
+});
+
+// Grid mode column count (1 to 4 columns)
+const gridColCount = computed(() => {
+  if (windowWidth.value < 640) return 1;
+  if (windowWidth.value < 1024) return 2;
+  if (windowWidth.value < 1280) return 3;
+  return 4;
+});
+
+const gridColumns = computed(() => {
+  const count = gridColCount.value;
+  const cols: Creator[][] = Array.from({ length: count }, () => []);
+  filteredCreatorsList.value.forEach((c, idx) => {
+    cols[idx % count].push(c);
+  });
+  return cols;
+});
+
+// Detailed mode column count (1 to 3 columns, avoiding oversized 1000px cards on 2xl)
+const detailedColCount = computed(() => {
+  if (windowWidth.value < 1024) return 1;
+  if (windowWidth.value < 1536) return 2;
+  return 3;
+});
+
+const detailedColumns = computed(() => {
+  const count = detailedColCount.value;
+  const cols: Creator[][] = Array.from({ length: count }, () => []);
+  filteredCreatorsList.value.forEach((c, idx) => {
+    cols[idx % count].push(c);
+  });
+  return cols;
+});
+
 function toggleSelectCreator(id: string) {
   if (selectedCreatorIds.value.has(id)) {
     selectedCreatorIds.value.delete(id);
@@ -229,7 +309,6 @@ function selectAllFilteredCreators() {
 
 function clearCreatorSelection() {
   selectedCreatorIds.value = new Set();
-  isBatchMode.value = false;
 }
 
 function batchRefreshSelectedCreators() {
@@ -274,6 +353,42 @@ function getCreatorGroupedChannels(creatorId: string): Record<string, Channel[]>
     map[ch.platform].push(ch);
   }
   return map;
+}
+
+/**
+ * 聚合分析创作者旗下全部频道的同步健康状况
+ */
+function getCreatorSyncSummary(creatorId: string) {
+  const chs = context.value.channels.filter(ch => ch.creatorId === creatorId);
+  const total = chs.length;
+  const errorChannels = chs.filter(ch => ch.status === 'error');
+  const isUpdating = Boolean(
+    context.value.syncingCreatorIds?.has(creatorId) ||
+    chs.some(ch => ch.status === 'updating' || context.value.syncingChannelIds?.has(ch.id))
+  );
+  const lastCheckAt = Math.max(0, ...chs.map(ch => ch.lastCheckAt || 0));
+
+  return {
+    total,
+    hasError: errorChannels.length > 0,
+    errorCount: errorChannels.length,
+    firstErrorChannel: errorChannels[0],
+    isUpdating,
+    lastCheckAt,
+  };
+}
+
+function formatRelativeTime(timestamp?: number): string {
+  if (!timestamp) return '未同步';
+  const diff = Date.now() - timestamp;
+  if (diff < 60_000) return '刚刚';
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min}分钟前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}小时前`;
+  const day = Math.floor(hour / 24);
+  if (day < 30) return `${day}天前`;
+  return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 }
 
 // ==================== SIDE-EFFECT ACTIONS (forwarded to parent via emits) ====================
@@ -321,46 +436,80 @@ function loadDemoData() {
 <template>
   <section class="space-y-6">
     <!-- Header & Action Toolbar -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div>
-        <div class="flex items-center gap-2">
-          <h2 class="font-bold text-lg text-slate-900 dark:text-white">关注管理</h2>
-          <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900">
-            {{ filteredCreatorsList.length }} / {{ context.creators.length }} 位
-          </span>
-        </div>
-        <p class="text-xs text-slate-500 mt-0.5">管理关注的创作者和绑定的各平台账号</p>
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 flex-wrap">
+        <h2 class="font-bold text-lg text-slate-900 dark:text-white">关注管理</h2>
+        <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900">
+          {{ filteredCreatorsList.length }} / {{ context.creators.length }} 位创作者
+        </span>
       </div>
-      <div class="flex items-center gap-2">
+
+      <!-- Right Action Group: View Mode Switcher + Batch Mode + Add Button -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- View Mode Switcher -->
+        <div class="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shadow-2xs">
+          <button
+            type="button"
+            @click="setViewMode('grid')"
+            :class="viewMode === 'grid' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
+            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
+            title="网格磁贴视图 (中等密度，清晰直观)"
+          >
+            <LayoutGrid class="w-3.5 h-3.5" />
+            <span class="hidden md:inline">网格</span>
+          </button>
+          <button
+            type="button"
+            @click="setViewMode('list')"
+            :class="viewMode === 'list' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
+            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
+            title="紧凑列表视图 (超高密度，一屏容纳 20+ 位创作者)"
+          >
+            <List class="w-3.5 h-3.5" />
+            <span class="hidden md:inline">紧凑列表</span>
+          </button>
+          <button
+            type="button"
+            @click="setViewMode('detailed')"
+            :class="viewMode === 'detailed' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
+            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
+            title="详细卡片视图 (完全展开全部账号与角色管理)"
+          >
+            <LayoutList class="w-3.5 h-3.5" />
+            <span class="hidden md:inline">详细卡片</span>
+          </button>
+        </div>
+
         <button
           @click="isBatchMode = !isBatchMode; if (!isBatchMode) selectedCreatorIds = new Set();"
           :class="isBatchMode ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'"
-          class="flex items-center gap-1.5 px-3 py-2 border rounded-xl text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+          class="flex items-center gap-1.5 px-3 py-1.5 border rounded-xl text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
         >
           <CheckSquare class="w-3.5 h-3.5" />
-          <span>{{ isBatchMode ? '完成' : '批量' }}</span>
+          <span>{{ isBatchMode ? '完成批量' : '批量操作' }}</span>
         </button>
+
         <button
           @click="openAddModal('new')"
-          class="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+          class="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
         >
           <Plus class="w-4 h-4" />
-          <span>+ 新建</span>
+          <span>+ 关注创作者</span>
         </button>
       </div>
     </div>
 
-    <!-- Filter & Search Bar -->
-    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-2xs space-y-3">
-      <div class="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+    <!-- Filter & Search Bar (Streamlined high-density bar) -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 shadow-2xs space-y-2.5">
+      <div class="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
         <!-- Search Input -->
         <div class="relative flex-1">
-          <Search class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             v-model="creatorSearch"
             type="text"
-            placeholder="搜索创作者..."
-            class="w-full pl-9 pr-8 py-2 bg-slate-100 dark:bg-slate-800 border-none rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+            placeholder="快速搜索创作者名称、标签或账号..."
+            class="w-full pl-8 pr-8 py-1.5 bg-slate-100 dark:bg-slate-800 border-none rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
           />
           <button
             v-if="creatorSearch"
@@ -373,7 +522,7 @@ function loadDemoData() {
 
         <!-- Sort By Select -->
         <div class="flex items-center gap-2 shrink-0">
-          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300">
+          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300">
             <ArrowUpDown class="w-3.5 h-3.5 text-slate-400" />
             <span class="text-[11px] text-slate-400 font-medium">排序</span>
             <select
@@ -381,23 +530,38 @@ function loadDemoData() {
               class="bg-transparent border-none text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
             >
               <option value="updated">最近活跃</option>
-              <option value="posts">作品数</option>
-              <option value="channels">账号数</option>
-              <option value="name">按名称</option>
+              <option value="posts">作品数量</option>
+              <option value="channels">账号数量</option>
+              <option value="name">字母名称</option>
             </select>
           </div>
+
+          <!-- Tags Drawer Trigger Button if tags exist -->
+          <button
+            v-if="allTags.length > 0"
+            type="button"
+            @click="isTagsExpanded = !isTagsExpanded"
+            :class="isTagsExpanded || includeTags.size > 0 || excludeTags.size > 0 ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-transparent'"
+            class="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer"
+            title="展开/收起标签过滤"
+          >
+            <Tag class="w-3.5 h-3.5" />
+            <span>标签</span>
+            <span v-if="includeTags.size > 0 || excludeTags.size > 0" class="w-2 h-2 rounded-full bg-indigo-500"></span>
+            <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': isTagsExpanded }" />
+          </button>
         </div>
       </div>
 
-      <!-- Platform Filter Pills -->
-      <div class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+      <!-- Platform Filter Pills (Compact Row) -->
+      <div class="flex flex-wrap items-center gap-1 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
         <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
           <Filter class="w-3 h-3" />
-          平台筛选:
+          平台:
         </span>
         <button
           @click="creatorPlatformFilter = 'all'"
-          class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
+          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer"
           :class="creatorPlatformFilter === 'all'
             ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
             : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
@@ -408,7 +572,7 @@ function loadDemoData() {
           <button
             v-if="context.creatorCountByPlatform[pKey]"
             @click="creatorPlatformFilter = pKey"
-            class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
+            class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
             :class="creatorPlatformFilter === pKey
               ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
               : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
@@ -419,8 +583,8 @@ function loadDemoData() {
         </template>
       </div>
 
-      <!-- Tags Filter Row (Tri-state: Include / Exclude / Neutral) -->
-      <div v-if="allTags.length > 0" class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+      <!-- Collapsible Tags Filter Row -->
+      <div v-if="allTags.length > 0 && isTagsExpanded" class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs animate-fade-in">
         <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
           <Tag class="w-3 h-3" />
           标签筛选:
@@ -429,9 +593,9 @@ function loadDemoData() {
           type="button"
           @click="clearAllTagFilters"
           :class="includeTags.size === 0 && excludeTags.size === 0 ? 'bg-indigo-600 text-white font-semibold shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'"
-          class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
+          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer"
         >
-          全部标签
+          全部
         </button>
         <button
           v-for="t in allTags"
@@ -445,7 +609,7 @@ function loadDemoData() {
               ? 'bg-rose-600 text-white font-bold shadow-2xs line-through'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
           ]"
-          class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
+          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
           :title="getTagFilterState(t) === 'include' ? '正向包含（点击切为反向排除）' : getTagFilterState(t) === 'exclude' ? '反向排除（点击取消）' : '点击设置为正向包含(+)'"
         >
           <span v-if="getTagFilterState(t) === 'include'" class="text-[10px] font-black">+</span>
@@ -523,14 +687,505 @@ function loadDemoData() {
       </button>
     </div>
 
-    <!-- Creator Cards Grid -->
-    <div v-else class="columns-1 md:columns-2 gap-4 xl:gap-5">
+    <!-- 1. Grid Tiles View (Default: 8-16 Creators per screen, compact cards with platform icons and collapsible account details) -->
+    <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 items-start">
       <div
-        v-for="c in filteredCreatorsList"
-        :key="c.id"
-        class="mb-4 xl:mb-5 break-inside-avoid p-3.5 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-sm space-y-3 relative overflow-hidden"
-        :class="selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md'"
+        v-for="(colCreators, colIdx) in gridColumns"
+        :key="'grid-col-' + colIdx"
+        class="flex flex-col gap-3.5 min-w-0"
       >
+        <div
+          v-for="c in colCreators"
+          :key="c.id"
+          class="p-3 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-2xs space-y-2.5 relative flex flex-col"
+          :class="selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-xs'"
+        >
+        <div>
+          <!-- Header Row: Checkbox / Avatar / Name / Actions -->
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <!-- Batch Checkbox -->
+              <button
+                v-if="isBatchMode"
+                @click="toggleSelectCreator(c.id)"
+                class="shrink-0 text-indigo-600 hover:scale-105 transition-transform cursor-pointer"
+              >
+                <CheckSquare v-if="selectedCreatorIds.has(c.id)" class="w-4 h-4 text-indigo-600" />
+                <Square v-else class="w-4 h-4 text-slate-400" />
+              </button>
+
+              <!-- Avatar with Change Overlay -->
+              <div
+                class="relative group/avatar w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-50 to-violet-100 dark:from-indigo-950/70 dark:to-violet-900/50 flex items-center justify-center text-indigo-600 font-black text-sm overflow-hidden border border-indigo-100 dark:border-indigo-900 shrink-0 shadow-inner cursor-pointer"
+                @click.stop="openAvatarPicker(c)"
+                title="更换主头像"
+              >
+                <img
+                  v-if="getCreatorAvatar(c)"
+                  :src="getCreatorAvatar(c)"
+                  referrerpolicy="no-referrer"
+                  @error="handleAvatarError(getCreatorAvatar(c))"
+                  class="w-full h-full object-cover transition-transform duration-200 group-hover/avatar:scale-105"
+                />
+                <span v-else>{{ c.name.slice(0, 1) }}</span>
+                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center text-white">
+                  <Camera class="w-3.5 h-3.5 drop-shadow" />
+                </div>
+              </div>
+
+              <!-- Name & Post Count -->
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <h3 class="font-bold text-sm text-slate-900 dark:text-white truncate" :title="c.name">{{ c.name }}</h3>
+                </div>
+                <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span class="font-medium text-slate-600 dark:text-slate-300">{{ context.creatorPostCountMap[c.id] || 0 }} 篇作品</span>
+                  <span>•</span>
+                  <span :title="'上次检查：' + (getCreatorSyncSummary(c.id).lastCheckAt ? new Date(getCreatorSyncSummary(c.id).lastCheckAt).toLocaleString('zh-CN') : '尚未检查')">
+                    {{ formatRelativeTime(getCreatorSyncSummary(c.id).lastCheckAt) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex items-center gap-0.5 shrink-0">
+              <!-- Sync Creator -->
+              <button
+                @click="handleRefreshCreator(c.id)"
+                :title="getCreatorSyncSummary(c.id).isUpdating ? '正在同步中...' : '同步该创作者所有账号'"
+                class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': getCreatorSyncSummary(c.id).isUpdating }" />
+              </button>
+              <!-- Deep Sync Modal Trigger -->
+              <button
+                @click="openDeepSyncModal(c)"
+                title="回溯更早历史作品"
+                class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <History class="w-3.5 h-3.5" />
+              </button>
+              <!-- Edit Tags -->
+              <button
+                @click="openEditCreatorTags(c)"
+                title="编辑创作者标签"
+                class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <Edit3 class="w-3.5 h-3.5" />
+              </button>
+              <!-- Delete Creator -->
+              <button
+                @click="deleteCreator(c.id)"
+                title="移除创作者"
+                class="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Tags Preview (Compact) -->
+          <div v-if="c.tags?.length" class="flex flex-wrap items-center gap-1 mt-1.5">
+            <span
+              v-for="t in c.tags.slice(0, 3)"
+              :key="t"
+              class="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+              @click="cycleTagFilter(t)"
+              :title="'点击过滤标签 #' + t"
+            >
+              #{{ t }}
+            </span>
+            <span v-if="c.tags.length > 3" class="text-[10px] text-slate-400 font-mono">+{{ c.tags.length - 3 }}</span>
+          </div>
+
+          <!-- Attached Platform Badges & Health Indicator -->
+          <div class="flex items-center justify-between gap-1.5 pt-2 mt-2 border-t border-slate-100 dark:border-slate-800">
+            <!-- Platform Pills Row -->
+            <div class="flex items-center gap-1 flex-wrap min-w-0">
+              <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
+                <span
+                  :class="PLATFORM_REGISTRY[platform as Platform]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'"
+                  class="px-1.5 py-0.5 rounded text-[9px] font-bold border flex items-center gap-1"
+                  :title="`${PLATFORM_REGISTRY[platform as Platform]?.name || platform} (${chs.length}个账号)`"
+                >
+                  <span>{{ PLATFORM_REGISTRY[platform as Platform]?.name || platform }}</span>
+                  <span v-if="chs.length > 1" class="text-[8px] opacity-75 font-mono">x{{ chs.length }}</span>
+                </span>
+              </template>
+              <span v-if="context.channels.filter(ch => ch.creatorId === c.id).length === 0" class="text-[10px] text-slate-400">
+                未绑定账号
+              </span>
+            </div>
+
+            <!-- Sync Error Badge or Collapsible Account Details Toggle -->
+            <div class="flex items-center gap-1 shrink-0">
+              <span
+                v-if="getCreatorSyncSummary(c.id).hasError"
+                @click.stop="toggleExpandCreator(c.id)"
+                class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 cursor-pointer flex items-center gap-0.5"
+                title="存在同步异常账号，点击展开查看"
+              >
+                <AlertCircle class="w-2.5 h-2.5" />
+                <span>{{ getCreatorSyncSummary(c.id).errorCount }}个异常</span>
+              </span>
+
+              <button
+                type="button"
+                @click="toggleExpandCreator(c.id)"
+                class="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-0.5 text-[10px]"
+                :title="expandedCreatorIds.has(c.id) ? '收起账号详情' : '展开管理各平台账号'"
+              >
+                <span class="font-mono text-[10px]">{{ context.channels.filter(ch => ch.creatorId === c.id).length }}</span>
+                <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Expanded Account Details in Grid Mode -->
+        <div
+          v-if="expandedCreatorIds.has(c.id)"
+          class="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 animate-fade-in"
+        >
+          <div class="flex items-center justify-between text-[10px] text-slate-500 pb-1">
+            <span class="font-semibold text-slate-700 dark:text-slate-300">绑定的账号列表</span>
+            <button
+              @click="openAddModal('channel', c)"
+              class="text-indigo-600 hover:underline font-semibold flex items-center gap-0.5 cursor-pointer"
+            >
+              <Plus class="w-2.5 h-2.5" />
+              <span>添加账号</span>
+            </button>
+          </div>
+
+          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+            <div
+              v-for="ch in context.channels.filter(ch => ch.creatorId === c.id)"
+              :key="ch.id"
+              class="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 text-xs space-y-1"
+            >
+              <div class="flex items-center justify-between gap-1">
+                <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                  <!-- Role Badge with Quick Cycle -->
+                  <button
+                    @click="cycleChannelRole(ch)"
+                    title="点击切换账号角色"
+                    class="px-1 py-0.2 rounded text-[9px] font-medium border cursor-pointer shrink-0"
+                    :class="getRoleBadgeClass(ch.accountRole)"
+                  >
+                    {{ ch.label || getRoleLabel(ch.accountRole) }}
+                  </button>
+
+                  <a
+                    :href="ch.profileUrl"
+                    target="_blank"
+                    class="font-medium text-[11px] text-slate-700 dark:text-slate-200 hover:underline truncate max-w-[110px]"
+                    :title="ch.profileUrl"
+                  >
+                    {{ ch.displayName || ch.accountId }}
+                  </a>
+                </div>
+
+                <div class="flex items-center gap-0.5 shrink-0">
+                  <button
+                    @click="openDeepSyncModal(c, ch.id)"
+                    title="深度挖掘该账号历史动态"
+                    class="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
+                  >
+                    <History class="w-3 h-3" />
+                  </button>
+                  <button
+                    @click="handleRefreshChannel(ch, false)"
+                    @click.shift.stop="handleRefreshChannel(ch, true)"
+                    title="同步最新 (按住 Shift 强制覆盖)"
+                    class="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
+                  >
+                    <RefreshCw class="w-3 h-3" :class="{ 'animate-spin': ch.status === 'updating' || context.syncingChannelIds?.has(ch.id) }" />
+                  </button>
+                  <button
+                    @click="deleteChannel(ch.id)"
+                    title="移除账号"
+                    class="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                  >
+                    <Trash2 class="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              <!-- Error alert if present -->
+              <div
+                v-if="ch.errorMessage"
+                class="text-[9px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-1 rounded border border-rose-200/60 dark:border-rose-900/40 flex items-start gap-1"
+              >
+                <AlertCircle class="w-2.5 h-2.5 shrink-0 mt-0.5" />
+                <span class="break-all">{{ ch.errorMessage }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- 2. Compact Table List View (15-25+ Creators per screen, highest density) -->
+    <div v-else-if="viewMode === 'list'" class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-850/60 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              <th v-if="isBatchMode" class="py-2.5 px-3 w-10 text-center">
+                <button @click="selectAllFilteredCreators" class="cursor-pointer text-indigo-600">
+                  <CheckSquare class="w-3.5 h-3.5" />
+                </button>
+              </th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-56 sm:w-64">创作者</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300">已绑平台账号</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-24 text-center">作品数</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-32">同步状态</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-36 text-right pr-4">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+            <template v-for="c in filteredCreatorsList" :key="'row-' + c.id">
+              <tr
+                class="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group"
+                :class="{ 'bg-indigo-50/20 dark:bg-indigo-950/20': selectedCreatorIds.has(c.id) }"
+              >
+                <!-- Batch Checkbox -->
+                <td v-if="isBatchMode" class="py-2.5 px-3 text-center">
+                  <button @click="toggleSelectCreator(c.id)" class="cursor-pointer text-indigo-600">
+                    <CheckSquare v-if="selectedCreatorIds.has(c.id)" class="w-4 h-4 text-indigo-600" />
+                    <Square v-else class="w-4 h-4 text-slate-400" />
+                  </button>
+                </td>
+
+                <!-- Creator Avatar, Name & Tags -->
+                <td class="py-2.5 px-3">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div
+                      class="relative w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer shadow-2xs"
+                      @click="openAvatarPicker(c)"
+                      title="更换主头像"
+                    >
+                      <img
+                        v-if="getCreatorAvatar(c)"
+                        :src="getCreatorAvatar(c)"
+                        referrerpolicy="no-referrer"
+                        @error="handleAvatarError(getCreatorAvatar(c))"
+                        class="w-full h-full object-cover"
+                      />
+                      <span v-else class="w-full h-full flex items-center justify-center font-bold text-indigo-600 text-xs">
+                        {{ c.name.slice(0, 1) }}
+                      </span>
+                    </div>
+
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="font-semibold text-xs text-slate-900 dark:text-slate-100 truncate max-w-[130px] sm:max-w-[180px]">{{ c.name }}</span>
+                        <!-- Quick Tag List -->
+                        <span
+                          v-for="t in (c.tags || []).slice(0, 2)"
+                          :key="t"
+                          class="px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer border border-slate-200/50 dark:border-slate-700/50"
+                          @click="cycleTagFilter(t)"
+                        >
+                          #{{ t }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Attached Platform Badges -->
+                <td class="py-2.5 px-3">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
+                      <span
+                        :class="PLATFORM_REGISTRY[platform as Platform]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'"
+                        class="px-1.5 py-0.5 rounded text-[10px] font-medium border flex items-center gap-0.5 shadow-2xs"
+                      >
+                        {{ PLATFORM_REGISTRY[platform as Platform]?.name || platform }}
+                        <span v-if="chs.length > 1" class="text-[9px] opacity-75">x{{ chs.length }}</span>
+                      </span>
+                    </template>
+                    <button
+                      @click="toggleExpandCreator(c.id)"
+                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer ml-1 shadow-2xs"
+                    >
+                      <span>{{ expandedCreatorIds.has(c.id) ? '收起明细' : '查看全部' }}</span>
+                      <span class="text-[10px] text-slate-400">({{ context.channels.filter(ch => ch.creatorId === c.id).length }})</span>
+                      <ChevronDown class="w-3 h-3 text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
+                    </button>
+                  </div>
+                </td>
+
+                <!-- Post Count -->
+                <td class="py-2.5 px-3 text-center text-slate-600 dark:text-slate-400">
+                  <span class="font-semibold text-slate-700 dark:text-slate-200">{{ context.creatorPostCountMap[c.id] || 0 }}</span>
+                  <span class="text-[10px] text-slate-400 ml-0.5">篇</span>
+                </td>
+
+                <!-- Sync Health & Last Checked -->
+                <td class="py-2.5 px-3">
+                  <div class="flex items-center gap-1.5">
+                    <span
+                      v-if="getCreatorSyncSummary(c.id).isUpdating"
+                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40"
+                    >
+                      <RefreshCw class="w-2.5 h-2.5 animate-spin" />
+                      <span>同步中</span>
+                    </span>
+                    <span
+                      v-else-if="getCreatorSyncSummary(c.id).hasError"
+                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200/60 dark:border-rose-900/40 cursor-pointer hover:bg-rose-100 transition-colors"
+                      @click="toggleExpandCreator(c.id)"
+                      :title="getCreatorSyncSummary(c.id).firstErrorChannel?.errorMessage"
+                    >
+                      <AlertCircle class="w-2.5 h-2.5" />
+                      <span>异常 ({{ getCreatorSyncSummary(c.id).errorCount }})</span>
+                    </span>
+                    <span
+                      v-else
+                      class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span>{{ formatRelativeTime(getCreatorSyncSummary(c.id).lastCheckAt) }}</span>
+                    </span>
+                  </div>
+                </td>
+
+                <!-- Action Toolbar -->
+                <td class="py-2.5 px-3 text-right">
+                  <div class="flex items-center justify-end gap-1">
+                    <button
+                      @click="handleRefreshCreator(c.id)"
+                      title="同步最新动态"
+                      class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': getCreatorSyncSummary(c.id).isUpdating }" />
+                    </button>
+                    <button
+                      @click="openDeepSyncModal(c)"
+                      title="回溯历史作品"
+                      class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <History class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      @click="openAddModal('channel', c)"
+                      title="绑定新账号"
+                      class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Plus class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      @click="openEditCreatorTags(c)"
+                      title="编辑标签"
+                      class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Edit3 class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      @click="deleteCreator(c.id)"
+                      title="移除创作者"
+                      class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Nested Table Row if Expanded -->
+              <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-850/40">
+                <td :colspan="isBatchMode ? 6 : 5" class="p-3">
+                  <div class="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
+                    <div class="flex items-center justify-between text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                      <span class="font-bold text-slate-700 dark:text-slate-200">【{{ c.name }}】全部已绑定平台账号</span>
+                      <button
+                        @click="openAddModal('channel', c)"
+                        class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus class="w-3 h-3" />
+                        <span>绑定新平台账号</span>
+                      </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div
+                        v-for="ch in context.channels.filter(ch => ch.creatorId === c.id)"
+                        :key="ch.id"
+                        class="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200/70 dark:border-slate-700 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div class="flex items-center gap-2 min-w-0 flex-1">
+                          <button
+                            @click="cycleChannelRole(ch)"
+                            title="点击切换角色"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-medium border cursor-pointer shrink-0"
+                            :class="getRoleBadgeClass(ch.accountRole)"
+                          >
+                            {{ ch.label || getRoleLabel(ch.accountRole) }}
+                          </button>
+                          <span :class="PLATFORM_REGISTRY[ch.platform]?.badgeBg" class="px-1 py-0.2 rounded text-[9px] font-bold border shrink-0">
+                            {{ PLATFORM_REGISTRY[ch.platform]?.name || ch.platform }}
+                          </span>
+                          <a :href="ch.profileUrl" target="_blank" class="font-medium text-slate-700 dark:text-slate-200 hover:underline truncate max-w-[140px]">
+                            {{ ch.displayName || ch.accountId }}
+                          </a>
+                          <span v-if="ch.status === 'error'" class="px-1 py-0.2 text-[9px] bg-rose-50 text-rose-600 rounded border border-rose-200 shrink-0">
+                            异常
+                          </span>
+                        </div>
+
+                        <div class="flex items-center gap-1 shrink-0">
+                          <button
+                            @click="openDeepSyncModal(c, ch.id)"
+                            title="针对该账号回溯历史"
+                            class="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
+                          >
+                            <History class="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            @click="handleRefreshChannel(ch, false)"
+                            @click.shift.stop="handleRefreshChannel(ch, true)"
+                            title="同步最新 (按住 Shift 强制覆盖)"
+                            class="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
+                          >
+                            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': ch.status === 'updating' || context.syncingChannelIds?.has(ch.id) }" />
+                          </button>
+                          <button
+                            @click="deleteChannel(ch.id)"
+                            title="移除账号"
+                            class="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                          >
+                            <Trash2 class="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. Detailed Cards View (The complete accordion layout) -->
+    <div v-else class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 xl:gap-5 items-start">
+      <div
+        v-for="(colCreators, colIdx) in detailedColumns"
+        :key="'detail-col-' + colIdx"
+        class="flex flex-col gap-4 xl:gap-5 min-w-0"
+      >
+        <div
+          v-for="c in colCreators"
+          :key="c.id"
+          class="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-sm space-y-3 relative overflow-hidden"
+          :class="selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md'"
+        >
         <!-- Top Row: Avatar, Name, Stats & Actions -->
         <div class="flex items-start justify-between gap-3">
           <div class="flex items-center gap-3 min-w-0">
@@ -558,8 +1213,6 @@ function loadDemoData() {
                 class="w-full h-full object-cover transition-transform duration-200 group-hover/avatar:scale-105"
               />
               <span v-else>{{ c.name.slice(0, 1) }}</span>
-
-              <!-- Subtle hover mask & camera icon -->
               <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center text-white">
                 <Camera class="w-4 h-4 drop-shadow" />
               </div>
@@ -584,7 +1237,6 @@ function loadDemoData() {
                   #{{ t }}
                 </span>
                 <span v-if="!c.tags?.length" class="text-[10px] text-slate-400">未分类</span>
-                <!-- Edit tags button -->
                 <button
                   type="button"
                   @click.stop="openEditCreatorTags(c)"
@@ -600,7 +1252,6 @@ function loadDemoData() {
 
           <!-- Top Quick Action Buttons -->
           <div class="flex items-center gap-1 shrink-0">
-            <!-- Open Deep History Sync Modal Button -->
             <button
               @click="openDeepSyncModal(c)"
               title="回溯更早的历史动态"
@@ -609,15 +1260,13 @@ function loadDemoData() {
               <History class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">回溯历史</span>
             </button>
-            <!-- Quick Sync Latest -->
             <button
               @click="handleRefreshCreator(c.id)"
-              title="同步最新动态"
+              :title="getCreatorSyncSummary(c.id).isUpdating ? '正在同步中...' : '同步最新动态'"
               class="p-2 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
             >
-              <RefreshCw class="w-4 h-4" />
+              <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': getCreatorSyncSummary(c.id).isUpdating }" />
             </button>
-            <!-- Delete Creator Archive -->
             <button
               @click="deleteCreator(c.id)"
               title="移除该创作者档案"
@@ -665,7 +1314,6 @@ function loadDemoData() {
                   class="flex items-center justify-between p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-xs shadow-2xs"
                 >
                   <div class="flex items-center gap-2 min-w-0 flex-1">
-                    <!-- Account Role Badge with Quick Cycle Switch on Click -->
                     <button
                       @click="cycleChannelRole(ch)"
                       title="点击切换账号角色分类 (主号 / 小号 / 里号 / 自定义)"
@@ -675,7 +1323,6 @@ function loadDemoData() {
                       {{ ch.label || getRoleLabel(ch.accountRole) }}
                     </button>
 
-                    <!-- Channel Avatar Thumbnail -->
                     <div class="w-5 h-5 rounded-full overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-500">
                       <img
                         v-if="ch.avatarUrl && !failedAvatarUrls.has(ch.avatarUrl)"
@@ -687,18 +1334,24 @@ function loadDemoData() {
                       <span v-else>{{ (ch.displayName || ch.accountId || 'U').slice(0, 1) }}</span>
                     </div>
 
-                    <!-- Account Name & Link -->
                     <a
                       :href="ch.profileUrl"
                       target="_blank"
-                      class="font-medium text-slate-700 dark:text-slate-200 hover:underline flex items-center gap-1 truncate max-w-[180px] sm:max-w-xs"
+                      class="font-medium text-slate-700 dark:text-slate-200 hover:underline flex items-center gap-1 truncate max-w-[150px] sm:max-w-[200px]"
                       :title="ch.profileUrl"
                     >
                       <span class="truncate">{{ ch.displayName || ch.accountId }}</span>
                       <ExternalLink class="w-2.5 h-2.5 text-slate-400 shrink-0" />
                     </a>
 
-                    <!-- Status Indicator -->
+                    <span
+                      v-if="ch.displayName && ch.accountId && ch.displayName !== ch.accountId"
+                      class="text-[11px] text-slate-400 dark:text-slate-500 truncate hidden sm:inline shrink-0 max-w-[130px]"
+                      :title="'账号 ID: ' + ch.accountId"
+                    >
+                      {{ ch.accountId.startsWith('@') ? ch.accountId : '@' + ch.accountId }}
+                    </span>
+
                     <span
                       v-if="ch.status === 'error'"
                       @click.stop="alert(`【${ch.displayName || ch.accountId} 同步未成功】\n\n原因：${ch.errorMessage || '未知异常'}`)"
@@ -707,11 +1360,18 @@ function loadDemoData() {
                     >
                       同步失败
                     </span>
+
+                    <span
+                      v-else-if="ch.lastSyncAt"
+                      class="text-[10px] text-slate-400 dark:text-slate-500 hidden sm:inline-flex items-center gap-1 shrink-0 ml-auto mr-1"
+                      :title="'上次同步：' + new Date(ch.lastSyncAt).toLocaleString('zh-CN')"
+                    >
+                      <span class="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+                      <span>{{ formatRelativeTime(ch.lastSyncAt) }}</span>
+                    </span>
                   </div>
 
-                  <!-- Actions -->
                   <div class="flex items-center gap-1 shrink-0 ml-2">
-                    <!-- Deep Sync Single Channel -->
                     <button
                       @click="openDeepSyncModal(c, ch.id)"
                       title="针对该账号深度回溯更早历史动态"
@@ -719,16 +1379,14 @@ function loadDemoData() {
                     >
                       <History class="w-3.5 h-3.5" />
                     </button>
-                    <!-- Refresh Channel Latest (Normal click: incremental; Shift+click: force refresh existing) -->
                     <button
                       @click="handleRefreshChannel(ch, false)"
                       @click.shift.stop="handleRefreshChannel(ch, true)"
                       title="同步最新动态 (按住 Shift 点击可强制重新刷新覆盖已有内容与图片)"
                       class="p-1 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                     >
-                      <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': ch.status === 'updating' }" />
+                      <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': ch.status === 'updating' || context.syncingChannelIds?.has(ch.id) }" />
                     </button>
-                    <!-- Delete Channel -->
                     <button
                       @click="deleteChannel(ch.id)"
                       title="移除该账号"
@@ -739,7 +1397,6 @@ function loadDemoData() {
                   </div>
                 </div>
 
-                <!-- Error notification if present -->
                 <div
                   v-for="ch in chs.filter(c => c.errorMessage)"
                   :key="'err-' + ch.id"
@@ -757,6 +1414,7 @@ function loadDemoData() {
           </div>
         </div>
       </div>
+    </div>
     </div>
   </section>
 </template>

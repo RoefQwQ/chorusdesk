@@ -234,7 +234,7 @@ const bookmarkColumns = computed(() => {
             :post="post"
             :creators="context.creators"
             :channels="context.channels"
-            bookmarked
+            :bookmarked="Boolean(post.isBookmarked)"
             @bookmark="context.onToggleBookmark"
             @delete="context.onDelete"
             @read="context.onRead"

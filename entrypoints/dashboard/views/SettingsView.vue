@@ -456,13 +456,13 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
         <div>
           <h3 class="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
             <Trash2 class="w-4 h-4 text-rose-500" />
-            <span>动态回收站 (安全兜底与定向找回)</span>
+            <span>动态回收站</span>
             <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60">
               {{ context.deletedPostCount }} 条记录
             </span>
           </h3>
           <p class="text-xs text-slate-500 mt-1">
-            所有手动删除的动态均在此安全兜底。日常“一键同步”默认不拉取回收站中的内容；您可在此随时“定向找回”并即刻无缝还原至动态流，避免误删导致无法恢复。
+            手动删除的动态将存入回收站，同步时默认不再抓取。可随时在此恢复到动态列表，避免误删丢失。
           </p>
         </div>
         <div class="flex items-center gap-2 shrink-0">

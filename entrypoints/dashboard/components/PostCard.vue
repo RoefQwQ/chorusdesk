@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { Bookmark, ChevronRight, Clock, ExternalLink, Film, ImageOff, Repeat2, Trash2 } from 'lucide-vue-next';
+import { computed, ref, watch, onMounted } from 'vue';
+import { Bookmark, ChevronRight, Clock, ExternalLink, Film, Video, ImageOff, Repeat2, Trash2 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
 import { imageCacheService } from '../../../src/services/imageCache';
-import { onMounted } from 'vue';
 
 const props = withDefaults(defineProps<{
   post: Post;
@@ -20,6 +19,11 @@ const emit = defineEmits<{
   media: [media: { url: string; originalUrl?: string; type: string; title?: string }];
   avatarError: [url: string];
 }>();
+
+const isBookmarked = ref(Boolean(props.post.isBookmarked || props.bookmarked));
+watch(() => [props.post.isBookmarked, props.bookmarked], () => {
+  isBookmarked.value = Boolean(props.post.isBookmarked || props.bookmarked);
+});
 
 const creator = computed(() => props.creators.find(c => c.id === props.post.creatorId));
 const channel = computed(() => props.channels.find(c => c.id === props.post.channelId));
@@ -172,13 +176,27 @@ const formatTime = (timestamp: number) => {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
   return date.toLocaleDateString('zh-CN');
 };
+
 const openMedia = (url: string, type: string) => emit('media', { url, originalUrl: props.post.originalUrl, type, title: props.post.title });
+
+function openVideoPost(url?: string) {
+  if (url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } else if (props.post.mediaList?.[0]?.previewUrl) {
+    openMedia(props.post.mediaList[0].previewUrl, 'video');
+  }
+}
+
+function toggleBookmark() {
+  isBookmarked.value = !isBookmarked.value;
+  emit('bookmark', props.post);
+}
 </script>
 
 <template>
   <article
     class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ease-out flex flex-col group/card will-change-transform"
-    :class="bookmarked ? 'ring-1 ring-amber-500/30' : (post.isRead ? '' : 'ring-1 ring-indigo-400/40 dark:ring-indigo-600/50')"
+    :class="isBookmarked ? 'ring-1 ring-amber-500/30' : (post.isRead ? '' : 'ring-1 ring-indigo-400/40 dark:ring-indigo-600/50')"
     @click="emit('read', post)"
   >
     <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
@@ -201,7 +219,7 @@ const openMedia = (url: string, type: string) => emit('media', { url, originalUr
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">
-        <button type="button" @click.stop="emit('bookmark', post)" :title="post.isBookmarked ? '取消收藏' : '收藏'" class="p-1.5 rounded-lg transition-all duration-150 cursor-pointer active:scale-90" :class="post.isBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-950/60' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800'"><Bookmark class="w-3.5 h-3.5" :class="{ 'fill-amber-500 text-amber-500': post.isBookmarked }" /></button>
+        <button type="button" @click.stop="toggleBookmark" :title="isBookmarked ? '取消收藏' : '收藏'" class="p-1.5 rounded-lg transition-all duration-150 cursor-pointer active:scale-90" :class="isBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-950/60' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800'"><Bookmark class="w-3.5 h-3.5" :class="{ 'fill-amber-500 text-amber-500': isBookmarked }" /></button>
         <button type="button" @click.stop="emit('delete', post)" title="删除动态" class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-all duration-150 cursor-pointer active:scale-90"><Trash2 class="w-3.5 h-3.5" /></button>
         <a :href="post.originalUrl" target="_blank" title="打开原帖" class="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer active:scale-90 shrink-0"><ExternalLink class="w-3.5 h-3.5" /></a>
       </div>
@@ -212,9 +230,35 @@ const openMedia = (url: string, type: string) => emit('media', { url, originalUr
       <p v-if="post.content" class="text-xs text-slate-600 dark:text-slate-300 line-clamp-4 whitespace-pre-wrap leading-relaxed">{{ post.content }}</p>
       <div v-if="post.mediaList?.length" class="pt-1">
         <!-- Single Video -->
-        <div v-if="post.mediaList.length === 1 && post.mediaList[0].type === 'video'" @click.stop="openMedia(post.mediaList[0].previewUrl, 'video')" class="relative aspect-video rounded-xl overflow-hidden bg-slate-900 cursor-pointer group/vid flex items-center justify-center">
-          <img v-if="!isMediaFailed(post.mediaList[0].previewUrl)" :src="secure(post.mediaList[0].previewUrl)" referrerpolicy="no-referrer" loading="lazy" class="w-full h-full object-cover opacity-90 group-hover/vid:scale-105 transition-transform duration-300" @error="handleMediaError($event, post.mediaList[0].previewUrl)" />
-          <Film class="absolute w-11 h-11 p-3 rounded-full bg-white/30 backdrop-blur-xs text-white fill-white shadow-lg group-hover/vid:scale-110 transition-transform duration-200" />
+        <div
+          v-if="post.mediaList.length === 1 && post.mediaList[0].type === 'video'"
+          @click.stop="openVideoPost(post.originalUrl)"
+          class="relative aspect-video rounded-xl overflow-hidden bg-slate-900 cursor-pointer group/vid flex items-center justify-center shadow-xs hover:shadow-md transition-shadow"
+          title="在新标签页中打开并观看原视频"
+        >
+          <img
+            v-if="!isMediaFailed(post.mediaList[0].previewUrl)"
+            :src="secure(post.mediaList[0].previewUrl)"
+            referrerpolicy="no-referrer"
+            loading="lazy"
+            class="w-full h-full object-cover opacity-95 group-hover/vid:scale-103 transition-transform duration-300"
+            @error="handleMediaError($event, post.mediaList[0].previewUrl)"
+          />
+
+          <!-- Elegant Corner Video Indicator Badge -->
+          <div class="absolute bottom-2.5 right-2.5 px-2 py-1 rounded-lg bg-black/65 backdrop-blur-md text-white text-[11px] font-medium flex items-center gap-1.5 shadow-sm border border-white/10 group-hover/vid:bg-black/80 transition-all">
+            <Video class="w-3.5 h-3.5 text-indigo-400" />
+            <span>视频动态</span>
+            <ExternalLink class="w-3 h-3 text-white/70 group-hover/vid:text-white transition-colors" />
+          </div>
+
+          <!-- Subtle Hover Overlay Prompt -->
+          <div class="absolute inset-0 bg-black/25 opacity-0 group-hover/vid:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+            <span class="px-3.5 py-1.5 rounded-full bg-black/75 backdrop-blur-md text-white text-xs font-medium flex items-center gap-1.5 shadow-lg border border-white/15 scale-95 group-hover/vid:scale-100 transition-transform">
+              <span>在源站观看完整视频</span>
+              <ExternalLink class="w-3.5 h-3.5 text-indigo-300" />
+            </span>
+          </div>
         </div>
 
         <!-- Single Image -->
