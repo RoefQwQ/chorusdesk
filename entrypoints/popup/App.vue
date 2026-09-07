@@ -103,9 +103,9 @@ onMounted(async () => {
     <!-- Header -->
     <div class="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
       <div class="flex items-center gap-2.5">
-        <img src="/icons/icon-48.png" class="w-7 h-7 rounded-xl shadow-xs shrink-0" alt="Creator Feed Hub" />
+        <img src="/icons/icon-48.png" class="w-7 h-7 rounded-xl shadow-xs shrink-0" alt="Chorus" />
         <div>
-          <h1 class="font-bold text-sm tracking-tight text-slate-900 dark:text-white">Creator Feed Hub</h1>
+          <h1 class="font-bold text-sm tracking-tight text-slate-900 dark:text-white">Chorus</h1>
           <p class="text-[10px] text-slate-500">创作者聚合追踪</p>
         </div>
       </div>

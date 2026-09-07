@@ -1,4 +1,4 @@
-# Creator Feed Hub
+# Chorus
 
 一个基于 WXT、Vue 3 和 Manifest V3 的本地优先创作者动态聚合扩展。
 
@@ -69,7 +69,7 @@ npm run zip
 ## 使用流程
 
 1. 在支持的平台打开创作者主页。
-2. 点击浏览器工具栏中的 Creator Feed Hub 图标。
+2. 点击浏览器工具栏中的 Chorus 图标。
 3. 在 Popup 中确认识别结果，选择“新建创作者”或绑定已有创作者。
 4. 打开 Dashboard，在“动态”页同步全部账号或单独刷新账号。
 5. 在“关注”页维护创作者、平台账号、角色和标签。
@@ -121,7 +121,7 @@ flowchart TB
 ### 目录
 
 ```text
-creator-feed-hub/
+chorusdesk/
 ├─ entrypoints/
 │  ├─ background.ts                    # MV3 入口和薄消息路由
 │  ├─ rplay-sync.content.ts            # Rplay 页面会话同步

@@ -7,7 +7,7 @@ import { setupDeclarativeNetRules } from '../src/infrastructure/chrome/declarati
 import { handleAutoSyncAlarm, setupAutoSync } from '../src/infrastructure/chrome/autoSync';
 
 export default defineBackground(() => {
-  console.log('[Creator Feed Hub] Background Service Worker ready');
+  console.log('[Chorus] Background Service Worker ready');
   setupDeclarativeNetRules();
   setupAutoSync();
 

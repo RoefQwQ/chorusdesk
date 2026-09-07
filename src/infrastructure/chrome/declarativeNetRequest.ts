@@ -135,8 +135,8 @@ export async function setupDeclarativeNetRules() {
       removeRuleIds: [1001, 1002, 1003, 1004, 1005, 1006],
       addRules: rules,
     });
-    console.log('[Creator Feed Hub] declarativeNetRequest rules initialized');
+    console.log('[Chorus] declarativeNetRequest rules initialized');
   } catch (e) {
-    console.warn('[Creator Feed Hub] Failed to set declarativeNetRequest rules:', e);
+    console.warn('[Chorus] Failed to set declarativeNetRequest rules:', e);
   }
 }

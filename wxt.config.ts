@@ -10,7 +10,7 @@ export default defineConfig({
     ],
   }),
   manifest: {
-    name: 'Creator Feed Hub - 跨平台创作者聚合展台',
+    name: 'Chorus - 跨平台创作者聚合展台',
     description: '聚合追踪B站、Twitter、Fantia、Pixiv、YouTube、Rplay等选定创作者动态，支持多平台博主归集与被动更新。',
     version: '1.0.0',
     permissions: [
@@ -49,7 +49,7 @@ export default defineConfig({
       '128': 'icons/icon-128.png',
     },
     action: {
-      default_title: 'Creator Feed Hub',
+      default_title: 'Chorus',
       default_icon: {
         '16': 'icons/icon-16.png',
         '32': 'icons/icon-32.png',

@@ -459,10 +459,10 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
       <div class="w-full max-w-[98%] 2xl:max-w-[96%] mx-auto px-3 sm:px-6 h-16 flex items-center justify-between">
         <!-- Logo & Title -->
         <div class="flex items-center gap-3">
-          <img src="/icons/icon-48.png" class="w-9 h-9 rounded-xl shadow-md shadow-indigo-500/25 shrink-0" alt="Creator Feed Hub" />
+          <img src="/icons/icon-48.png" class="w-9 h-9 rounded-xl shadow-md shadow-indigo-500/25 shrink-0" alt="Chorus" />
           <div>
             <h1 class="font-black text-lg tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-              Creator Feed Hub
+              Chorus
               <span class="text-[10px] font-normal px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
                 轻量展台
               </span>
