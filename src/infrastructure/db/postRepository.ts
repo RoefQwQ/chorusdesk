@@ -130,6 +130,30 @@ export async function getDeletedPostRecords(): Promise<DeletedPostRecord[]> {
 }
 
 /**
+ * Persist the post's bookmark flag. Mirrors the dashboard's inline
+ * `db.posts.update(post.id, { isBookmarked })` write exactly.
+ */
+export async function setPostBookmarked(id: string, isBookmarked: boolean): Promise<void> {
+  await db.posts.update(id, { isBookmarked });
+}
+
+/**
+ * Mark a single post as read (`isRead: true`). The caller keeps its own
+ * already-read guard; this only persists the flag like the legacy write.
+ */
+export async function setPostRead(id: string): Promise<void> {
+  await db.posts.update(id, { isRead: true });
+}
+
+/**
+ * Permanently clear every tombstone in the recycle bin without restoring any
+ * snapshot (dashboard "清空回收站" action — `db.deletedPostIds.clear()`).
+ */
+export async function clearDeletedPostRecords(): Promise<void> {
+  await db.deletedPostIds.clear();
+}
+
+/**
  * Heal broken or stale image URLs in local IndexedDB posts (e.g. Xiaohongshu strict CDN domains).
  * Returns the count of healed posts.
  */
