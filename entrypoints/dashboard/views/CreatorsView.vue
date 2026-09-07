@@ -57,6 +57,7 @@ const emit = defineEmits<{
   (e: 'add', payload: { mode: 'new' | 'channel'; creator?: Creator }): void;
   (e: 'avatar-picker', creator: Creator): void;
   (e: 'deep-sync', payload: { creator: Creator; channelId?: string }): void;
+  (e: 'edit-tags', creator: Creator): void;
   (e: 'refresh-creator', creatorId: string): void;
   (e: 'refresh-channel', payload: { channel: Channel; force: boolean }): void;
   (e: 'delete-creator', creatorId: string): void;
@@ -286,6 +287,10 @@ function openAvatarPicker(creator: Creator) {
 
 function openDeepSyncModal(creator: Creator, specificChannelId?: string) {
   emit('deep-sync', { creator, channelId: specificChannelId });
+}
+
+function openEditCreatorTags(creator: Creator) {
+  emit('edit-tags', creator);
 }
 
 function handleRefreshCreator(creatorId: string) {
@@ -582,7 +587,7 @@ function loadDemoData() {
                 <!-- Edit tags button -->
                 <button
                   type="button"
-                  @click.stop="openAddModal('channel', c)"
+                  @click.stop="openEditCreatorTags(c)"
                   title="编辑修改创作者标签"
                   class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 cursor-pointer transition-colors"
                 >
