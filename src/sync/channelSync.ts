@@ -24,6 +24,9 @@ function normalizeErrorMessage(errorStr?: string): string | undefined {
   if (errorStr.includes('429') || errorStr.toLowerCase().includes('too many requests')) {
     return '触发平台防刷频率限制 (HTTP 429)。目标平台正在进行安全限流冷却，请等待 2~3 分钟后再刷新，避免频繁请求。';
   }
+  if (errorStr.includes('微博') && (errorStr.includes('403') || errorStr.includes('Visitor System') || errorStr.includes('访客系统'))) {
+    return '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。';
+  }
   return errorStr;
 }
 
@@ -88,6 +91,18 @@ export async function updateChannel(
     const result = await Promise.race([adapter.fetchLatest(channel, limit, mergedOptions), timeoutPromise]);
 
     if (result.error && result.posts.length === 0) {
+      // If the adapter signalled completion or end-of-history, treat as success with __END__ cursor
+      if (result.hasMore === false || result.error.includes('已到达') || result.error.includes('已同步该博主主页展示的全部')) {
+        await db.channels.update(channel.id, {
+          status: 'success',
+          nextCursor: '__END__',
+          errorMessage: undefined,
+          lastCheckAt: Date.now(),
+          lastSuccessAt: Date.now(),
+        });
+        return { ...result, error: undefined };
+      }
+
       const friendlyError = normalizeErrorMessage(result.error);
       await db.channels.update(channel.id, {
         status: 'error',

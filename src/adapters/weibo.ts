@@ -178,7 +178,14 @@ export const weiboAdapter: PlatformAdapter = {
       });
 
       if (!res.ok) {
+        if (res.status === 403) {
+          return { posts: [], error: '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。' };
+        }
         return { posts: [], error: `微博接口响应异常 HTTP ${res.status}` };
+      }
+
+      if (typeof res.data === 'string' && (res.data.includes('Sina Visitor System') || res.data.includes('passport.weibo.com') || res.data.trim().startsWith('<'))) {
+        return { posts: [], error: '微博访客系统拦截。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。' };
       }
 
       const json = JSON.parse(res.data);

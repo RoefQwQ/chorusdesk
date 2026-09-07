@@ -20,7 +20,9 @@
 仓库正处于兼容式重构中，额外三条铁律：
 - **Dashboard 四个页面 View 已完成接入**：`FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 承载各自 Tab 模板，通过 context/emits 与 `App.vue` 通信。App.vue 仍保留跨页面组合、全局弹窗和部分应用动作，不能宣称入口层已完全变薄。
 - `useDashboardData` 只承载数据加载、媒体修复和统计刷新；回收站刷新仍由 Dashboard 组合流程协调，避免 composable 循环依赖。
-- 生产代码仍在大量使用兼容桶 `src/db`、`src/adapters`（见 §9 迁移边界）。改业务时可以继续从桶导入以保持最小 diff，但**新模块一律直接依赖真实实现**：`src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；兼容桶只允许 re-export，禁止在其中新增业务逻辑。
+生产调用方已直接依赖 `src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；`src/db/index.ts`、`src/adapters/index.ts` 仅保留兼容 re-export。新代码禁止从兼容桶导入，也禁止在兼容桶新增业务逻辑。
+
+开始开发前按顺序阅读：`README.md`（产品与入口）→ `docs/ARCHITECTURE.md`（当前事实与契约）→ 本手册（改动流程）→ 涉及 Dashboard 时再读 `docs/DASHBOARD_MIGRATION.md`。冲突时以源码和 `ARCHITECTURE.md` 的当前状态为准。
 
 ## 2. 新功能模板（推荐实现顺序）
 
@@ -38,10 +40,10 @@
 ```
 
 样例要点（以“在 Dashboard 增加按 XX 过滤”为例）：
-1. 若过滤属纯展示，先在 `App.vue` 的过滤 computed 链中追加（现状是 `filteredPosts` / `filteredBookmarkedPosts` 各自过滤）；不要复制一份 posts 数组。
-2. 若过滤会复用，再抽到 `entrypoints/dashboard/composables/useFeedFilters.ts`；抽离时通过参数/actions 注入依赖（参照 `useDeletedPosts`：它不 import App.vue，而是接收 `reloadData/refreshAll/getChannels/...` 回调），保证“搬迁职责、不复制逻辑”。
+1. 若过滤属纯展示，放在拥有该列表的 View：Feed 使用 `FeedView` 接收的 `context.filteredPosts`，Bookmarks 使用 `BookmarksView` 内部的 `filteredBookmarkedPosts`；不要复制一份 posts 数组。
+2. 若过滤会复用，再抽到 `entrypoints/dashboard/composables/`；抽离时通过参数/actions 注入依赖（参照 `useDeletedPosts`），保证“搬迁职责、不复制逻辑”。
 3. 若该过滤应作用于同步（例如 `onlyOriginal` 语义扩展），改 `FetchOptions` + adapter 读取端，并在 `updateChannel` 的 mergedOptions 链路中生效；UI 只透传。
-4. 用户偏好要持久化就进 `AppSettings`（`src/types/index.ts` + `settingsRepository.DEFAULT_SETTINGS`），不要用孤立 localStorage 键；纯 UI 瞬时偏好（如隐藏创作者、主题）例外，可继续用 localStorage，键名加 `creator_feed_` 前缀。
+4. 用户偏好要持久化就进 `AppSettings`（`src/types/index.ts` + `settingsRepository.DEFAULT_SETTINGS`），不要用孤立 localStorage 键；纯 UI 瞬时偏好例外使用 `creator_feed_` 前缀。
 
 ## 3. 新增平台接入
 

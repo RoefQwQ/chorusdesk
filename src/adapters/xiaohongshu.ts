@@ -181,7 +181,6 @@ export const xiaohongshuAdapter: PlatformAdapter = {
             avatar: authorAvatar,
           },
           hasMore: false,
-          error: `已同步该博主主页展示的全部公开作品（共 ${allPosts.length} 篇，小红书网页端受反爬风控限制无法继续无限滚动翻页）。`,
         };
       }
 
