@@ -1,18 +1,30 @@
+import type { Channel } from '../../types';
 import { db } from '../db/database';
 import { getSettings } from '../db/settingsRepository';
-import { updateChannel } from '../../sync/channelSync';
+import { batchUpdateChannelsInterleaved } from '../../sync/batchSync';
+
 const AUTO_SYNC_ALARM = 'creator-feed-auto-sync';
+const AUTO_SYNC_PERIOD_MINUTES = 30;
 
 /**
  * (Re)creates or clears the periodic auto-sync alarm according to the current
  * setting, then refreshes the unread badge. Safe to call on startup, install
  * or whenever the setting changes.
+ *
+ * `chrome.alarms.create` with an existing name REPLACES that alarm and restarts
+ * its countdown, so an unconditional create here meant any service-worker wake
+ * (opening the popup, any message) reset the 30-minute timer — with normal use
+ * the alarm never fired at all. Dynamic alarms already persist across restarts,
+ * so we only create when missing or when the period changed.
  */
 export async function setupAutoSync() {
   if (!chrome.alarms) return;
   const settings = await getSettings();
   if (settings.enableAutoSync) {
-    await chrome.alarms.create(AUTO_SYNC_ALARM, { periodInMinutes: 30 });
+    const existing = await chrome.alarms.get(AUTO_SYNC_ALARM);
+    if (!existing || existing.periodInMinutes !== AUTO_SYNC_PERIOD_MINUTES) {
+      await chrome.alarms.create(AUTO_SYNC_ALARM, { periodInMinutes: AUTO_SYNC_PERIOD_MINUTES });
+    }
   } else {
     await chrome.alarms.clear(AUTO_SYNC_ALARM);
   }
@@ -22,16 +34,24 @@ export async function setupAutoSync() {
 /**
  * Syncs every tracked channel once with the current per-fetch limit and
  * repost preference. No-op while auto-sync is disabled.
+ *
+ * Uses the same interleaved, per-platform-paced batch routine as the dashboard's
+ * manual refresh rather than a bare serial loop: this path previously issued
+ * back-to-back requests with no delay, which now matters because the requests
+ * actually reach the network (see `src/utils/http.ts`).
  */
 async function syncAllChannels() {
   try {
     const settings = await getSettings();
     if (!settings.enableAutoSync) return;
 
-    const channels = await db.channels.toArray();
-    for (const channel of channels) {
-      await updateChannel(channel, settings.itemsPerFetch, false, { onlyOriginal: settings.hideReposts });
-    }
+    const channels: Channel[] = await db.channels.toArray();
+    if (channels.length === 0) return;
+
+    await batchUpdateChannelsInterleaved(channels, settings.itemsPerFetch, {
+      onlyOriginal: settings.hideReposts,
+      minPlatformIntervalMs: Math.max(settings.requestDelayMs ?? 0, 800),
+    });
   } catch (error) {
     console.warn('[Background] Auto-sync failed:', error);
   }
@@ -39,6 +59,10 @@ async function syncAllChannels() {
 
 /**
  * Reflects the unread post count on the toolbar badge (capped at 999, indigo).
+ *
+ * `isRead` is stored as 0|1 because IndexedDB refuses booleans as index keys
+ * (see AGENTS.md rule 5); querying `equals(0)` against boolean-valued rows
+ * matched nothing, which is why the badge used to stay empty.
  */
 async function updateUnreadBadge() {
   try {

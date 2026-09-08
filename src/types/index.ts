@@ -196,8 +196,10 @@ export interface Post {
   originalUrl: string;
   publishedAt: number; // 秒级或毫秒级时间戳
   fetchedAt: number;
-  isRead: boolean;
-  isBookmarked?: boolean;
+  // Persisted as 0|1, never boolean: both fields are indexed and IndexedDB
+  // refuses booleans as index keys. Read sites use truthiness.
+  isRead: 0 | 1;
+  isBookmarked?: 0 | 1;
   isRepost?: boolean; // 是否为转推 / 转发动态
   authorMeta?: {
     name?: string;

@@ -88,7 +88,7 @@ export const youtubeAdapter: PlatformAdapter = {
           originalUrl,
           publishedAt: published ? new Date(published).getTime() : Date.now(),
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
         };
       });
 

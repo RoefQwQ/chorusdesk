@@ -19,7 +19,7 @@ export interface PostActionsDependencies {
 export function usePostActions(deps: PostActionsDependencies) {
   async function toggleBookmarkPost(post: Post) {
     const nextState = !post.isBookmarked;
-    post.isBookmarked = nextState;
+    post.isBookmarked = nextState ? 1 : 0;
     if (deps.posts) {
       triggerRef(deps.posts);
     }
@@ -31,7 +31,7 @@ export function usePostActions(deps: PostActionsDependencies) {
       }
     } catch (err: unknown) {
       console.error('Failed to toggle post bookmark', err);
-      post.isBookmarked = !nextState; // rollback on failure
+      post.isBookmarked = nextState ? 0 : 1; // rollback on failure
       if (deps.posts) {
         triggerRef(deps.posts);
       }
@@ -40,7 +40,7 @@ export function usePostActions(deps: PostActionsDependencies) {
 
   async function markPostRead(post: Post) {
     if (post.isRead) return;
-    post.isRead = true;
+    post.isRead = 1;
     if (deps.posts) {
       triggerRef(deps.posts);
     }

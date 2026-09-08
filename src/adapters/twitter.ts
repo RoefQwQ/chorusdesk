@@ -1,11 +1,21 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { IS_SERVICE_WORKER } from '../utils/runtime';
 
 export const twitterAdapter: PlatformAdapter = {
   platform: 'twitter',
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     const username = channel.accountId.replace(/^@/, '').trim();
+
+    // The SW never receives its own runtime.sendMessage, so from the
+    // background (auto-sync) the FETCH_TWITTER_TIMELINE channel is unusable.
+    if (IS_SERVICE_WORKER) {
+      return {
+        posts: [],
+        error: '后台自动同步暂不支持推特（需在扩展页面中同步）',
+      };
+    }
 
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
       return {
@@ -248,7 +258,7 @@ export const twitterAdapter: PlatformAdapter = {
         originalUrl: `https://x.com/${username}/status/${tweetId}`,
         publishedAt: pubDate,
         fetchedAt: Date.now(),
-        isRead: false,
+        isRead: 0,
         isRepost: isRetweet,
       });
     }

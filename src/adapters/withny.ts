@@ -41,7 +41,7 @@ export const withnyAdapter: PlatformAdapter = {
         originalUrl: `https://withny.fun/posts/${item.id}`,
         publishedAt: item.publishedAt ? new Date(item.publishedAt).getTime() : Date.now(),
         fetchedAt: Date.now(),
-        isRead: false,
+        isRead: 0,
       }));
 
       // Sort strictly newest first

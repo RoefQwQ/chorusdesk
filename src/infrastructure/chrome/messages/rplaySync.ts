@@ -1,3 +1,4 @@
+import { hostMatches } from './hosts';
 // Minimal local types for the SYNC_RPLAY_TOKEN runtime-message contract. They
 // only describe what this handler reads / replies with — the protocol shape
 // itself is unchanged (see entrypoints/popup/composables/useRplaySync.ts
@@ -48,7 +49,15 @@ export function handleSyncRplayToken(message: SyncRplayTokenMessage, sendRespons
       let tabs = await chrome.tabs.query({ url: ['*://*.rplay.live/*', 'https://rplay.live/*'] }).catch(() => []);
       if (!tabs || tabs.length === 0) {
         const allTabs = await chrome.tabs.query({}).catch(() => []);
-        tabs = allTabs.filter(t => t.url && t.url.includes('rplay.live'));
+        tabs = allTabs.filter((t) => {
+          if (!t.url) return false;
+          try {
+            const { hostname } = new URL(t.url);
+            return hostMatches(hostname, 'rplay.live');
+          } catch {
+            return false;
+          }
+        });
       }
 
       if (tabs.length === 0) {

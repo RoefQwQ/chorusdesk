@@ -168,7 +168,7 @@ export const rplayAdapter: PlatformAdapter = {
             originalUrl: `https://rplay.live/c/${encodeURIComponent(creatorUser.nickname || rawId)}?content=${oid}`,
             publishedAt: publishedTime,
             fetchedAt: Date.now(),
-            isRead: false,
+            isRead: 0,
           });
         } catch (itemErr) {
           console.warn(`[Rplay] Error fetching item ${oid}:`, itemErr);

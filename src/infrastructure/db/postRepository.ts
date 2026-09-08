@@ -130,19 +130,20 @@ export async function getDeletedPostRecords(): Promise<DeletedPostRecord[]> {
 }
 
 /**
- * Persist the post's bookmark flag. Mirrors the dashboard's inline
- * `db.posts.update(post.id, { isBookmarked })` write exactly.
+ * Persist the post's bookmark flag as 0|1 (IndexedDB refuses booleans as
+ * index keys — AGENTS.md rule 5). Callers speak boolean; the boundary
+ * converts.
  */
 export async function setPostBookmarked(id: string, isBookmarked: boolean): Promise<void> {
-  await db.posts.update(id, { isBookmarked });
+  await db.posts.update(id, { isBookmarked: isBookmarked ? 1 : 0 });
 }
 
 /**
- * Mark a single post as read (`isRead: true`). The caller keeps its own
+ * Mark a single post as read (`isRead: 1`). The caller keeps its own
  * already-read guard; this only persists the flag like the legacy write.
  */
 export async function setPostRead(id: string): Promise<void> {
-  await db.posts.update(id, { isRead: true });
+  await db.posts.update(id, { isRead: 1 });
 }
 
 /**

@@ -152,7 +152,7 @@ export const fantiaAdapter: PlatformAdapter = {
           originalUrl: postUrl,
           publishedAt: pubDate,
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
         };
       });
 

@@ -88,7 +88,7 @@ export const pixivAdapter: PlatformAdapter = {
           originalUrl: `https://www.pixiv.net/artworks/${id}`,
           publishedAt: estimatedPubTime,
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
         });
       }
 

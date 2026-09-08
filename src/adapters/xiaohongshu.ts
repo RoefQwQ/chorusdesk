@@ -158,7 +158,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
           originalUrl: noteUrl,
           publishedAt: pubTime,
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
           isRepost: false,
         });
       }

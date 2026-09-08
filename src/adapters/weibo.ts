@@ -139,7 +139,7 @@ export const weiboAdapter: PlatformAdapter = {
           originalUrl: `https://weibo.com/${userInfo.id || uid}/${mblog.bid || id}`,
           publishedAt: pubDate,
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
           isRepost: isRetweet,
         });
       }
@@ -234,7 +234,7 @@ export const weiboAdapter: PlatformAdapter = {
           originalUrl: `https://weibo.com/${uid}/${item.mblogid || id}`,
           publishedAt: pubDate,
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
           isRepost: isRetweet,
         });
       }

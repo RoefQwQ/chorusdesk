@@ -27,3 +27,4 @@ Thumbs.db
 .vscode/
 .idea/
 .e2e-profile/
+bun.lock

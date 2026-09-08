@@ -7,7 +7,9 @@ export async function getDatabaseStats() {
   const creatorsCount = await db.creators.count();
   const channelsCount = await db.channels.count();
   const totalPostsCount = await db.posts.count();
-  const bookmarkedPostsCount = await db.posts.where('isBookmarked').equals(1 as any).count();
+  // isBookmarked is stored as 0|1 (IndexedDB refuses booleans as index keys),
+  // so this now matches real rows and needs no `as any`.
+  const bookmarkedPostsCount = await db.posts.where('isBookmarked').equals(1).count();
 
   let quotaUsage = { usage: 0, quota: 0 };
   if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {

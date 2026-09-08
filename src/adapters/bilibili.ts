@@ -155,7 +155,7 @@ export const bilibiliAdapter: PlatformAdapter = {
                 : `https://t.bilibili.com/${idStr}`,
               publishedAt: pubTime || Date.now(),
               fetchedAt: Date.now(),
-              isRead: false,
+              isRead: 0,
               isRepost: isForward,
             });
 
@@ -216,7 +216,7 @@ export const bilibiliAdapter: PlatformAdapter = {
                 originalUrl: `https://www.bilibili.com/video/${bvid}`,
                 publishedAt: pubTime || Date.now(),
                 fetchedAt: Date.now(),
-                isRead: false,
+                isRead: 0,
                 isRepost: false,
               });
 
@@ -368,7 +368,7 @@ export const bilibiliAdapter: PlatformAdapter = {
                 : `https://t.bilibili.com/${idStr}`,
               publishedAt: pubTime,
               fetchedAt: Date.now(),
-              isRead: false,
+              isRead: 0,
               isRepost: isForward,
             });
 

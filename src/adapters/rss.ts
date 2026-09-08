@@ -112,7 +112,7 @@ export const rssAdapter: PlatformAdapter = {
           originalUrl: link,
           publishedAt,
           fetchedAt: Date.now(),
-          isRead: false,
+          isRead: 0,
         });
       }
 
