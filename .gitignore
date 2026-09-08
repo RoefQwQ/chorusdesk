@@ -11,15 +11,22 @@ node_modules/
 *.key
 *.p12
 *.pfx
+*.crt
+*.cer
+*.mobileprovision
 
 # Local databases, backups, logs, and exports
 *.db
+*.db-*
 *.sqlite
 *.sqlite3
 *.local
 *.log
+*.har
 *backup*.json
 *export*.json
+*credentials*.json
+*secrets*.json
 
 # OS/editor files
 .DS_Store
