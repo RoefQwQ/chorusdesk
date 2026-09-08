@@ -1,4 +1,4 @@
-# Creator Feed Hub 开发手册
+# Chorus 开发手册
 
 > 面向在本仓库做增量功能与兼容式重构的开发说明。配合 `docs/ARCHITECTURE.md` 使用；本手册只讲“怎么改”，涉及现状与边界时以 ARCHITECTURE.md 为准。
 > 项目默认中文注释与中文用户文案；代码风格延续现有模块头注释 + JSDoc。

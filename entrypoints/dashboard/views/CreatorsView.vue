@@ -933,7 +933,7 @@ function loadDemoData() {
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse text-xs">
           <thead>
-            <tr class="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-850/60 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+            <tr class="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
               <th v-if="isBatchMode" class="py-2.5 px-3 w-10 text-center">
                 <button @click="selectAllFilteredCreators" class="cursor-pointer text-indigo-600">
                   <CheckSquare class="w-3.5 h-3.5" />
@@ -1098,7 +1098,7 @@ function loadDemoData() {
               </tr>
 
               <!-- Nested Table Row if Expanded -->
-              <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-850/40">
+              <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-800/40">
                 <td :colspan="isBatchMode ? 6 : 5" class="p-3">
                   <div class="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
                     <div class="flex items-center justify-between text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
@@ -1292,7 +1292,7 @@ function loadDemoData() {
             <div
               v-for="(chs, platform) in getCreatorGroupedChannels(c.id)"
               :key="platform"
-              class="rounded-xl border border-slate-200/70 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-850/50 p-2.5 space-y-1.5"
+              class="rounded-xl border border-slate-200/70 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-800/60 p-2.5 space-y-1.5"
             >
               <!-- Platform Header within Creator -->
               <div class="flex items-center justify-between">

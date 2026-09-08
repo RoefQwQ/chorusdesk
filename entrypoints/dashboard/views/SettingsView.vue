@@ -155,7 +155,7 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
         <div
           v-for="(meta, key) in PLATFORM_REGISTRY"
           :key="key"
-          class="p-4 bg-slate-50/80 dark:bg-slate-850/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col justify-between gap-3 shadow-2xs"
+          class="p-4 bg-slate-50/80 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col justify-between gap-3 shadow-2xs"
         >
           <div>
             <div class="flex items-start justify-between gap-2 mb-1.5">
@@ -244,7 +244,7 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
         <!-- Custom Feed Expansion Slot -->
         <div
           @click="context.onAddSource"
-          class="p-4 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 flex flex-col items-center justify-center text-center cursor-pointer transition-all group bg-slate-50/40 dark:bg-slate-850/40"
+          class="p-4 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 flex flex-col items-center justify-center text-center cursor-pointer transition-all group bg-slate-50/40 dark:bg-slate-800/40"
         >
           <div class="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 mb-1.5 group-hover:scale-110 transition-transform">
             <Plus class="w-4 h-4" />
@@ -506,7 +506,7 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
       <div class="space-y-2.5 max-h-96 overflow-y-auto pr-1">
         <div
           v-if="context.filteredDeletedPostsList.length === 0"
-          class="py-8 text-center bg-slate-50/50 dark:bg-slate-850/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-400"
+          class="py-8 text-center bg-slate-50/50 dark:bg-slate-800/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-400"
         >
           <Trash2 class="w-6 h-6 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
           <span>{{ context.deletedPostsSearchQuery ? '未找到符合搜索条件的回收站记录' : '回收站为空，暂无已删除动态' }}</span>
@@ -515,7 +515,7 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
         <div
           v-for="record in context.filteredDeletedPostsList"
           :key="record.id"
-          class="p-3.5 bg-slate-50/80 dark:bg-slate-850/60 rounded-xl border border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all hover:border-slate-300 dark:hover:border-slate-700"
+          class="p-3.5 bg-slate-50/80 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all hover:border-slate-300 dark:hover:border-slate-700"
         >
           <div class="flex items-start gap-3 min-w-0 flex-1">
             <!-- Media cover / thumbnail if available -->

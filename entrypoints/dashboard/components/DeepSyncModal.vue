@@ -120,7 +120,7 @@ function start() {
               v-for="ch in channels.filter(c => c.creatorId === creator?.id)"
               :key="ch.id"
               @click="toggleChannel(ch.id)"
-              :class="selectedChannels.includes(ch.id) ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 text-slate-600 dark:text-slate-400'"
+              :class="selectedChannels.includes(ch.id) ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400'"
               class="flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer select-none text-xs"
             >
               <div class="w-4 h-4 flex items-center justify-center shrink-0">
@@ -166,7 +166,7 @@ function start() {
         </div>
 
         <!-- Sub-mode A: Count Selection -->
-        <div v-if="mode === 'count'" class="space-y-2 bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-200/70 dark:border-slate-800">
+        <div v-if="mode === 'count'" class="space-y-2 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200/70 dark:border-slate-800">
           <div class="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 mb-1">
             <span class="font-medium">目标数量：</span>
             <span class="font-bold text-indigo-600 dark:text-indigo-400">
@@ -207,7 +207,7 @@ function start() {
         </div>
 
         <!-- Sub-mode B: Time Range Selection -->
-        <div v-else class="space-y-2 bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-200/70 dark:border-slate-800">
+        <div v-else class="space-y-2 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200/70 dark:border-slate-800">
           <div class="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 mb-1">
             <span class="font-medium">时间范围：</span>
             <span class="font-bold text-indigo-600 dark:text-indigo-400">
@@ -231,7 +231,7 @@ function start() {
         </div>
 
         <!-- Filter Options (Only Original) -->
-        <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs">
+        <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs">
           <div class="space-y-0.5">
             <div class="font-medium text-slate-800 dark:text-slate-200">仅原创</div>
             <div class="text-[11px] text-slate-400">跳过转发内容，专注回溯创作者本人产出的内容</div>
@@ -245,7 +245,7 @@ function start() {
         </div>
 
         <!-- Reset Cursor Option -->
-        <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs">
+        <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs">
           <div class="space-y-0.5">
             <div class="font-medium text-slate-800 dark:text-slate-200">重置历史进度（重新深度扫描）</div>
             <div class="text-[11px] text-slate-400">若此前已显示到头或需重新扫描修复旧数据，勾选此项重置断点并重新回溯</div>

@@ -66,7 +66,7 @@ const secure = toSecureMediaUrl;
         <div
           v-for="record in filteredRecords"
           :key="record.id"
-          class="p-3 bg-slate-50/80 dark:bg-slate-850/60 rounded-xl border border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-3 text-xs"
+          class="p-3 bg-slate-50/80 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-3 text-xs"
         >
           <div class="flex items-center gap-3 min-w-0">
             <div

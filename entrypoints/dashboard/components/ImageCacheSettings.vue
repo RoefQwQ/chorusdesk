@@ -125,7 +125,7 @@ async function handleBatchCacheExisting() {
     </div>
 
     <!-- Directory Binding Card -->
-    <div class="p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/40 space-y-3">
+    <div class="p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 space-y-3">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="flex items-center gap-3 min-w-0">
           <div
@@ -177,7 +177,7 @@ async function handleBatchCacheExisting() {
           type="button"
           @click="handleBatchCacheExisting"
           :disabled="isBatchCaching"
-          class="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+          class="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isBatchCaching }" />
           <span>{{ isBatchCaching ? `正在归档 ${batchProgress.current}/${batchProgress.total}...` : '一键离线当前全部图片' }}</span>

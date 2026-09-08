@@ -177,7 +177,7 @@ onUnmounted(() => {
           @input="handleSearchInput"
           type="text"
           placeholder="搜索内容或创作者..."
-          class="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-200 placeholder-slate-400"
+          class="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
         />
       </div>
     </div>
@@ -186,20 +186,20 @@ onUnmounted(() => {
     <div class="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
       <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 flex items-center justify-between">
         <span>平台</span>
-        <span class="text-[10px] font-mono font-normal">{{ Object.keys(context.PLATFORM_REGISTRY).length }} 个平台</span>
+        <span class="text-[10px] font-mono font-normal text-slate-400 dark:text-slate-500">{{ Object.keys(context.PLATFORM_REGISTRY).length }} 个平台</span>
       </div>
 
       <!-- All Platforms Button -->
       <button
         @click="emit('update:selectedPlatform', 'all')"
-        :class="context.selectedPlatform === 'all' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold border-indigo-200 dark:border-indigo-800 shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent'"
+        :class="context.selectedPlatform === 'all' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 font-bold border-indigo-200 dark:border-indigo-500/40 shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 dark:hover:text-white border-transparent'"
         class="w-full flex items-center justify-between px-3 py-2 text-xs rounded-xl border transition-all cursor-pointer"
       >
         <div class="flex items-center gap-2">
           <LayoutGrid class="w-4 h-4" />
           <span>全部</span>
         </div>
-        <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-transparent dark:border-slate-700/60">
           {{ context.platformPostCounts['all'] || 0 }}
         </span>
       </button>
@@ -209,7 +209,7 @@ onUnmounted(() => {
         v-for="(meta, key) in context.PLATFORM_REGISTRY"
         :key="key"
         @click="emit('update:selectedPlatform', key)"
-        :class="context.selectedPlatform === key ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold border-indigo-200 dark:border-indigo-800 shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent'"
+        :class="context.selectedPlatform === key ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 font-bold border-indigo-200 dark:border-indigo-500/40 shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 dark:hover:text-white border-transparent'"
         class="w-full flex items-center justify-between px-3 py-2 text-xs rounded-xl border transition-all cursor-pointer"
       >
         <div class="flex items-center gap-2 truncate">
@@ -218,7 +218,7 @@ onUnmounted(() => {
         </div>
         <span
           v-if="context.platformPostCounts[key]"
-          class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+          class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-transparent dark:border-slate-700/60"
         >
           {{ context.platformPostCounts[key] }}
         </span>
@@ -236,7 +236,7 @@ onUnmounted(() => {
         <button
           @click="context.toggleHideReposts"
           class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
-          :class="context.hideReposts ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'"
+          :class="context.hideReposts ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
         >
           <div class="flex items-center gap-2">
             <Repeat2 class="w-3.5 h-3.5" :class="{ 'text-amber-600 dark:text-amber-400': context.hideReposts }" />
@@ -245,7 +245,7 @@ onUnmounted(() => {
           <span
             v-if="context.repostsCount > 0"
             class="text-[10px] px-1.5 py-0.2 rounded-full font-mono"
-            :class="context.hideReposts ? 'bg-amber-200/80 dark:bg-amber-900 text-amber-800 dark:text-amber-200' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'"
+            :class="context.hideReposts ? 'bg-amber-200/80 dark:bg-amber-500/25 text-amber-800 dark:text-amber-200' : 'bg-slate-200 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400'"
           >
             {{ context.repostsCount }}
           </span>
@@ -255,7 +255,7 @@ onUnmounted(() => {
         <button
           @click="context.toggleHideTextOnly"
           class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
-          :class="context.hideTextOnly ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-700 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'"
+          :class="context.hideTextOnly ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
           :title="context.hideTextOnly ? '当前已过滤无图文/视频的纯文字博文，点击恢复展示' : '点击过滤纯文字博文，只看包含图片/视频的动态'"
         >
           <div class="flex items-center gap-2">
@@ -266,7 +266,7 @@ onUnmounted(() => {
           <span
             v-if="context.textOnlyCount > 0"
             class="text-[10px] px-1.5 py-0.2 rounded-full font-mono"
-            :class="context.hideTextOnly ? 'bg-indigo-200/80 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'"
+            :class="context.hideTextOnly ? 'bg-indigo-200/80 dark:bg-indigo-500/25 text-indigo-800 dark:text-indigo-200' : 'bg-slate-200 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400'"
           >
             {{ context.textOnlyCount }}
           </span>
@@ -296,7 +296,7 @@ onUnmounted(() => {
           <button
             type="button"
             @click="context.clearAllTagFilters"
-            :class="context.includeTags.size === 0 && context.excludeTags.size === 0 ? 'bg-indigo-600 text-white font-semibold shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'"
+            :class="context.includeTags.size === 0 && context.excludeTags.size === 0 ? 'bg-indigo-600 text-white font-semibold shadow-2xs' : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60 hover:bg-slate-200 dark:hover:bg-slate-700 dark:hover:text-white'"
             class="px-2.5 py-1 text-[11px] rounded-lg transition-colors cursor-pointer"
           >
             全部
@@ -311,7 +311,7 @@ onUnmounted(() => {
                 ? 'bg-indigo-600 text-white font-bold shadow-2xs'
                 : context.getTagFilterState(t) === 'exclude'
                 ? 'bg-rose-600 text-white font-bold shadow-2xs line-through'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60 hover:bg-slate-200 dark:hover:bg-slate-700 dark:hover:text-white'
             ]"
             class="px-2.5 py-1 text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1"
             :title="context.getTagFilterState(t) === 'include' ? '当前：正向包含（点击切换为反选排除）' : context.getTagFilterState(t) === 'exclude' ? '当前：反向排除（点击取消选择）' : '点击设置为正向包含(+)'"
@@ -428,7 +428,7 @@ onUnmounted(() => {
       <!-- Empty Creators under filter -->
       <div
         v-if="context.visibleCreatorsForFilter.length === 0"
-        class="text-center py-6 text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-850/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-800"
+        class="text-center py-6 text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-800/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-800"
       >
         当前暂无匹配创作者
       </div>
@@ -441,14 +441,14 @@ onUnmounted(() => {
           class="rounded-xl border transition-all select-none overflow-hidden"
           :class="[
             context.hiddenCreatorIds.has(c.id)
-              ? 'bg-slate-100/60 dark:bg-slate-800/30 border-slate-200 dark:border-slate-800 opacity-60'
-              : 'bg-slate-50/70 dark:bg-slate-850 border-slate-200/80 dark:border-slate-800 shadow-2xs hover:border-indigo-300 dark:hover:border-indigo-700'
+              ? 'bg-slate-100/60 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 opacity-50'
+              : 'bg-slate-50/70 dark:bg-slate-800/60 border-slate-200/80 dark:border-slate-700/60 shadow-2xs hover:border-indigo-300 dark:hover:border-indigo-500/50 dark:hover:bg-slate-800/80'
           ]"
         >
           <!-- Creator Card Header (Click to expand/fold inline directly) -->
           <div
             @click="context.toggleExpandCreator(c.id)"
-            class="flex items-center justify-between p-2.5 cursor-pointer hover:bg-slate-100/60 dark:hover:bg-slate-800/60 transition-colors gap-2"
+            class="flex items-center justify-between p-2.5 cursor-pointer hover:bg-slate-100/60 dark:hover:bg-slate-700/40 transition-colors gap-2"
             :title="context.hiddenCreatorIds.has(c.id) ? '点击眼睛恢复显示该创作者' : '点击展开渠道选择，点击眼睛隐藏此创作者'"
           >
             <!-- Left: Avatar & Name -->
@@ -493,7 +493,7 @@ onUnmounted(() => {
                 :title="context.hiddenCreatorIds.has(c.id) ? '恢复显示该创作者' : '隐藏该创作者的所有动态'"
               >
                 <EyeOff v-if="context.hiddenCreatorIds.has(c.id)" class="w-3.5 h-3.5 text-rose-500" />
-                <Eye v-else class="w-3.5 h-3.5 text-slate-400 hover:text-indigo-600" />
+                <Eye v-else class="w-3.5 h-3.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400" />
               </button>
               <div
                 class="p-0.5 text-slate-400 transition-transform duration-200"
@@ -507,7 +507,7 @@ onUnmounted(() => {
           <!-- INLINE EXPANSION: 直接展开选择渠道 (点开直接选择，非二级菜单弹窗) -->
           <div
             v-if="context.expandedCreatorIds.has(c.id)"
-            class="p-2.5 pt-2 bg-slate-100/70 dark:bg-slate-900/70 border-t border-slate-200/60 dark:border-slate-800 space-y-2 text-xs animate-in fade-in duration-150"
+            class="p-2.5 pt-2 bg-slate-100/70 dark:bg-slate-900/90 border-t border-slate-200/60 dark:border-slate-700/60 space-y-2 text-xs animate-in fade-in duration-150"
           >
             <div class="flex items-center justify-between text-[10px] text-slate-400 px-0.5">
               <span>显示的平台渠道：</span>
@@ -533,7 +533,7 @@ onUnmounted(() => {
                 class="flex items-center justify-between px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer"
                 :class="context.hiddenCreatorPlatforms[c.id]?.includes(pKey)
                   ? 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300'
-                  : 'bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:border-indigo-300'"
+                  : 'bg-white dark:bg-slate-800/90 border-slate-200/80 dark:border-slate-700/70 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-500/40'"
               >
                 <div class="flex items-center gap-2 truncate min-w-0">
                   <span

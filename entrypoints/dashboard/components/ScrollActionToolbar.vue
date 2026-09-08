@@ -71,7 +71,7 @@ onUnmounted(() => {
 <template>
   <!-- Floating Action Group Container -->
   <aside
-    class="fixed right-5 bottom-6 z-40 flex flex-col items-center gap-2 select-none"
+    class="relative flex flex-col items-center gap-2 select-none"
     aria-label="页面快捷导航"
   >
     <!-- Toast Popup Notification -->
@@ -85,7 +85,7 @@ onUnmounted(() => {
     >
       <div
         v-if="showToast"
-        class="absolute bottom-full mb-3 right-0 whitespace-nowrap px-3 py-1.5 rounded-xl bg-slate-900/90 dark:bg-white/95 text-white dark:text-slate-900 text-xs font-medium shadow-xl flex items-center gap-1.5 backdrop-blur-md pointer-events-none"
+        class="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1.5 rounded-xl bg-slate-900/90 dark:bg-white/95 text-white dark:text-slate-900 text-xs font-medium shadow-xl flex items-center gap-1.5 backdrop-blur-md pointer-events-none"
       >
         <Check class="w-3.5 h-3.5 text-emerald-400 dark:text-emerald-600" />
         <span>已标记当前浏览位置</span>

@@ -211,15 +211,15 @@ function toggleBookmark() {
             <span v-if="label" class="px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700/80 shrink-0">{{ label }}</span>
           </div>
           <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 min-w-0">
-            <span :class="PLATFORM_REGISTRY[post.platform]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200'" class="px-1.5 py-0.2 rounded text-[9px] font-semibold border shrink-0 transition-transform hover:scale-105">{{ PLATFORM_REGISTRY[post.platform]?.name || post.platform }}</span>
-            <span v-if="isRepost" class="px-1.5 py-0.2 rounded text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200 shrink-0 flex items-center gap-0.5"><Repeat2 class="w-2.5 h-2.5" />转发</span>
+            <span :class="PLATFORM_REGISTRY[post.platform]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'" class="px-1.5 py-0.2 rounded text-[9px] font-semibold border shrink-0 transition-transform hover:scale-105">{{ PLATFORM_REGISTRY[post.platform]?.name || post.platform }}</span>
+            <span v-if="isRepost" class="px-1.5 py-0.2 rounded text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/40 shrink-0 flex items-center gap-0.5"><Repeat2 class="w-2.5 h-2.5" />转发</span>
             <span class="truncate max-w-[100px] text-slate-500 dark:text-slate-400">@{{ channelName }}</span><span>•</span>
             <span class="flex items-center gap-0.5 shrink-0"><Clock class="w-2.5 h-2.5" />{{ formatTime(post.publishedAt) }}</span>
           </div>
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">
-        <button type="button" @click.stop="toggleBookmark" :title="isBookmarked ? '取消收藏' : '收藏'" class="p-1.5 rounded-lg transition-all duration-150 cursor-pointer active:scale-90" :class="isBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-950/60' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800'"><Bookmark class="w-3.5 h-3.5" :class="{ 'fill-amber-500 text-amber-500': isBookmarked }" /></button>
+        <button type="button" @click.stop="toggleBookmark" :title="isBookmarked ? '取消收藏' : '收藏'" class="p-1.5 rounded-lg transition-all duration-150 cursor-pointer active:scale-90" :class="isBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/20 dark:text-amber-400' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800'"><Bookmark class="w-3.5 h-3.5" :class="{ 'fill-amber-500 text-amber-500': isBookmarked }" /></button>
         <button type="button" @click.stop="emit('delete', post)" title="删除动态" class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-all duration-150 cursor-pointer active:scale-90"><Trash2 class="w-3.5 h-3.5" /></button>
         <a :href="post.originalUrl" target="_blank" title="打开原帖" class="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer active:scale-90 shrink-0"><ExternalLink class="w-3.5 h-3.5" /></a>
       </div>
@@ -266,7 +266,7 @@ function toggleBookmark() {
           <!-- Elegant Fallback Card when image is restricted / unavailable -->
           <div
             v-if="isMediaFailed(post.mediaList[0].previewUrl)"
-            class="w-full py-8 px-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-gradient-to-b from-slate-50 to-slate-100/70 dark:from-slate-850 dark:to-slate-900/80 flex flex-col items-center justify-center text-center select-none"
+            class="w-full py-8 px-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-gradient-to-b from-slate-50 to-slate-100/70 dark:from-slate-800/80 dark:to-slate-900 flex flex-col items-center justify-center text-center select-none"
           >
             <div class="w-10 h-10 rounded-2xl bg-white dark:bg-slate-800 shadow-xs border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-center text-slate-400 dark:text-slate-400 mb-2.5">
               <ImageOff class="w-5 h-5 stroke-[1.75]" />
@@ -310,7 +310,7 @@ function toggleBookmark() {
             :key="index"
             @click.stop="!isMediaFailed(media.previewUrl) && openMedia(localMediaUrls[media.previewUrl] || media.originalUrl || media.previewUrl, media.type)"
             class="relative aspect-square rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center"
-            :class="isMediaFailed(media.previewUrl) ? 'border border-slate-200/80 dark:border-slate-800 bg-slate-50 dark:bg-slate-850' : 'cursor-zoom-in group/gallery'"
+            :class="isMediaFailed(media.previewUrl) ? 'border border-slate-200/80 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80' : 'cursor-zoom-in group/gallery'"
           >
             <!-- Miniature Fallback if thumbnail is unavailable -->
             <div
@@ -342,7 +342,7 @@ function toggleBookmark() {
         </div>
       </div>
     </div>
-    <div class="px-4 py-2.5 bg-slate-50/80 dark:bg-slate-850/60 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+    <div class="px-4 py-2.5 bg-slate-50/80 dark:bg-slate-950/50 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-400 dark:text-slate-400 flex items-center justify-between">
       <span>{{ formatTime(post.fetchedAt) }} 同步</span>
       <a :href="post.originalUrl" target="_blank" class="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium group/link transition-colors">
         <span>原文</span>
