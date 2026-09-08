@@ -2,6 +2,7 @@
 import { Trash2, X, Search, RotateCcw } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type DeletedPostRecord } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
+import BaseModal from './BaseModal.vue';
 
 defineProps<{
   records: DeletedPostRecord[];
@@ -17,11 +18,10 @@ const emit = defineEmits<{
 }>();
 const secure = toSecureMediaUrl;
 </script>
-
 <template>
-  <div
-    class="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
-    @click.self="emit('close')"
+  <BaseModal
+    overlay-class="bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+    @close="emit('close')"
   >
     <div class="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[85vh] flex flex-col">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
@@ -144,5 +144,5 @@ const secure = toSecureMediaUrl;
         </button>
       </div>
     </div>
-  </div>
+  </BaseModal>
 </template>

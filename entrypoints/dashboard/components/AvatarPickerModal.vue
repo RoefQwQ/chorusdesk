@@ -2,6 +2,7 @@
 import { X, CheckCircle2 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Creator, type Channel } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
+import BaseModal from './BaseModal.vue';
 
 defineProps<{
   creator: Creator;
@@ -18,7 +19,10 @@ const secure = toSecureMediaUrl;
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4" @click.self="emit('close')">
+  <BaseModal
+    overlay-class="bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
+    @close="emit('close')"
+  >
     <div class="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
         <div>
@@ -82,5 +86,5 @@ const secure = toSecureMediaUrl;
         </button>
       </div>
     </div>
-  </div>
+  </BaseModal>
 </template>

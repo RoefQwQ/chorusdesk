@@ -123,33 +123,19 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
 
 ## Fix queue
 
-Ordered. Items 1-4 are in flight this session; 5-12 are queued.
+All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
+follow-up series). Kept as a record of what was fixed and where the rule came
+from.
 
-### In flight
-
-1. **`bgFetch` credential host matching** — done: `hosts.ts` + `senderGuard.ts` added; `bgFetch.ts`
-   rewritten (hostname-exact token injection, GET-only, credentials by allowlist,
-   `performBgFetch` exported for SW use).
-2. **Sender validation + router policy table** — in progress: `senderGuard.ts` written,
-   `background.ts` router not yet wired.
-3. **`isRead`/`isBookmarked` → `0|1`** — not started. Needs Dexie `version(4)` upgrade migrating
-   existing rows, 10 adapter write sites, `setPostRead`/`setPostBookmarked`, `autoSync.ts:45`,
-   `statsService.ts:10` (drop the `as any`).
-4. **Auto-sync alarm** — not started. `alarms.get` guard **and** the SW-messaging fix from rule 6,
-   otherwise the alarm fires into a dead fetch path.
-
-Known broken state at time of writing: `src/utils/runtime.ts` fails to compile —
-`ServiceWorkerGlobalScope` is not in `tsconfig.json`'s `lib` (needs `WebWorker`).
-
-### Queued
-
-5. DNR rules: add `initiatorDomains`, drop `sub_frame` (`declarativeNetRequest.ts:11-131`).
-6. Data integrity in adapters: stable post IDs (no `Math.random()` fallback), `btoa` → `TextEncoder`
-   for non-ASCII guids, `Number.isFinite` guard on parsed timestamps.
-7. `parseBackup`: check `version`, validate per-record required fields.
-8. `FetchResult.error` → `{ code: 'auth'|'rate_limit'|'network'|'parse'|'timeout', message, retryable }`;
-   remove the silent RSS fallback in `getAdapter`.
-9. Use the existing indexes: `[channelId+publishedAt]` for the watermark, `channelId` for tombstones.
-10. Resolve the `application/` layer; merge the two cookie-auth tables; extract a `buildPost` factory.
-11. Split `CreatorsView.vue` (1420 lines); extract `BaseModal` with `role="dialog"`, focus trap, Escape.
-12. Add lint + typecheck CI; regression tests for items 1, 3, 4, 6.
+1. `bgFetch` credential host matching — `hosts.ts` + `senderGuard.ts`; hostname-exact token injection, GET-only, credentials by allowlist.
+2. Sender validation — router policy table in `background.ts`.
+3. `isRead`/`isBookmarked` → `0|1` with Dexie v4 migration (posts + tombstone snapshots).
+4. Auto-sync alarm guard + SW-direct `performBgFetch` (`IS_SERVICE_WORKER`).
+5. DNR rules scoped with `initiatorDomains: [chrome.runtime.id]`, `sub_frame` dropped, applied on install only.
+6. Adapter data integrity: no `Math.random()` post IDs (skip or content-hash), `btoa` → TextEncoder hash (rss `stableHash`), `Number.isFinite` guards on all parsed timestamps.
+7. `parseBackup`: version gate + per-record required-field validation, fail-fast.
+8. `FetchResult.error` → structured `FetchError { code, message, retryable }`; adapters classify; `channelSync` switches on codes; silent RSS fallback removed from `getAdapter`.
+9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
+10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
+11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
+12. CI (`.github/workflows/ci.yml`: typecheck + vitest + build), 37 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR), `typescript` pinned to 7.0.2.

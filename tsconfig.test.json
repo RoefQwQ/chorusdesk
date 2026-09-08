@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "chrome"],
+    "noEmit": true
+  },
+  "include": ["tests/**/*.ts", "**/*.d.ts", ".wxt/wxt.d.ts"],
+  "exclude": ["node_modules", ".output"]
+}

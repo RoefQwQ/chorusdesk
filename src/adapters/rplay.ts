@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
 export const rplayAdapter: PlatformAdapter = {
@@ -140,11 +142,12 @@ export const rplayAdapter: PlatformAdapter = {
             item.multiLangIntroText?.en ||
             '';
 
-          const publishedTime = item.publishedAt
+          const parsedTime = item.publishedAt
             ? new Date(item.publishedAt).getTime()
             : item.createdAt
             ? new Date(item.createdAt).getTime()
             : Date.now();
+          const publishedTime = Number.isFinite(parsedTime) ? parsedTime : Date.now();
 
           // Build thumbnail preview URL from s3key
           const mediaList: any[] = [];
@@ -157,19 +160,14 @@ export const rplayAdapter: PlatformAdapter = {
             });
           }
 
-          posts.push({
+          posts.push(buildPost(channel, {
             id: `rplay_${oid}`,
-            creatorId: channel.creatorId,
-            channelId: channel.id,
-            platform: 'rplay',
             title,
             content,
             mediaList,
             originalUrl: `https://rplay.live/c/${encodeURIComponent(creatorUser.nickname || rawId)}?content=${oid}`,
             publishedAt: publishedTime,
-            fetchedAt: Date.now(),
-            isRead: 0,
-          });
+          }));
         } catch (itemErr) {
           console.warn(`[Rplay] Error fetching item ${oid}:`, itemErr);
         }
@@ -190,10 +188,11 @@ export const rplayAdapter: PlatformAdapter = {
         nextCursor: hasMore ? String(nextOffset) : undefined,
         hasMore,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: err?.message || 'Rplay 抓取失败 (请确认当前浏览器是否登录 Rplay)',
+        error: fetchError('network', message || 'Rplay 抓取失败 (请确认当前浏览器是否登录 Rplay)', true),
       };
     }
   },

@@ -76,7 +76,9 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       await deps.reloadData();
       const safeResults = Array.isArray(results) ? results : [];
       const totalPosts = safeResults.reduce((acc, r) => acc + (r.posts?.length || 0), 0);
-      const errors = safeResults.filter(r => r.error).map(r => r.error);
+      const errors = safeResults
+        .filter(r => r.error)
+        .map(r => r.error!.message);
       if (errors.length > 0 && totalPosts === 0) {
         alert(`【同步提示 - ${creator?.name || '创作者'}】\n${errors.join('\n')}`);
       } else {
@@ -103,9 +105,9 @@ export function useSyncActions(deps: SyncActionsDependencies) {
         onlyOriginal: deps.getHideReposts(),
         forceRefresh,
       });
-      await deps.reloadData();
+
       if (res.error) {
-        alert(`【同步未成功】${channel.displayName || channel.accountId}：\n${res.error}`);
+        alert(`【同步未成功】${channel.displayName || channel.accountId}：\n${res.error.message}`);
       } else if (res.posts && res.posts.length > 0) {
         alert(`【同步成功】已获取并更新 ${channel.displayName || channel.accountId} 的 ${res.posts.length} 条作品/动态！`);
       } else {

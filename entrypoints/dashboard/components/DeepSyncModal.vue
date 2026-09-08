@@ -5,6 +5,7 @@ import {
 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Creator, type Channel } from '../../../src/types';
 import type { DeepSyncStartRequest } from '../types/modal';
+import BaseModal from './BaseModal.vue';
 
 const props = defineProps<{
   creator: Creator;
@@ -78,10 +79,11 @@ function start() {
   });
 }
 </script>
-
 <template>
-  <div
-    class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+  <BaseModal
+    overlay-class="bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+    :close-on-backdrop="false"
+    @close="emit('close')"
   >
     <div class="bg-white dark:bg-slate-900 rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 animate-scale-up max-h-[90vh] flex flex-col">
       <!-- Header -->
@@ -311,5 +313,5 @@ function start() {
         </div>
       </div>
     </div>
-  </div>
+  </BaseModal>
 </template>

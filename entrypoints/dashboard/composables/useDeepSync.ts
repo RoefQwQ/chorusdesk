@@ -73,7 +73,7 @@ export function useDeepSync(deps: DeepSyncDependencies) {
             if (deepSyncLogs.value.length > 50) deepSyncLogs.value.pop();
           }
           if (info.error) {
-            deepSyncLogs.value.unshift(`[提示] ${info.error}`);
+            deepSyncLogs.value.unshift(`[提示] ${info.error.message}`);
           }
         }
       });

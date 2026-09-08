@@ -13,6 +13,33 @@ export interface FetchOptions {
   forceRefresh?: boolean;
 }
 
+/**
+ * Structured error for FetchResult. Adapters classify the failure so the sync
+ * layer can decide retryability and message wording without regexing the
+ * message string (which is what `normalizeErrorMessage` used to do).
+ */
+export type FetchErrorCode =
+  | 'auth'
+  | 'rate_limit'
+  | 'network'
+  | 'parse'
+  | 'timeout'
+  | 'not_found'
+  | 'unsupported';
+
+export interface FetchError {
+  /** Machine-readable failure class; drives sync-layer policy, not display. */
+  code: FetchErrorCode;
+  /** Human-readable Chinese message, safe to surface in the UI as-is. */
+  message: string;
+  /** True when retrying the same request can plausibly succeed. */
+  retryable?: boolean;
+}
+
+export function fetchError(code: FetchErrorCode, message: string, retryable?: boolean): FetchError {
+  return retryable === undefined ? { code, message } : { code, message, retryable };
+}
+
 export interface FetchResult {
   posts: Post[];
   authorMeta?: {
@@ -20,8 +47,9 @@ export interface FetchResult {
     avatar?: string;
   };
   nextCursor?: string;
+  /** False when the adapter knows there is nothing older to fetch. */
   hasMore?: boolean;
-  error?: string;
+  error?: FetchError;
   /** Total raw posts returned by adapter in this batch before DB deduplication */
   totalFetched?: number;
 }

@@ -1,5 +1,6 @@
 import type { Channel } from '../types';
-import type { FetchResult } from '../adapters/types';
+import type { FetchError, FetchResult } from '../adapters/types';
+import { fetchError } from '../adapters/types';
 import { db } from '../infrastructure/db/database';
 import { updateChannel } from './channelSync';
 
@@ -14,7 +15,7 @@ export async function fetchChannelHistory(
   if (channel.nextCursor === '__END__') {
     return {
       posts: [],
-      error: '已到达该账号历史作品最底部，暂无更多更早内容。',
+      error: fetchError('not_found', '已到达该账号历史作品最底部，暂无更多更早内容。'),
       hasMore: false,
     };
   }
@@ -40,7 +41,7 @@ export interface DeepSyncOptions {
     totalNewPosts: number;
     reachEnd: boolean;
     status: 'fetching' | 'done' | 'error';
-    error?: string;
+    error?: FetchError;
   }) => void;
   shouldStop?: () => boolean;
 }
@@ -51,7 +52,7 @@ export interface DeepSyncOptions {
 export async function deepSyncChannel(
   channel: Channel,
   options: DeepSyncOptions = {}
-): Promise<{ totalNew: number; reachEnd: boolean; rounds: number; error?: string }> {
+): Promise<{ totalNew: number; reachEnd: boolean; rounds: number; error?: FetchError }> {
   let totalNew = 0;
   let rounds = 0;
   let consecutiveEmptyRounds = 0;
@@ -115,7 +116,10 @@ export async function deepSyncChannel(
       consecutiveEmptyRounds = 0;
     }
 
-    const isFinished = Boolean(res.hasMore === false || rawFetched === 0);
+    // Finished only on an explicit end-of-history signal. An empty round with
+    // no error used to count as "finished" here, silently ending the dig even
+    // when the adapter simply had nothing new for this page.
+    const isFinished = res.hasMore === false;
 
     options.onProgress?.({
       channelId: channel.id,

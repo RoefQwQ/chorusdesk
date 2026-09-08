@@ -25,7 +25,10 @@ const ADAPTER_MAP: Record<string, PlatformAdapter> = {
 };
 
 export function getAdapter(platform: Platform): PlatformAdapter | undefined {
-  return ADAPTER_MAP[platform] || ADAPTER_MAP['rss'];
+  // No silent fallback: an unknown platform must surface as an unsupported
+  // error (channelSync handles a missing adapter) rather than silently
+  // fetching the channel's URL as RSS.
+  return ADAPTER_MAP[platform];
 }
 
 export function registerAdapter(platformKey: string, adapter: PlatformAdapter): void {

@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
-import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import type { PlatformAdapter, FetchResult, FetchOptions, FetchError } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 import { toSecureMediaUrl } from '../utils/media';
 
@@ -7,19 +9,19 @@ import { toSecureMediaUrl } from '../utils/media';
 const BILI_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
-/** Map Bilibili business error codes to a clear, user-facing message. */
-function biliCodeMessage(code: number): string {
+/** Map Bilibili business error codes to a structured, user-facing error. */
+function biliCodeError(code: number): FetchError {
   switch (code) {
     case -101:
-      return 'B站未登录或登录已过期，请检查登录状态';
+      return fetchError('auth', 'B站未登录或登录已过期，请检查登录状态');
     case -352:
-      return 'B站风控校验失败，请稍后重试或完成人机验证';
+      return fetchError('rate_limit', 'B站风控校验失败，请稍后重试或完成人机验证', true);
     case -403:
-      return 'B站接口拒绝访问（权限不足或签名失效），请确认登录状态后重试';
+      return fetchError('auth', 'B站接口拒绝访问（权限不足或签名失效），请确认登录状态后重试');
     case -412:
-      return 'B站请求被拦截（风控），请稍后重试';
+      return fetchError('rate_limit', 'B站请求被拦截（风控），请稍后重试', true);
     default:
-      return `B站接口异常 (code ${code})`;
+      return fetchError('parse', `B站接口异常 (code ${code})`);
   }
 }
 
@@ -38,7 +40,7 @@ export const bilibiliAdapter: PlatformAdapter = {
     if (options?.cursor) {
       const fetchHistory = this.fetchHistory;
       if (!fetchHistory) {
-        return { posts: [], error: 'Bilibili historical fetch is unavailable' };
+        return { posts: [], error: fetchError('unsupported', 'Bilibili historical fetch is unavailable') };
       }
       return fetchHistory.call(this, channel, uid, limit, options, authorName, authorAvatar);
     }
@@ -102,9 +104,10 @@ export const bilibiliAdapter: PlatformAdapter = {
             if (archiveBvid) seenBvids.add(archiveBvid);
 
             const idStr = item.id_str || String(item.basic?.comment_id_str || item.id || '');
+            if (!archiveBvid && !idStr) continue; // no stable identity — skip rather than fabricate
             const postId = archiveBvid
               ? `bilibili_video_${archiveBvid}`
-              : `bilibili_${idStr || Math.random().toString(36).slice(2)}`;
+              : `bilibili_${idStr}`;
 
             const text = moduleDynamic.desc?.text || moduleDynamic.major?.archive?.desc || '';
             const title = moduleDynamic.major?.archive?.title || '';
@@ -142,11 +145,8 @@ export const bilibiliAdapter: PlatformAdapter = {
               }
             }
 
-            allPosts.push({
+            allPosts.push(buildPost(channel, {
               id: postId,
-              creatorId: channel.creatorId,
-              channelId: channel.id,
-              platform: 'bilibili',
               title,
               content: text || title || '（分享动态）',
               mediaList,
@@ -154,10 +154,8 @@ export const bilibiliAdapter: PlatformAdapter = {
                 ? `https://www.bilibili.com/video/${archiveBvid}`
                 : `https://t.bilibili.com/${idStr}`,
               publishedAt: pubTime || Date.now(),
-              fetchedAt: Date.now(),
-              isRead: 0,
               isRepost: isForward,
-            });
+            }));
 
             if (allPosts.length >= limit) break;
           }
@@ -205,20 +203,15 @@ export const bilibiliAdapter: PlatformAdapter = {
               const title = item.title || '无标题视频';
               const desc = item.intro && item.intro !== '-' ? item.intro : title;
 
-              allPosts.push({
+              allPosts.push(buildPost(channel, {
                 id: `bilibili_video_${bvid}`,
-                creatorId: channel.creatorId,
-                channelId: channel.id,
-                platform: 'bilibili',
                 title,
                 content: desc,
                 mediaList: cover ? [{ type: 'video', previewUrl: cover, originalUrl: `https://www.bilibili.com/video/${bvid}` }] : [],
                 originalUrl: `https://www.bilibili.com/video/${bvid}`,
                 publishedAt: pubTime || Date.now(),
-                fetchedAt: Date.now(),
-                isRead: 0,
                 isRepost: false,
-              });
+              }));
 
               if (allPosts.length >= limit) break;
             }
@@ -248,16 +241,14 @@ export const bilibiliAdapter: PlatformAdapter = {
       if (hardCode !== undefined) {
         return {
           posts: [],
-          error: biliCodeMessage(hardCode),
+          error: biliCodeError(hardCode),
         };
       }
       return {
         posts: [],
-        error: '未获取到B站内容（账号可能无投稿或已注销）',
+        error: fetchError('not_found', '未获取到B站内容（账号可能无投稿或已注销）'),
       };
     }
-
-    allPosts.sort((a, b) => b.publishedAt - a.publishedAt);
 
     return {
       posts: allPosts.slice(0, limit),
@@ -313,11 +304,11 @@ export const bilibiliAdapter: PlatformAdapter = {
             const archiveBvid = moduleDynamic.major?.archive?.bvid;
             if (archiveBvid && seenBvids.has(archiveBvid)) continue;
             if (archiveBvid) seenBvids.add(archiveBvid);
-
             const idStr = item.id_str || String(item.basic?.comment_id_str || item.id || '');
+            if (!archiveBvid && !idStr) continue; // no stable identity — skip rather than fabricate
             const postId = archiveBvid
               ? `bilibili_video_${archiveBvid}`
-              : `bilibili_${idStr || Math.random().toString(36).slice(2)}`;
+              : `bilibili_${idStr}`;
             const pubTime = moduleAuthor.pub_ts ? moduleAuthor.pub_ts * 1000 : Date.now();
             const text = moduleDynamic.desc?.text || moduleDynamic.major?.archive?.desc || '';
             const title = moduleDynamic.major?.archive?.title || '';
@@ -355,11 +346,8 @@ export const bilibiliAdapter: PlatformAdapter = {
               }
             }
 
-            allPosts.push({
+            allPosts.push(buildPost(channel, {
               id: postId,
-              creatorId: channel.creatorId,
-              channelId: channel.id,
-              platform: 'bilibili',
               title,
               content: text || title || '（分享动态）',
               mediaList,
@@ -367,10 +355,8 @@ export const bilibiliAdapter: PlatformAdapter = {
                 ? `https://www.bilibili.com/video/${archiveBvid}`
                 : `https://t.bilibili.com/${idStr}`,
               publishedAt: pubTime,
-              fetchedAt: Date.now(),
-              isRead: 0,
               isRepost: isForward,
-            });
+            }));
 
             if (allPosts.length >= limit) break;
           }

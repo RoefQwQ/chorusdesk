@@ -256,11 +256,8 @@ function handleGlobalShortcut(event: KeyboardEvent) {
   }
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && lightboxMedia.value) {
-    lightboxMedia.value = null;
-  }
-}
+// Escape handling for the lightbox now lives in BaseModal (focus-trapped
+// dialog), so no global keydown listener is needed for it anymore.
 
 // Tab scroll position preservation
 const tabScrollPositions: Record<string, number> = {};
@@ -294,13 +291,11 @@ onMounted(async () => {
   await loadRplayToken();
 
   initDarkMode();
-  window.addEventListener('keydown', handleKeydown);
   window.addEventListener('keydown', handleGlobalShortcut);
   await checkPlatformLogins();
 });
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown);
   window.removeEventListener('keydown', handleGlobalShortcut);
 });
 

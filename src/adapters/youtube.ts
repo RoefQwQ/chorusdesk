@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
 export const youtubeAdapter: PlatformAdapter = {
@@ -63,34 +65,32 @@ export const youtubeAdapter: PlatformAdapter = {
       const authorName = pageAuthorTitle || xmlDoc.querySelector('author > name')?.textContent || channel.displayName;
       const entries = Array.from(xmlDoc.querySelectorAll('entry')).slice(0, limit);
 
-      const posts: Post[] = entries.map((entry) => {
-        const videoId = entry.querySelector('yt\\:videoId, videoId')?.textContent || '';
-        const title = entry.querySelector('title')?.textContent || '';
-        const published = entry.querySelector('published')?.textContent || '';
-        const desc = entry.querySelector('media\\:description, description')?.textContent || '';
-        const originalUrl = entry.querySelector('link')?.getAttribute('href') || `https://www.youtube.com/watch?v=${videoId}`;
-        const thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+      const posts: Post[] = entries
+        .filter((entry) => entry.querySelector('yt\\:videoId, videoId')?.textContent)
+        .map((entry) => {
+          const videoId = entry.querySelector('yt\\:videoId, videoId')?.textContent || '';
+          const title = entry.querySelector('title')?.textContent || '';
+          const published = entry.querySelector('published')?.textContent || '';
+          const desc = entry.querySelector('media\\:description, description')?.textContent || '';
+          const originalUrl = entry.querySelector('link')?.getAttribute('href') || `https://www.youtube.com/watch?v=${videoId}`;
+          const thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+          const parsedTime = published ? new Date(published).getTime() : Date.now();
 
-        return {
-          id: `youtube_${videoId || Math.random().toString(36).slice(2)}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'youtube',
-          title,
-          content: desc.slice(0, 300) + (desc.length > 300 ? '...' : ''),
-          mediaList: videoId ? [
-            {
-              type: 'video',
-              previewUrl: thumbnail,
-              originalUrl,
-            },
-          ] : [],
-          originalUrl,
-          publishedAt: published ? new Date(published).getTime() : Date.now(),
-          fetchedAt: Date.now(),
-          isRead: 0,
-        };
-      });
+          return buildPost(channel, {
+            id: `youtube_${videoId}`,
+            title,
+            content: desc.slice(0, 300) + (desc.length > 300 ? '...' : ''),
+            mediaList: videoId ? [
+              {
+                type: 'video',
+                previewUrl: thumbnail,
+                originalUrl,
+              },
+            ] : [],
+            originalUrl,
+            publishedAt: Number.isFinite(parsedTime) ? parsedTime : Date.now(),
+          });
+        });
 
       return {
         posts,
@@ -99,10 +99,11 @@ export const youtubeAdapter: PlatformAdapter = {
           avatar: pageAuthorAvatar || undefined,
         },
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: err?.message || 'YouTube 更新抓取失败',
+        error: fetchError('network', message || 'YouTube 更新抓取失败', true),
       };
     }
   },

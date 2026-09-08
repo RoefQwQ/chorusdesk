@@ -37,9 +37,12 @@ const SENDER_POLICY: Record<string, 'page' | 'rplay-content'> = {
 
 export default defineBackground(() => {
   console.log('[Chorus] Background Service Worker ready');
-  void setupDeclarativeNetRules().catch((e) =>
-    console.warn('[Chorus] DNR setup failed:', e)
-  );
+  // DNR dynamic rules persist across browser restarts, so they are applied
+  // only on install/update (onInstalled). Re-running remove+add on every SW
+  // wake is wasted work and briefly unscopes the hotlink rules mid-window.
+  // setupAutoSync still runs at startup: it is guarded by alarms.get and
+  // cheap, and it must repair a missing alarm after a browser restart wiped
+  // it (e.g. alarm cleared while the extension was disabled).
   void setupAutoSync().catch((e) => console.warn('[Chorus] Auto-sync setup failed:', e));
 
   chrome.runtime.onInstalled.addListener(() => {

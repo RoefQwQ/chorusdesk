@@ -5,6 +5,7 @@ import { PLATFORM_REGISTRY, type Creator, type Channel } from '../../../src/type
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import { parseProfileUrl } from '../../../src/utils/urlParser';
 import type { AddModalOpenRequest, AddModalSubmitPayload, AddModalRole } from '../types/modal';
+import BaseModal from './BaseModal.vue';
 
 
 const props = defineProps<{
@@ -152,10 +153,11 @@ function submit() {
   });
 }
 </script>
-
 <template>
-  <div
-    class="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+  <BaseModal
+    overlay-class="bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+    :close-on-backdrop="false"
+    @close="emit('close')"
   >
     <div class="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
       <div class="flex items-center justify-between">
@@ -475,5 +477,5 @@ function submit() {
         </button>
       </div>
     </div>
-  </div>
+  </BaseModal>
 </template>

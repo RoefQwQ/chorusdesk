@@ -1,6 +1,25 @@
 import type { Channel, Post, MediaItem } from '../types';
 import type { PlatformAdapter, FetchResult } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
+
+
+/**
+ * Deterministic short hash for feed item guids. `btoa` threw on non-ASCII
+ * guids (CJK feed titles are common), so encode UTF-8 bytes via TextEncoder
+ * and fold to a base36 string instead.
+ */
+function stableHash(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (const b of bytes) {
+    h1 = (h1 ^ b) * 0x01000193 >>> 0;
+    h2 = (h2 + b + (h2 << 6) + (h2 << 16)) >>> 0;
+  }
+  return (h1.toString(36) + h2.toString(36)).slice(0, 32);
+}
 
 export const rssAdapter: PlatformAdapter = {
   platform: 'rss',
@@ -50,10 +69,19 @@ export const rssAdapter: PlatformAdapter = {
           item.querySelector('link')?.getAttribute('href') ||
           channelLink;
 
+        // Date (parsed before the guid fallback needs it)
+        const dateStr =
+          item.querySelector('pubDate, published, updated')?.textContent || '';
+        const parsedTime = dateStr ? new Date(dateStr).getTime() : Date.now();
+        const publishedAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
+
+        // Stable fallback: derive from content identity, not randomness — a
+        // Math.random id made every sync re-import the same item as a "new"
+        // post when guid and link are both missing.
         const guid =
           item.querySelector('guid, id')?.textContent ||
           link ||
-          Math.random().toString(36).substring(2);
+          `${title}|${publishedAt}`;
 
         const desc =
           item.querySelector('description, summary, content')?.textContent || '';
@@ -95,25 +123,15 @@ export const rssAdapter: PlatformAdapter = {
           }
         });
 
-        // Date
-        const dateStr =
-          item.querySelector('pubDate, published, updated')?.textContent || '';
-        const publishedAt = dateStr ? new Date(dateStr).getTime() : Date.now();
-
-        posts.push({
-          id: `rss_${btoa(guid).replace(/[/+=]/g, '').slice(0, 32)}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'rss',
+        posts.push(buildPost(channel, {
+          id: `rss_${stableHash(guid)}`,
           channelLabel: channel.label,
           title,
           content: cleanText.slice(0, 350) + (cleanText.length > 350 ? '...' : ''),
           mediaList,
           originalUrl: link,
           publishedAt,
-          fetchedAt: Date.now(),
-          isRead: 0,
-        });
+        }));
       }
 
       return {
@@ -122,10 +140,11 @@ export const rssAdapter: PlatformAdapter = {
           name: channelTitle,
         },
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: err?.message || 'RSS 订阅源抓取失败',
+        error: fetchError('network', message || 'RSS 订阅源抓取失败', true),
       };
     }
   },

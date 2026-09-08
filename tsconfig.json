@@ -17,5 +17,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.vue", "**/*.d.ts", ".wxt/wxt.d.ts"],
-  "exclude": ["node_modules", ".output"]
+  "exclude": ["node_modules", ".output", "vitest.config.ts", "tests"]
 }

@@ -1,5 +1,7 @@
+import Dexie from 'dexie';
 import type { Creator, Channel, Post } from '../types';
-import type { FetchOptions, FetchResult } from '../adapters/types';
+import type { FetchError, FetchOptions, FetchResult } from '../adapters/types';
+import { fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
 import { db } from '../infrastructure/db/database';
 
@@ -15,19 +17,22 @@ export async function clearStaleUpdatingStatus() {
     console.warn('[Adapters] Failed to clear stale updating status:', e);
   }
 }
+class FetchTimeoutError extends Error {}
+
 
 /**
- * Format error message with helpful, non-cryptic explanation for rate-limiting.
+ * Friendly wording for error classes the sync layer understands. With the
+ * structured FetchError contract this is a code lookup, not message regexing.
  */
-function normalizeErrorMessage(errorStr?: string): string | undefined {
-  if (!errorStr) return undefined;
-  if (errorStr.includes('429') || errorStr.toLowerCase().includes('too many requests')) {
-    return '触发平台防刷频率限制 (HTTP 429)。目标平台正在进行安全限流冷却，请等待 2~3 分钟后再刷新，避免频繁请求。';
+function friendlyError(err: FetchError): string {
+  switch (err.code) {
+    case 'rate_limit':
+      return '触发平台防刷频率限制。目标平台正在进行安全限流冷却，请等待 2~3 分钟后再刷新，避免频繁请求。';
+    case 'auth':
+      return err.message; // adapters already word auth errors as user actions
+    default:
+      return err.message;
   }
-  if (errorStr.includes('微博') && (errorStr.includes('403') || errorStr.includes('Visitor System') || errorStr.includes('访客系统'))) {
-    return '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。';
-  }
-  return errorStr;
 }
 
 /**
@@ -41,7 +46,7 @@ export async function updateChannel(
 ): Promise<FetchResult> {
   const adapter = getAdapter(channel.platform);
   if (!adapter) {
-    return { posts: [], error: `不支持的平台: ${channel.platform}` };
+    return { posts: [], error: fetchError('unsupported', `不支持的平台: ${channel.platform}`) };
   }
 
   // Cooldown protection: if updated successfully within 30 seconds and not forced, skip hitting network
@@ -61,7 +66,7 @@ export async function updateChannel(
   try {
     // Twitter may need an existing authenticated tab fallback; allow enough time for it to load.
     const timeoutPromise = new Promise<FetchResult>((_, reject) => {
-      setTimeout(() => reject(new Error('同步请求超时（已超过 45 秒未响应，请检查平台登录状态）')), 45_000);
+      setTimeout(() => reject(new FetchTimeoutError('同步请求超时（已超过 45 秒未响应，请检查平台登录状态）')), 45_000);
     });
 
     // For normal (non-paginated) syncs, find the newest post already in DB to use as a watermark.
@@ -76,13 +81,19 @@ export async function updateChannel(
       !options?.forceRefresh
     ) {
       try {
+        // [channelId+publishedAt] compound index: `.last()` walks the index
+        // cursor straight to the newest post instead of materializing every
+        // row of the channel (`.sortBy` loaded the whole channel into memory
+        // on every normal sync).
         const latestPost = await db.posts
-          .where('channelId')
-          .equals(channel.id)
-          .reverse()
-          .sortBy('publishedAt');
-        if (latestPost.length > 0) {
-          sinceTimestamp = latestPost[0].publishedAt;
+          .where('[channelId+publishedAt]')
+          .between(
+            [channel.id, Dexie.minKey],
+            [channel.id, Dexie.maxKey]
+          )
+          .last();
+        if (latestPost) {
+          sinceTimestamp = latestPost.publishedAt;
         }
       } catch {}
     }
@@ -91,8 +102,9 @@ export async function updateChannel(
     const result = await Promise.race([adapter.fetchLatest(channel, limit, mergedOptions), timeoutPromise]);
 
     if (result.error && result.posts.length === 0) {
-      // If the adapter signalled completion or end-of-history, treat as success with __END__ cursor
-      if (result.hasMore === false || result.error.includes('已到达') || result.error.includes('已同步该博主主页展示的全部')) {
+      // End-of-history is signalled by hasMore === false or a not_found code,
+      // never by message wording.
+      if (result.hasMore === false || result.error.code === 'not_found') {
         await db.channels.update(channel.id, {
           status: 'success',
           nextCursor: '__END__',
@@ -103,13 +115,13 @@ export async function updateChannel(
         return { ...result, error: undefined };
       }
 
-      const friendlyError = normalizeErrorMessage(result.error);
+      const friendly = friendlyError(result.error);
       await db.channels.update(channel.id, {
         status: 'error',
-        errorMessage: friendlyError,
+        errorMessage: friendly,
         lastCheckAt: Date.now(),
       });
-      return { ...result, error: friendlyError };
+      return { ...result, error: { ...result.error, message: friendly } };
     }
 
     let enhancedPosts: Post[] = [];
@@ -146,7 +158,12 @@ export async function updateChannel(
       // Filter out deleted posts by default; if restoreDeleted is true, clear them from deletedPostIds
       if (!options?.restoreDeleted) {
         try {
-          const deletedKeys = await db.deletedPostIds.toCollection().primaryKeys();
+          // channelId index on deletedPostIds — a full-table primaryKeys() scan
+          // walked every tombstone in the database for each channel sync.
+          const deletedKeys = await db.deletedPostIds
+            .where('channelId')
+            .equals(channel.id)
+            .primaryKeys();
           if (deletedKeys.length > 0) {
             const deletedSet = new Set(deletedKeys);
             newPosts = newPosts.filter(p => !deletedSet.has(p.id));
@@ -179,10 +196,19 @@ export async function updateChannel(
             .map(p => p.originalUrl)
         );
         if (videoUrls.size > 0) {
-          const existingPosts = await db.posts.where('channelId').equals(channel.id).toArray();
-          const staleIds = existingPosts
-            .filter(p => !p.id.startsWith('bilibili_video_') && videoUrls.has(p.originalUrl))
-            .map(p => p.id);
+          // Stream the channel's rows and collect only stale ids — never
+          // materialize the whole channel as an array like the old toArray()
+          // did. originalUrl is not indexed so rows must be read, but the
+          // cursor is still bounded to this channel by the channelId index.
+          const staleIds: string[] = [];
+          await db.posts
+            .where('channelId')
+            .equals(channel.id)
+            .each((p) => {
+              if (!p.id.startsWith('bilibili_video_') && videoUrls.has(p.originalUrl)) {
+                staleIds.push(p.id);
+              }
+            });
           if (staleIds.length > 0) {
             await db.posts.bulkDelete(staleIds);
           }
@@ -289,14 +315,18 @@ export async function updateChannel(
       posts: enhancedPosts,
       totalFetched: result.posts?.length || 0,
     };
-  } catch (err: any) {
-    const friendlyError = normalizeErrorMessage(err?.message || '未知异常');
+  } catch (err: unknown) {
+    const structured = err instanceof FetchTimeoutError
+      ? fetchError('timeout', err.message)
+      : err instanceof Error
+        ? fetchError('network', err.message, true)
+        : fetchError('network', '未知异常', true);
     await db.channels.update(channel.id, {
       status: 'error',
-      errorMessage: friendlyError,
+      errorMessage: structured.message,
       lastCheckAt: Date.now(),
     });
-    return { posts: [], error: friendlyError };
+    return { posts: [], error: structured };
   } finally {
     // Failsafe: Ensure channel is NEVER left in 'updating' status
     const current = await db.channels.get(channel.id);

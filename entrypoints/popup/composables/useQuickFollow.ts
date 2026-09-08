@@ -1,6 +1,10 @@
 import { computed, ref, type Ref } from 'vue';
 import type { Channel, Creator } from '../../../src/types';
 import type { ParsedProfile } from '../../../src/utils/urlParser';
+import { creatorService, channelService } from '../../../src/application';
+// Catalog reads (creators/channels) still read `db` directly: the popup only
+// lists and looks up records here; every write goes through the services
+// above, which are the application-layer boundary for persistence.
 import { db } from '../../../src/infrastructure/db/database';
 import { updateChannel, clearStaleUpdatingStatus } from '../../../src/sync';
 import type { AuthorMeta } from './usePageDetection';
@@ -152,7 +156,7 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
           updatedAt: Date.now(),
         };
 
-        await db.creators.add(newCreator);
+        await creatorService.save(newCreator);
         targetCreatorId = newCreator.id;
         creators.value.push(newCreator);
       }
@@ -177,7 +181,8 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
         status: 'idle',
       };
 
-      await db.channels.put(newChannel);
+      await channelService.upsert(newChannel);
+
 
       // Trigger on-demand initial fetch
       updateChannel(newChannel, 5).catch(console.error);

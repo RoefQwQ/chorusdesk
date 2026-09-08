@@ -1,5 +1,6 @@
 import type { Channel } from '../types';
 import type { FetchOptions, FetchResult } from '../adapters/types';
+import { fetchError } from '../adapters/types';
 import { db } from '../infrastructure/db/database';
 import { updateChannel } from './channelSync';
 
@@ -85,9 +86,12 @@ export async function batchUpdateChannelsInterleaved(
         newPostsCount += res.posts?.length || 0;
       }
       options?.onProgress?.(i + 1, total, ch, res);
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn(`[BatchUpdate] Error on ${ch.id}:`, e);
-      options?.onProgress?.(i + 1, total, ch, { posts: [], error: String(e) });
+      options?.onProgress?.(i + 1, total, ch, {
+        posts: [],
+        error: fetchError('network', e instanceof Error ? e.message : String(e), true),
+      });
     }
   }
 

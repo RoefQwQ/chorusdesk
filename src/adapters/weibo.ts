@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
 export const weiboAdapter: PlatformAdapter = {
@@ -84,6 +86,7 @@ export const weiboAdapter: PlatformAdapter = {
         }
 
         const id = mblog.id || mblog.mid || String(card.id);
+        if (!id) continue; // skip rather than collide all items on weibo_undefined
         const rawText = cleanWeiboHtml(mblog.text || '');
         let fullText = rawText;
 
@@ -128,20 +131,15 @@ export const weiboAdapter: PlatformAdapter = {
           ? firstLine
           : (isRetweet ? `转发微博: ${rawText.slice(0, 30)}` : `@${authorName} 的微博`);
 
-        posts.push({
+        posts.push(buildPost(channel, {
           id: `weibo_${id}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'weibo',
           title,
           content: fullText || title,
           mediaList,
           originalUrl: `https://weibo.com/${userInfo.id || uid}/${mblog.bid || id}`,
           publishedAt: pubDate,
-          fetchedAt: Date.now(),
-          isRead: 0,
           isRepost: isRetweet,
-        });
+        }));
       }
 
       // Sort strictly newest first
@@ -158,10 +156,11 @@ export const weiboAdapter: PlatformAdapter = {
         nextCursor: hasMore ? String(page + 1) : undefined,
         hasMore,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: '获取微博动态异常: ' + (err?.message || err),
+        error: fetchError('network', `获取微博动态异常: ${message}`, true),
       };
     }
   },
@@ -179,13 +178,13 @@ export const weiboAdapter: PlatformAdapter = {
 
       if (!res.ok) {
         if (res.status === 403) {
-          return { posts: [], error: '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。' };
+          return { posts: [], error: fetchError('auth', '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
         }
-        return { posts: [], error: `微博接口响应异常 HTTP ${res.status}` };
+        return { posts: [], error: fetchError('network', `微博接口响应异常 HTTP ${res.status}`, true) };
       }
 
       if (typeof res.data === 'string' && (res.data.includes('Sina Visitor System') || res.data.includes('passport.weibo.com') || res.data.trim().startsWith('<'))) {
-        return { posts: [], error: '微博访客系统拦截。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。' };
+        return { posts: [], error: fetchError('auth', '微博访客系统拦截。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
       }
 
       const json = JSON.parse(res.data);
@@ -205,7 +204,9 @@ export const weiboAdapter: PlatformAdapter = {
 
         const text = cleanWeiboHtml(item.text_raw || item.text || '');
         const id = item.id || item.mid;
-        const pubDate = item.created_at ? new Date(item.created_at).getTime() : Date.now();
+        if (!id) continue; // skip rather than collide all items on weibo_undefined
+        const parsedTime = item.created_at ? new Date(item.created_at).getTime() : Date.now();
+        const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
 
         const mediaList: any[] = [];
         if (item.pic_infos) {
@@ -223,20 +224,15 @@ export const weiboAdapter: PlatformAdapter = {
           }
         }
 
-        posts.push({
+        posts.push(buildPost(channel, {
           id: `weibo_${id}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'weibo',
           title: text.slice(0, 40),
           content: text,
           mediaList,
           originalUrl: `https://weibo.com/${uid}/${item.mblogid || id}`,
           publishedAt: pubDate,
-          fetchedAt: Date.now(),
-          isRead: 0,
           isRepost: isRetweet,
-        });
+        }));
       }
 
       // Sort strictly newest first
@@ -251,8 +247,9 @@ export const weiboAdapter: PlatformAdapter = {
         nextCursor: list.length > 0 ? String(page + 1) : undefined,
         hasMore: list.length > 0,
       };
-    } catch (e: any) {
-      return { posts: [], error: e.message || '微博网络连接异常' };
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { posts: [], error: fetchError('network', message || '微博网络连接异常', true) };
     }
   },
 

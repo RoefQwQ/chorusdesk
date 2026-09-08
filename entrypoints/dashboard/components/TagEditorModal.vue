@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue';
 import { X, Tag, Plus, Trash2 } from 'lucide-vue-next';
 import type { Creator } from '../../../src/types';
+import BaseModal from './BaseModal.vue';
 
 const props = defineProps<{
   creator: Creator;
@@ -65,10 +66,11 @@ function save() {
   newTagInput.value = '';
 }
 </script>
-
 <template>
-  <div
-    class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+  <BaseModal
+    overlay-class="bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+    :close-on-backdrop="false"
+    @close="emit('close')"
   >
     <div class="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-scale-up">
       <!-- Modal Header -->
@@ -203,5 +205,5 @@ function save() {
         </button>
       </div>
     </div>
-  </div>
+  </BaseModal>
 </template>

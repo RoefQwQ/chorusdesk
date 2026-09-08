@@ -1,5 +1,7 @@
 import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
 interface FantiaThumb {
@@ -110,7 +112,7 @@ export const fantiaAdapter: PlatformAdapter = {
           },
           nextCursor: undefined,
           hasMore: false,
-          error: 'Fantia 该俱乐部暂无可见投稿 (recent_posts 为空)',
+          error: fetchError('not_found', 'Fantia 该俱乐部暂无可见投稿 (recent_posts 为空)'),
         };
       }
 
@@ -138,22 +140,18 @@ export const fantiaAdapter: PlatformAdapter = {
           });
         }
 
-        const pubDate = p.posted_at ? new Date(p.posted_at).getTime() : Date.now();
+        const parsedTime = p.posted_at ? new Date(p.posted_at).getTime() : Date.now();
+        const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
         const postUrl = p.uri?.show ? `https://fantia.jp${p.uri.show}` : `https://fantia.jp/posts/${p.id}`;
 
-        return {
+        return buildPost(channel, {
           id: `fantia_${p.id}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'fantia' as const,
           title: p.title || 'Fantia 投稿',
           content: (p.comment || p.title || '').slice(0, 300),
           mediaList,
           originalUrl: postUrl,
           publishedAt: pubDate,
-          fetchedAt: Date.now(),
-          isRead: 0,
-        };
+        });
       });
 
       // Sort strictly newest first
@@ -174,7 +172,9 @@ export const fantiaAdapter: PlatformAdapter = {
     } catch (err: unknown) {
       return {
         posts: [],
-        error: err instanceof Error ? err.message : 'Fantia 更新抓取失败 (请确认是否在浏览器中登录过 Fantia)',
+        error: err instanceof Error
+          ? fetchError('network', err.message, true)
+          : fetchError('network', 'Fantia 更新抓取失败 (请确认是否在浏览器中登录过 Fantia)', true),
       };
     }
   },

@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
 export const withnyAdapter: PlatformAdapter = {
@@ -26,23 +28,22 @@ export const withnyAdapter: PlatformAdapter = {
       const data = JSON.parse(res.data);
       const list = data?.posts || data?.data || [];
 
-      const posts: Post[] = list.map((item: any) => ({
-        id: `withny_${item.id}`,
-        creatorId: channel.creatorId,
-        channelId: channel.id,
-        platform: 'withny',
-        title: item.title || 'Withny 动态',
-        content: item.body || item.text || '',
-        mediaList: item.mediaUrls ? item.mediaUrls.map((u: string) => ({
-          type: 'image',
-          previewUrl: u,
-          originalUrl: u,
-        })) : [],
-        originalUrl: `https://withny.fun/posts/${item.id}`,
-        publishedAt: item.publishedAt ? new Date(item.publishedAt).getTime() : Date.now(),
-        fetchedAt: Date.now(),
-        isRead: 0,
-      }));
+      const posts: Post[] = list
+        .filter((item: { id?: unknown }) => item.id)
+        .map((item: any) => buildPost(channel, {
+          id: `withny_${item.id}`,
+          title: item.title || 'Withny 动态',
+          content: item.body || item.text || '',
+          mediaList: item.mediaUrls ? item.mediaUrls.map((u: string) => ({
+            type: 'image',
+            previewUrl: u,
+            originalUrl: u,
+          })) : [],
+          originalUrl: `https://withny.fun/posts/${item.id}`,
+          publishedAt: Number.isFinite(new Date(item.publishedAt).getTime())
+            ? new Date(item.publishedAt).getTime()
+            : Date.now(),
+        }));
 
       // Sort strictly newest first
       posts.sort((a, b) => b.publishedAt - a.publishedAt);
@@ -71,10 +72,11 @@ export const withnyAdapter: PlatformAdapter = {
         nextCursor,
         hasMore,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: err?.message || 'Withny 抓取失败 (请确认当前浏览器是否登录 Withny)',
+        error: fetchError('network', message || 'Withny 抓取失败 (请确认当前浏览器是否登录 Withny)', true),
       };
     }
   },

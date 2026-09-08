@@ -2,7 +2,6 @@ export { creatorService } from './creatorService';
 export { channelService } from './channelService';
 export { backupService } from './backupService';
 export { postService } from './postService';
-export { platformAuthService } from './platformAuthService';
 export {
   downloadBackup,
   saveBackupToDisk,

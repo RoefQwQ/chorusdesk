@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { IS_SERVICE_WORKER } from '../utils/runtime';
 
 export const twitterAdapter: PlatformAdapter = {
@@ -13,14 +15,14 @@ export const twitterAdapter: PlatformAdapter = {
     if (IS_SERVICE_WORKER) {
       return {
         posts: [],
-        error: '后台自动同步暂不支持推特（需在扩展页面中同步）',
+        error: fetchError('unsupported', '后台自动同步暂不支持推特（需在扩展页面中同步）'),
       };
     }
 
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
       return {
         posts: [],
-        error: '当前运行环境不支持与扩展后台通信',
+        error: fetchError('unsupported', '当前运行环境不支持与扩展后台通信'),
       };
     }
 
@@ -36,14 +38,14 @@ export const twitterAdapter: PlatformAdapter = {
       if (!res) {
         return {
           posts: [],
-          error: '扩展后台服务未响应，请在 chrome://extensions 中重新加载插件后重试',
+          error: fetchError('network', '扩展后台服务未响应，请在 chrome://extensions 中重新加载插件后重试', true),
         };
       }
 
       if (!res.success) {
         return {
           posts: [],
-          error: res.error || '获取推文失败',
+          error: fetchError('network', res.error || '获取推文失败', true),
         };
       }
 
@@ -52,7 +54,7 @@ export const twitterAdapter: PlatformAdapter = {
         if (!parseGraphQLResult) {
           return {
             posts: [],
-            error: '推特解析器不可用',
+            error: fetchError('parse', '推特解析器不可用'),
           };
         }
         return parseGraphQLResult.call(
@@ -68,12 +70,13 @@ export const twitterAdapter: PlatformAdapter = {
 
       return {
         posts: [],
-        error: '推特未返回有效数据',
+        error: fetchError('parse', '推特未返回有效数据'),
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: '调用推特同步后台失败: ' + (err?.message || err),
+        error: fetchError('network', `调用推特同步后台失败: ${message}`, true),
       };
     }
   },
@@ -210,7 +213,8 @@ export const twitterAdapter: PlatformAdapter = {
         }
       }
 
-      const pubDate = tweet.created_at ? new Date(tweet.created_at).getTime() : Date.now();
+      const parsedTime = tweet.created_at ? new Date(tweet.created_at).getTime() : Date.now();
+      const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
 
       // Extract media
       const mediaList: any[] = [];
@@ -247,20 +251,15 @@ export const twitterAdapter: PlatformAdapter = {
         ? firstLine
         : `@${username} 的推文`;
 
-      posts.push({
+      posts.push(buildPost(channel, {
         id: `twitter_${tweetId}`,
-        creatorId: channel.creatorId,
-        channelId: channel.id,
-        platform: 'twitter',
         title,
         content: fullText,
         mediaList,
         originalUrl: `https://x.com/${username}/status/${tweetId}`,
         publishedAt: pubDate,
-        fetchedAt: Date.now(),
-        isRead: 0,
         isRepost: isRetweet,
-      });
+      }));
     }
 
     // Strictly sort newest first

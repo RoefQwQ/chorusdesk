@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 import { toSecureMediaUrl } from '../utils/media';
 
@@ -22,7 +24,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       if (!res.ok) {
         return {
           posts: [],
-          error: `小红书页面访问异常 HTTP ${res.status}`,
+          error: fetchError('network', `小红书页面访问异常 HTTP ${res.status}`, true),
         };
       }
 
@@ -32,7 +34,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       if (!state) {
         return {
           posts: [],
-          error: '未能解析小红书博主页面数据。请确认当前浏览器已在 xiaohongshu.com 登录。',
+          error: fetchError('parse', '未能解析小红书博主页面数据。请确认当前浏览器已在 xiaohongshu.com 登录。'),
         };
       }
 
@@ -147,20 +149,15 @@ export const xiaohongshuAdapter: PlatformAdapter = {
           pubTime = Date.now();
         }
 
-        allPosts.push({
+        allPosts.push(buildPost(channel, {
           id: `xiaohongshu_${noteId}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'xiaohongshu',
           title: displayTitle,
           content: noteContent,
           mediaList,
           originalUrl: noteUrl,
           publishedAt: pubTime,
-          fetchedAt: Date.now(),
-          isRead: 0,
           isRepost: false,
-        });
+        }));
       }
 
       // CRITICAL: Sort strictly descending by publication time (newest first)
@@ -198,10 +195,11 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         nextCursor: hasMore ? String(nextOffset) : undefined,
         hasMore,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: '获取小红书动态异常: ' + (err?.message || err),
+        error: fetchError('network', `获取小红书动态异常: ${message}`, true),
       };
     }
   },

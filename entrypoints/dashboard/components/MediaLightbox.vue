@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ExternalLink, X } from 'lucide-vue-next';
 import { toSecureMediaUrl, proxyImage } from '../../../src/utils/media';
+import BaseModal from './BaseModal.vue';
 
 defineProps<{ media: { url: string; originalUrl?: string; type: string; title?: string } }>();
 const emit = defineEmits<{ close: [] }>();
@@ -19,7 +20,10 @@ async function handleImgError(e: Event, originalUrl?: string) {
 }
 </script>
 <template>
-  <div class="fixed inset-0 z-50 bg-black/92 backdrop-blur-md flex flex-col justify-between p-4 sm:p-6" @click.self="emit('close')">
+  <BaseModal
+    overlay-class="bg-black/92 backdrop-blur-md flex flex-col justify-between p-4 sm:p-6"
+    @close="emit('close')"
+  >
     <div class="flex items-center justify-between text-white/80">
       <span class="text-xs truncate max-w-xl">{{ media.title || '媒体大图查看' }}</span>
       <div class="flex items-center gap-3">
@@ -33,5 +37,5 @@ async function handleImgError(e: Event, originalUrl?: string) {
       <img :src="secure(media.url)" referrerpolicy="no-referrer" class="max-w-full max-h-[82vh] object-contain rounded-xl shadow-2xl transition-all select-none" @error="handleImgError($event, media.url)" @click.stop />
     </div>
     <div class="text-center text-[11px] text-white/40">点击遮罩或按 ESC 键即可退出大图模式</div>
-  </div>
+  </BaseModal>
 </template>

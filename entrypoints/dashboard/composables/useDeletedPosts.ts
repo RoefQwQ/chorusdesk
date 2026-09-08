@@ -1,6 +1,5 @@
 import { computed, ref } from 'vue';
 import type { Channel, Post, DeletedPostRecord } from '../../../src/types';
-import { db } from '../../../src/infrastructure/db/database';
 import {
   getDeletedPostCount,
   getDeletedPostRecords,
@@ -8,6 +7,7 @@ import {
   restoreDeletedPost,
   restoreAllDeletedPostIds,
   permanentlyDeletePost,
+  clearDeletedPostRecords,
 } from '../../../src/infrastructure/db/postRepository';
 import type { updateChannel as UpdateChannelFn } from '../../../src/sync/channelSync';
 
@@ -114,7 +114,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
   async function handleEmptyRecycleBin() {
     if (deletedPostCount.value === 0) return;
     if (!confirm(`确定要彻底清空回收站中全部 ${deletedPostCount.value} 条记录吗？清空后将无法在此定向找回。`)) return;
-    await db.deletedPostIds.clear();
+    await clearDeletedPostRecords();
     deletedPostsList.value = [];
     await refreshDeletedCount();
     alert('回收站已彻底清空。');

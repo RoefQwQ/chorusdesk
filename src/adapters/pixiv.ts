@@ -1,5 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import { buildPost } from './buildPost';
+import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
 export const pixivAdapter: PlatformAdapter = {
@@ -70,11 +72,8 @@ export const pixivAdapter: PlatformAdapter = {
           Math.max(1400000000000, 1719792000000 + (id - 120000000) * 3150)
         );
 
-        posts.push({
+        posts.push(buildPost(channel, {
           id: `pixiv_${id}`,
-          creatorId: channel.creatorId,
-          channelId: channel.id,
-          platform: 'pixiv',
           title: `Pixiv 插画/作品 #${id}`,
           content: `作品 ID: ${id} (点击卡片直达原图查看)`,
           mediaList: [
@@ -87,9 +86,7 @@ export const pixivAdapter: PlatformAdapter = {
           ],
           originalUrl: `https://www.pixiv.net/artworks/${id}`,
           publishedAt: estimatedPubTime,
-          fetchedAt: Date.now(),
-          isRead: 0,
-        });
+        }));
       }
 
       // Sort strictly newest first
@@ -107,10 +104,11 @@ export const pixivAdapter: PlatformAdapter = {
         nextCursor: hasMore ? String(nextOffset) : undefined,
         hasMore,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         posts: [],
-        error: err?.message || 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)',
+        error: fetchError('network', message || 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)', true),
       };
     }
   },
