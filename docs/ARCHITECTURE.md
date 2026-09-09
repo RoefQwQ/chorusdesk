@@ -31,6 +31,9 @@ creator-feed-hub/
 │  │  ├─ types.ts                   # FetchOptions/FetchResult/PlatformAdapter 契约
 │  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts rplay.ts
 │  │  ├─ withny.ts xiaohongshu.ts weibo.ts youtube.ts rss.ts
+│  │  ├─ douyin.ts                  # 抖音 adapter（快照 → Post 映射）
+│  │  ├─ douyin/contract.ts         # 抖音快照校验/归一化（唯一了解页面结构的地方）
+│  │  ├─ douyin/collector.ts        # 注入抖音页面的只读 DOM 采集脚本
 │  │  └─ index.ts                   # 兼容导出：registry + 同步编排（见 §9）
 │  ├─ sync/                         # 同步应用层（真实实现）
 │  │  ├─ channelSync.ts             # 单频道同步 updateChannel / clearStaleUpdatingStatus
@@ -132,7 +135,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 ### 4.1 类型契约 `src/types/index.ts`
 
-- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'rplay' | 'withny' | 'xiaohongshu' | 'weibo' | 'rss' | (string & {})`。
+- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'rplay' | 'withny' | 'xiaohongshu' | 'weibo' | 'douyin' | 'rss' | (string & {})`。
 - `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记。
 - 实体：
   - `Creator { id, name, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
@@ -153,6 +156,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 | withny | `withny_<itemId>` |
 | xiaohongshu | `xiaohongshu_<noteId>` |
 | weibo | `weibo_<mblogId/bid>` |
+| douyin | `douyin_<awemeId>` |
 | youtube | `youtube_<videoId>` |
 | rss | `rss_<base64(guid) 前 32 位去特殊字符>` |
 
@@ -203,6 +207,7 @@ export interface PlatformAdapter {
 | `withny.ts` | `withny.fun/api/users/{username}/posts` | — |
 | `xiaohongshu.ts` | 抓取 `www.xiaohongshu.com/user/profile/{userId}` 页面 HTML 解析 | `checkAuthStatus` |
 | `weibo.ts` | `m.weibo.cn/api/container/getIndex`（uid + containerid 翻页） | `fetchAjaxFallback`（`weibo.com/ajax/statuses/mymblog`）、`checkAuthStatus` |
+| `douyin.ts` | 不直接请求抖音：经 `FETCH_DOUYIN_SNAPSHOT` 从已打开的抖音标签页采集 DOM 快照（后台直连只会拿到反爬 JS 挑战页） | — |
 | `youtube.ts` | 官方 RSS `www.youtube.com/feeds/videos.xml?channel_id=`（先尝试抓频道页解析 `channel_id`） | — |
 | `rss.ts` | 任意 RSS/Atom 源，`bgFetch` 拉取后 DOMParser 解析 | — |
 
@@ -388,6 +393,7 @@ Rplay 凭证采集有三条路径汇入 `chrome.storage.local['rplay_auth_token'
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
 | `SYNC_RPLAY_TOKEN` | Popup `useRplaySync`、Dashboard 设置页 | `messages/rplaySync.ts` `handleSyncRplayToken` | — | `{ success:true, token }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
+| `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
 
 各 handler 文件顶部注释均固化了自己那一半契约（入参/出参），改动协议时这些注释与 `bgFetch`/`proxyImage`/`useRplaySync`/`twitterAdapter` 的调用面必须一并核对。
 

@@ -17,6 +17,7 @@ Chorus 直接复用浏览器对应平台的已登录会话（Cookie / LocalStora
 | Withny | withny.fun | 浏览器 Cookie | 图文动态、赞助更新 | 支持 | 不需要 |
 | 小红书 | xiaohongshu.com | 浏览器 Cookie | 图文笔记、视频笔记 | 支持 | 自动清洗 Referer |
 | 微博 | weibo.com | 浏览器 Cookie | 原创微博、转发、九宫格图片、视频 | 支持 | 自动清洗 Referer |
+| 抖音 | douyin.com | 已打开的抖音页面（不读取凭据） | 创作者短视频、图文作品 | 不支持 | 封面走 Background 图片代理 |
 | 通用 RSS / Atom | 任意兼容 URL | 公开 XML 协议 | 博客、Substack 等通用订阅源 | 视源而定 | 不需要 |
 
 ---
@@ -58,7 +59,20 @@ Chorus 直接复用浏览器对应平台的已登录会话（Cookie / LocalStora
 - **鉴权**：复用微博网页端登录 Cookie。
 - **内容**：抓取原创与转发微博，支持超长多图及视频。
 
-### 2.9 通用 RSS / Atom
+### 2.9 抖音 (Douyin)
+
+- **添加方式**：粘贴创作者主页链接 `https://www.douyin.com/user/<sec_uid>`。作品链接（`/video/...`、`/note/...`）无法确定作者身份，会被识别为作品链接并提示改用主页。
+- **内容**：创作者公开的短视频与图文作品（标题/描述、封面、发布时间、话题标签）。
+- **鉴权**：不读取、不保存任何抖音凭据。扩展不接触 Cookie、Token、请求头或设备指纹。
+- **同步前置条件**：抖音的作品列表**只能在真实页面中加载**。后台直接请求主页只会得到反爬 JS 挑战页面（返回 200 但无任何作品数据），因此同步前需要在浏览器打开该创作者主页并保持标签页开启。
+- **采集方式**：扩展通过 `chrome.scripting.executeScript` 把只读采集脚本注入已打开的抖音标签页，仅读取已渲染的 DOM，与 Twitter 的活跃标签页方案同源。
+- **发布时间**：来自 `aweme_id` 本身（snowflake 高 32 位为秒级时间戳），不依赖页面上易变的日期文案。
+- **去重**：以 `aweme_id` 作为唯一身份（Post ID 形如 `douyin_<aweme_id>`）。描述、封面或媒体地址变化不会产生重复作品。
+- **视频播放**：抖音播放地址带签名且会过期，因此不做长期保存。卡片显示封面，点击跳转到稳定的作品页面。
+- **深度历史回溯**：**不支持**。当前页面作品列表没有稳定可靠的翻页机制，强行分页会漏内容，因此明确返回“已到底”而不是伪造分页。
+- **自动同步**：抖音需要真实页面参与，后台定时任务无法独立完成，会返回明确的不支持状态，不会显示成“同步成功 0 条”。
+
+### 2.10 通用 RSS / Atom
 - 支持导入任何标准 RSS 2.0、Atom 1.0 的 XML 链接。
 - 可以配合 [RSSHub](https://docs.rsshub.app/) 将 Telegram 频道、Patreon、Substack 或播客等接入 Chorus 统一阅读。
 
@@ -84,3 +98,28 @@ Chorus 的网络调用方式如下：
 ```
 
 所有请求均直接发生在用户本地浏览器与目标平台服务器之间，不通过任何第三方中转服务器。
+
+### 3.1 页面驱动采集（抖音）
+
+抖音不走上面的 `BG_FETCH` 路径：后台请求创作者主页只会得到反爬 JS 挑战外壳，没有任何作品数据。抖音改为从真实页面采集：
+
+```text
+[Dashboard 页面]
+        │
+        │ chrome.runtime.sendMessage({ type: 'FETCH_DOUYIN_SNAPSHOT', secUid, limit })
+        ▼
+[Background Service Worker]
+        │  校验发送方为扩展自身页面（sender policy）
+        │  查找已打开的抖音标签页，并校验其 hostname 属于 douyin.com
+        │  chrome.scripting.executeScript 注入只读采集脚本
+        ▼
+[已打开的抖音标签页]
+        │  仅读取已渲染 DOM，不读取 Cookie / Token / 请求头
+        ▼
+[快照返回扩展]
+        │  作为不可信输入进入校验层（normalizeSnapshot）
+        ▼
+[Post 写入本地数据库]
+```
+
+页面返回的所有数据都视为不可信输入：作品必须具备合法 `aweme_id` 与可用时间戳才会入库，媒体地址必须通过协议与 CDN 域名校验，否则整条或该字段被丢弃。

@@ -119,6 +119,35 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
 - New platform = new file in `src/adapters/` implementing `PlatformAdapter`; register in
   `src/platform/registry.ts`. See `docs/REVIEW_2026-09.md` for the full 6-8 touch-point list.
 
+## 9. Page-driven platforms keep their scraping in an isolated layer
+
+Douyin cannot be fetched from the service worker at all: a `bgFetch` of a creator page returns HTTP
+200 with an anti-bot JS challenge shell and zero post data. Its acquisition therefore runs in the
+page (`chrome.scripting.executeScript` into an open douyin.com tab, the `twitterTimeline.ts` pattern).
+
+For any platform in that shape, keep the boundary:
+
+- `src/adapters/<p>/collector.ts` — runs in the page. Self-contained (it is stringified for
+  injection): no imports, no closure over module scope, no `chrome.*`. Reads rendered DOM only —
+  never `document.cookie`, `localStorage`, request headers, or device/signature state.
+- `src/adapters/<p>/contract.ts` — validates the snapshot. Everything from the page is UNTRUSTED:
+  bound array counts and text/URL lengths, reject non-http(s) and off-allowlist media hosts, and
+  drop any item lacking a stable id or a finite plausible timestamp.
+- `src/adapters/<p>.ts` — maps the validated DTO onto `Post` via `buildPost`.
+
+Nothing else may learn the page's shape. When the markup changes, only the collector, the contract,
+and the fixtures should need edits — never the db, `channelSync`, `buildPost`, or another platform.
+
+Two further invariants this exposed, both easy to miss:
+
+- **Do not persist a signed CDN URL as identity or as a click target.** Douyin covers carry
+  `x-expires`/`x-signature`; a Post's `originalUrl` must be the canonical work page. Conversely, do
+  not "clean" query strings off media URLs — stripping the signature 403s every image.
+- **A new platform must add its generated placeholder-name prefixes to BOTH prefix lists in
+  `channelSync.ts`** (channel `displayName` and creator `name`). A platform missing from those lists
+  keeps its `平台用户_xxxx` placeholder forever, because the real nickname is only allowed to
+  overwrite a name the sync layer recognizes as a placeholder.
+
 ---
 
 ## Fix queue
