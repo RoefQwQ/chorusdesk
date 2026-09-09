@@ -186,6 +186,15 @@ export function collectDouyinSnapshot(maxItems: number): CollectedSnapshot {
  * `saturated` reports only that scrolling stopped helping. Whether that means
  * "reached the end" or "blocked" is decided by the adapter, which compares the
  * count against `statedTotal`.
+ *
+ * SELF-CONTAINMENT IS LOAD-BEARING. This function is serialized by
+ * `chrome.scripting.executeScript({ func })` via `Function.prototype.toString()`,
+ * which carries ONLY this function's own source. Any reference to module scope
+ * (like calling `collectDouyinSnapshot` below) becomes an undefined identifier
+ * in the page and throws `ReferenceError` on every dig. The scrape core is
+ * therefore duplicated here on purpose; the shallow collector cannot be shared
+ * into the injected context by any other means (module imports, closures, and
+ * `new Function`/eval are all unavailable or CSP-blocked in the page).
  */
 export async function deepCollectDouyinSnapshot(
   maxItems: number,
@@ -226,7 +235,9 @@ export async function deepCollectDouyinSnapshot(
     scrollGrid();
     // The lazy loader needs a moment; 900ms matches the pacing the sync layer
     // already uses between paginated requests.
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    const { promise: settle, resolve: settled } = Promise.withResolvers<void>();
+    setTimeout(settled, 900);
+    await settle;
     const current = countWorks();
     if (current <= previous) {
       stagnant++;
@@ -241,6 +252,116 @@ export async function deepCollectDouyinSnapshot(
     previous = current;
   }
 
-  const snapshot = collectDouyinSnapshot(maxItems);
-  return { ...snapshot, saturated };
+  // Scrape core — duplicated from `collectDouyinSnapshot` by injection
+  // constraint (see the doc comment above); keep the two in sync on purpose.
+  const text = (value: unknown, max: number): string => {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+  };
+
+  const secUidFromPath = (): string => {
+    const match = location.pathname.match(/\/user\/([A-Za-z0-9_-]{6,200})/);
+    return match ? match[1] : '';
+  };
+
+  const grid = document.querySelector('[data-e2e="user-post-list"]');
+  const detail = document.querySelector('[data-e2e="user-detail"]');
+
+  const gridText = grid ? text((grid as HTMLElement).innerText, 400) : '';
+  const gridError = /服务异常|重新刷新|加载失败|出错了/.test(gridText);
+
+  const bodyText = document.body ? text(document.body.innerText, 3000) : '';
+  const requiresVerify = Boolean(
+    document.querySelector('#captcha_container, .captcha_verify_container, .verify-wrap'),
+  );
+  const requiresAuth = /用户不存在|登录后|请先登录/.test(bodyText) && !grid;
+
+  let authorName = '';
+  const heading = document.querySelector('[data-e2e="user-detail"] h1');
+  if (heading) authorName = text((heading as HTMLElement).innerText, 120);
+  if (!authorName) {
+    const title = text(document.title, 120);
+    // Page title is "<nickname>的抖音 - 抖音".
+    const match = title.match(/^(.+?)的抖音/);
+    if (match) authorName = text(match[1], 120);
+  }
+
+  let authorAvatar = '';
+  const avatarImg = detail?.querySelector('img');
+  if (avatarImg) authorAvatar = text(avatarImg.getAttribute('src'), 2048);
+
+  const items: CollectedSnapshot['items'] = [];
+  const seen = new Set<string>();
+  const anchors = grid
+    ? Array.from(grid.querySelectorAll('a[href*="/video/"], a[href*="/note/"]'))
+    : [];
+
+  for (const anchor of anchors) {
+    if (items.length >= maxItems) break;
+    const href = text(anchor.getAttribute('href'), 2048);
+    const match = href.match(/\/(video|note)\/(\d{15,25})/);
+    if (!match) continue;
+    const awemeId = match[2];
+    if (seen.has(awemeId)) continue;
+    seen.add(awemeId);
+
+    // Walk up to the card (an <li> in the grid) to reach the cover and caption.
+    let card: HTMLElement = anchor as HTMLElement;
+    for (let i = 0; i < 8 && card.parentElement && card !== grid; i++) {
+      if (card.tagName === 'LI') break;
+      card = card.parentElement;
+    }
+    if (card === grid) card = anchor as HTMLElement;
+
+    const images = Array.from(card.querySelectorAll('img'));
+    const coverUrl = images.length ? text(images[0].getAttribute('src'), 2048) : '';
+    // The caption lives in the cover's alt as "<nickname>：<caption>"; the
+    // normalizer strips the prefix. Fall back to card text when alt is absent.
+    let description = images.length ? text(images[0].getAttribute('alt'), 2000) : '';
+    if (!description) description = text((card as HTMLElement).innerText, 2000);
+
+    const imageUrls: string[] = [];
+    if (match[1] === 'note') {
+      for (const img of images) {
+        const src = text(img.getAttribute('src'), 2048);
+        if (src && !imageUrls.includes(src)) imageUrls.push(src);
+        if (imageUrls.length >= 35) break;
+      }
+    }
+
+    items.push({
+      awemeId,
+      type: match[1] === 'note' ? 'image' : 'video',
+      href,
+      description,
+      coverUrl,
+      imageUrls,
+    });
+  }
+
+  let statedTotal: number | null = null;
+  const countCandidates = document.querySelectorAll(
+    '[data-e2e="user-tab-count"], [data-e2e="user-post-count"]',
+  );
+  for (const candidate of Array.from(countCandidates)) {
+    const raw = text((candidate as HTMLElement).innerText, 20);
+    if (/^\d+$/.test(raw)) {
+      const value = Number(raw);
+      if (statedTotal === null || value > statedTotal) statedTotal = value;
+    }
+  }
+
+  return {
+    secUid: secUidFromPath(),
+    authorName,
+    authorAvatar,
+    pageUrl: location.href,
+    items,
+    gridError: gridError && items.length === 0,
+    requiresAuth,
+    requiresVerify,
+    statedTotal,
+    saturated,
+  };
 }
