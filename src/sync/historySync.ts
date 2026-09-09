@@ -137,6 +137,17 @@ export async function deepSyncChannel(
       break;
     }
 
+    // A page-driven dig (Douyin) returns its whole scrolled grid in ONE round
+    // and has no pagination cursor: every additional round re-fetches the same
+    // window and can never produce anything new. Without this, a login-gated
+    // grid burned three more no-op rounds before the empty-round counter ended
+    // the loop, reporting "0 条更早作品" with no explanation. Real paginated
+    // platforms (bilibili/twitter) always carry a cursor or hasMore:false, so
+    // this is scoped to the single-shot acquisition model.
+    if (currentCh.platform === 'douyin' && !res.nextCursor && rawFetched > 0) {
+      break;
+    }
+
     // Check if reached untilTimestamp
     if (untilTimestamp > 0 && res.posts && res.posts.length > 0) {
       const oldestInBatch = Math.min(...res.posts.map((p) => p.publishedAt || Date.now()));

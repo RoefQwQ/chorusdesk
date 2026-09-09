@@ -138,13 +138,25 @@ export function collectDouyinSnapshot(maxItems: number): CollectedSnapshot {
 
   // The header states the creator's total work count ("作品 29"). Captured so the
   // adapter can detect a grid that stopped short of it.
+  //
+  // Two elements can carry it: the profile tab ("作品 29") and, on some layouts,
+  // the count chip inside the grid header. Read both and keep the largest plain
+  // integer — an anonymous page sometimes renders a 0/absent tab count while the
+  // grid itself shows the real total, and under-reporting here is what makes the
+  // adapter mistake a login-truncated grid for a complete one (and park the dig
+  // cursor at __END__, permanently hiding the older works).
   let statedTotal: number | null = null;
-  const tabCount = document.querySelector('[data-e2e="user-tab-count"]');
-  if (tabCount) {
-    const raw = text((tabCount as HTMLElement).innerText, 20);
+  const countCandidates = document.querySelectorAll(
+    '[data-e2e="user-tab-count"], [data-e2e="user-post-count"]',
+  );
+  for (const candidate of Array.from(countCandidates)) {
+    const raw = text((candidate as HTMLElement).innerText, 20);
     // Plain integers only: Douyin abbreviates large counts ("5.9万"), and a
     // guessed expansion would produce a bogus completeness check.
-    if (/^\d+$/.test(raw)) statedTotal = Number(raw);
+    if (/^\d+$/.test(raw)) {
+      const value = Number(raw);
+      if (statedTotal === null || value > statedTotal) statedTotal = value;
+    }
   }
 
   return {

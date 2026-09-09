@@ -120,4 +120,48 @@ describe('douyin history dig', () => {
     expect(res.error).toBeUndefined();
     expect(res.authorMeta?.name).toBe('示例创作者');
   });
+
+  it('does not claim end-of-history when the stated total is unknown', async () => {
+    // The header count could not be read as a plain integer (anonymous page,
+    // abbreviated count, or a layout change): a saturated grid then carries NO
+    // evidence of completeness. This is the exact shape that parked real user
+    // channels at __END__ while older works (e.g. one from last year) remained
+    // unsynced — hasMore:false on guesswork permanently blocked the dig.
+    //
+    // The snapshot is trimmed to recent works only, mirroring the real capture:
+    // 18 items stopping ~2 months back, older ones behind the login wall.
+    const recentOnly = { ...videoSnapshot, items: videoSnapshot.items.slice(0, 2) };
+    stubChannel({ ...recentOnly, statedTotal: 0, saturated: true });
+    const res = await douyinAdapter.fetchLatest(channel, 50, { isHistory: true });
+    expect(res.hasMore).not.toBe(false);
+    // The loaded works are still returned — the dig makes progress.
+    expect(res.posts.length).toBe(recentOnly.items.length);
+    expect(res.error).toBeUndefined();
+  });
+
+  it('explains a saturated dig with no stated total and nothing new', async () => {
+    const recentOnly = { ...videoSnapshot, items: videoSnapshot.items.slice(0, 2) };
+    stubChannel({ ...recentOnly, statedTotal: 0, saturated: true });
+    const newest = Math.max(
+      ...recentOnly.items.map((i) => Number(BigInt(i.awemeId) >> 32n) * 1000),
+    );
+    const res = await douyinAdapter.fetchLatest(channel, 50, {
+      isHistory: true,
+      sinceTimestamp: newest,
+    });
+    expect(res.posts).toEqual([]);
+    // The honest answer names the missing evidence, never a silent zero.
+    expect(res.error?.code).toBe('auth');
+    expect(res.error?.message).toContain('无法确认');
+  });
+
+  it('may end the dig when the unknown-total grid reaches far into the past', async () => {
+    // The oldest fixture work is from 2022 — well past the anonymous
+    // ~6-month window. A saturated grid whose loaded history spans years has
+    // almost certainly reached the creator's beginning, so the dig may end.
+    // (This fixture retains its 2022 work, unlike the trimmed variants above.)
+    stubChannel({ ...videoSnapshot, statedTotal: 0, saturated: true });
+    const res = await douyinAdapter.fetchLatest(channel, 50, { isHistory: true });
+    expect(res.hasMore).toBe(false);
+  });
 });

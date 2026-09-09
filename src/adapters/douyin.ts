@@ -28,6 +28,13 @@ interface SnapshotResponse {
   code?: 'auth' | 'network' | 'parse' | 'unsupported' | 'rate_limit';
 }
 
+/**
+ * Ceiling for a history dig's page payload. Bounded because a dig scrolls the
+ * grid, and an unbounded scrape of a prolific creator would ship a huge snapshot
+ * across the message channel in one go.
+ */
+const MAX_HISTORY_ITEMS = 200;
+
 export const douyinAdapter: PlatformAdapter = {
   platform: 'douyin',
 
@@ -105,8 +112,15 @@ export const douyinAdapter: PlatformAdapter = {
     // be a lie, so the truncation is surfaced as an auth error instead — the sync
     // layer shows the message and does NOT park the cursor at __END__.
     const isDeep = isDeepRequest(options);
+    // Unknown totals are treated as potentially truncated too: when the header
+    // count could not be read as a plain integer, "the grid stopped growing"
+    // carries no evidence of completeness, and claiming hasMore:false would park
+    // the cursor at __END__ on pure guesswork. Only a stated total that the grid
+    // actually reached may end the dig.
     const truncated =
-      snapshot.statedTotal > 0 && snapshot.items.length < snapshot.statedTotal;
+      snapshot.statedTotal > 0
+        ? snapshot.items.length < snapshot.statedTotal
+        : isDeep && snapshot.saturated && snapshot.items.length > 0 && !snapshotCompleteAtLoginWall(snapshot);
 
     if (isDeep && truncated && posts.length === 0) {
       return {
@@ -117,7 +131,9 @@ export const douyinAdapter: PlatformAdapter = {
         },
         error: fetchError(
           'auth',
-          `抖音页面只加载出 ${snapshot.items.length} / ${snapshot.statedTotal} 篇作品便停止。更早的作品需要在抖音标签页中登录后向下滚动加载，请登录后重试。`,
+          snapshot.statedTotal > 0
+            ? `抖音页面只加载出 ${snapshot.items.length} / ${snapshot.statedTotal} 篇作品便停止。更早的作品需要在抖音标签页中登录后向下滚动加载，请登录后重试。`
+            : `抖音页面加载了 ${snapshot.items.length} 篇作品后停止增长，且未能读取作品总数，无法确认已到历史底部。请在抖音标签页中登录后向下滚动加载，再重新回溯。`,
         ),
         totalFetched: snapshot.items.length,
       };
@@ -140,13 +156,6 @@ export const douyinAdapter: PlatformAdapter = {
 };
 
 /**
- * Ceiling for a history dig's page payload. Bounded because a dig scrolls the
- * grid, and an unbounded scrape of a prolific creator would ship a huge snapshot
- * across the message channel in one go.
- */
-const MAX_HISTORY_ITEMS = 200;
-
-/**
  * True when this fetch should scroll the grid before scraping.
  *
  * A dig, a cursor-driven page and a force-refresh all want older works, which
@@ -154,6 +163,27 @@ const MAX_HISTORY_ITEMS = 200;
  */
 function isDeepRequest(options?: FetchOptions): boolean {
   return Boolean(options?.isHistory || options?.cursor !== undefined || options?.forceRefresh);
+}
+
+/**
+ * Heuristic: does the page look like the works that ARE loaded reached the
+ * login wall's cut rather than the true bottom?
+ *
+ * Douyin's anonymous grid stops around the most recent ~6 months of a creator's
+ * output. A grid whose oldest loaded work is far older than that has very likely
+ * loaded everything Douyin is willing to show this visitor, so a saturated dig
+ * with an unreadable header count may still legitimately be complete. This is a
+ * deliberately conservative check: it only ever ALLOWS hasMore:false to be
+ * claimed, and only when the evidence (loaded history reaching well past the
+ * typical anonymous window) supports it.
+ */
+function snapshotCompleteAtLoginWall(snapshot: DouyinSnapshot): boolean {
+  if (snapshot.items.length === 0) return false;
+  const oldest = snapshot.items[snapshot.items.length - 1].publishedAt;
+  const SIX_MONTHS_MS = 183 * 24 * 60 * 60 * 1000;
+  // Oldest loaded work predates the typical anonymous window: the grid very
+  // likely reached the beginning of the creator's output, not a login wall.
+  return Date.now() - oldest > SIX_MONTHS_MS;
 }
 
 /** Map validated works onto Posts, applying the incremental watermark. */

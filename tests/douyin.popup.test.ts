@@ -35,6 +35,9 @@ function fakeDouyinPage(options: { name?: string; avatar?: string } = {}) {
       if (sel === '[data-e2e="user-post-list"]') return { innerText: '', querySelectorAll: () => [] };
       return null;
     },
+    // The collector reads the work-count candidates with querySelectorAll;
+    // the popup fake has no count chips, so it reports none.
+    querySelectorAll: () => [],
     title: `${name}的抖音 - 抖音`,
     body: { innerText: `${name}\n关注` },
   };
