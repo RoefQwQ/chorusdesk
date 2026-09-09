@@ -322,6 +322,25 @@ function submit() {
             </div>
             <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold shrink-0">✓ 已识别</span>
           </div>
+
+          <!-- Douyin: a work URL does not identify its author (the sec_uid is not
+               in the URL), so a channel created from one cannot sync. Say so
+               instead of letting the user add a dead channel. -->
+          <div
+            v-if="detectedParsedProfile?.platform === 'douyin' && detectedParsedProfile?.isContentUrl"
+            class="mt-2 p-2.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800/60 text-[11px] text-amber-800 dark:text-amber-200"
+          >
+            这是一条抖音作品链接，无法从中确定作者身份。请改为粘贴该创作者的主页链接（douyin.com/user/...）。
+          </div>
+
+          <!-- Douyin acquisition requires a real page: state the precondition up
+               front rather than letting the first sync fail. -->
+          <div
+            v-else-if="detectedParsedProfile?.platform === 'douyin'"
+            class="mt-2 p-2.5 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800/60 text-[11px] text-rose-800 dark:text-rose-200"
+          >
+            抖音作品列表只能在真实页面中加载：同步前请在浏览器中打开该创作者主页，并保持标签页开启。
+          </div>
         </div>
 
         <!-- Same platform multi-account hint -->
