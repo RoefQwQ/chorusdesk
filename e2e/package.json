@@ -1,0 +1,12 @@
+{
+  "name": "chorusdesk-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe:douyin": "node e2e/douyin-probe.mjs",
+    "drive:dashboard": "node e2e/drive-extension.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
