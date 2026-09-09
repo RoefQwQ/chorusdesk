@@ -51,8 +51,13 @@ const emit = defineEmits<{
 <template>
   <div
     class="rounded-lg bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-xs shadow-2xs"
-    :class="compact ? 'p-1.5 space-y-1' : 'p-1.5 flex items-center justify-between'"
+    :class="compact ? 'p-1.5' : 'p-1.5 flex items-center justify-between'"
   >
+    <!-- Compact mode keeps the row and its error banner stacked, but the row
+         itself must still lay out horizontally: without this wrapper the button
+         group was a block sibling of the label and wrapped onto its own line
+         instead of sitting at the right edge. -->
+    <div :class="compact ? 'flex items-center justify-between gap-1.5' : 'contents'">
     <div class="flex items-center min-w-0 flex-1" :class="compact ? 'gap-1.5' : 'gap-2'">
       <!-- Role Badge with Quick Cycle -->
       <button
@@ -154,12 +159,13 @@ const emit = defineEmits<{
       >
         <Trash2 :class="compact ? 'w-3 h-3' : 'w-3.5 h-3.5'" />
       </button>
+      </div>
     </div>
 
     <!-- Error alert (compact mode: stacked under the row) -->
     <div
       v-if="compact && channel.errorMessage"
-      class="text-[9px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-1 rounded border border-rose-200/60 dark:border-rose-900/40 flex items-start gap-1"
+      class="mt-1 text-[9px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-1 rounded border border-rose-200/60 dark:border-rose-900/40 flex items-start gap-1"
     >
       <AlertCircle class="w-2.5 h-2.5 shrink-0 mt-0.5" />
       <span class="break-all">{{ channel.errorMessage }}</span>

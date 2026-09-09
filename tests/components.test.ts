@@ -55,6 +55,17 @@ describe('creator view components render', () => {
     expect(html).toContain('登录已过期');
   });
 
+  it('ChannelRow compact mode lays the row out horizontally, not stacked', async () => {
+    // Regression: the compact root was `p-1.5 space-y-1` with no flex, so the
+    // action buttons were a block sibling of the label and wrapped onto their
+    // own line instead of sitting at the right edge. The row content and the
+    // button group must share one flex line.
+    const html = await render(ChannelRow, { channel, creatorId: 'creator_1', compact: true });
+    expect(html).toContain('flex items-center justify-between');
+    // The stacked-only utility must not drive the compact row layout any more.
+    expect(html).not.toContain('space-y-1');
+  });
+
   it('ChannelRow detailed mode shows avatar fallback letter and @id', async () => {
     const html = await render(ChannelRow, { channel, creatorId: 'creator_1' });
     expect(html).toContain('@42');
