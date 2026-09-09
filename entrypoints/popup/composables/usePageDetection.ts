@@ -2,6 +2,7 @@ import { computed, ref } from 'vue';
 import { parseProfileUrl, type ParsedProfile } from '../../../src/utils/urlParser';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import { bgFetch } from '../../../src/utils/http';
+import { collectDouyinSnapshot } from '../../../src/adapters/douyin/collector';
 
 export interface AuthorMeta {
   name?: string;
@@ -76,6 +77,40 @@ export function usePageDetection() {
   }
 
   /**
+   * Douyin author meta comes from the shared collector, not from a second copy of
+   * the page selectors here.
+   *
+   * The generic in-page script below has no Douyin branch and its meta-tag
+   * fallback does not help: a creator page's og:title is the site name and its
+   * og:image is not the avatar, so quick-follow used to fall back to the
+   * "抖音用户_xxxxxx" placeholder and a letter avatar. Reusing
+   * `collectDouyinSnapshot` keeps douyin.com's DOM shape confined to the
+   * acquisition layer (AGENTS.md rule 9), so a Douyin redesign is still a
+   * one-file fix.
+   */
+  async function extractDouyinAuthorMeta(tabId: number): Promise<string | undefined> {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: collectDouyinSnapshot,
+        // Author identity only — quick-follow does not need the work grid.
+        args: [0],
+      });
+      const snapshot = results?.[0]?.result;
+      if (!snapshot || typeof snapshot !== 'object') return undefined;
+      if (snapshot.authorName) {
+        detectedAuthorMeta.value.name = snapshot.authorName;
+      }
+      if (snapshot.authorAvatar) {
+        detectedAuthorMeta.value.avatar = toSecureMediaUrl(snapshot.authorAvatar);
+      }
+    } catch (e) {
+      console.warn('[Popup] Douyin author extraction skipped:', e);
+    }
+    return detectedAuthorMeta.value.name;
+  }
+
+  /**
    * Executes a lightweight in-page DOM script to extract the author's real name
    * & avatar from the current active tab, then (for Bilibili) upgrades the
    * result with the authoritative User Card API. Returns the final detected
@@ -84,6 +119,12 @@ export function usePageDetection() {
   async function extractActiveTabAuthorMeta(tabId: number, tabUrl?: string): Promise<string | undefined> {
     if (typeof chrome === 'undefined' || !chrome.scripting?.executeScript) return undefined;
     if (!tabUrl || /^(chrome|edge|about|devtools):/i.test(tabUrl)) return undefined;
+
+    // Douyin has its own collector; the generic script has no branch for it.
+    if (parsed.value?.platform === 'douyin') {
+      return await extractDouyinAuthorMeta(tabId);
+    }
+
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId },
