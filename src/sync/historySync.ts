@@ -93,7 +93,25 @@ export async function deepSyncChannel(
     }
 
     const currentCh = await db.channels.get(channel.id);
-    if (!currentCh || currentCh.nextCursor === '__END__') {
+    if (!currentCh) {
+      options.onProgress?.({
+        channelId: channel.id,
+        displayName: channel.displayName || channel.accountId,
+        platform: channel.platform,
+        round: rounds,
+        fetchedThisRound: 0,
+        totalNewPosts: totalNew,
+        reachEnd: true,
+        status: 'done',
+      });
+      return { totalNew, reachEnd: true, rounds };
+    }
+    // A douyin channel sitting at __END__ is a recorded completeness GUESS
+    // from an older build, not platform-stated fact (douyin has no real
+    // pagination cursor). fetchChannelHistory clears it and re-runs; a
+    // genuine end is re-recorded this round. Cursor-paginated platforms keep
+    // the early return — their __END__ came from the platform itself.
+    if (currentCh.nextCursor === '__END__' && currentCh.platform !== 'douyin') {
       options.onProgress?.({
         channelId: channel.id,
         displayName: channel.displayName || channel.accountId,
