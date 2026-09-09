@@ -234,14 +234,7 @@ function toggleExpandCreator(creatorId: string) {
 }
 
 // Platform login detector status
-const {
-  platformLoginStatus,
-  currentRplayToken,
-  loadRplayToken,
-  checkPlatformLogins,
-  syncRplayFromTab,
-  promptManualRplayToken,
-} = usePlatformLogins();
+const { platformLoginStatus, checkPlatformLogins } = usePlatformLogins();
 
 async function reloadData() {
   await reloadFeedData();
@@ -290,10 +283,6 @@ onMounted(async () => {
   await loadSettings();
   hideReposts.value = Boolean(settings.value.hideReposts);
   hideTextOnly.value = Boolean(settings.value.hideTextOnly);
-
-  // Load existing Rplay token if available
-  await loadRplayToken();
-
   initDarkMode();
   window.addEventListener('keydown', handleGlobalShortcut);
   await checkPlatformLogins();
@@ -402,17 +391,9 @@ const settingsContext = computed(() => ({
   creators: creators.value,
   dbStats: dbStats.value,
   platformLoginStatus: platformLoginStatus.value,
-  currentRplayToken: currentRplayToken.value,
   deletedPostCount: deletedPostCount.value,
-  deletedPostsList: deletedPostsList.value,
-  filteredDeletedPostsList: filteredDeletedPostsList.value,
-  deletedPostsSearchQuery: deletedPostsSearchQuery.value,
-  isHealingMedia: isHealingMedia.value,
-  isCleaningStorage: isCleaningStorage.value,
   onAddSource: () => openAddModal('new', undefined, 'https://'),
   onCheckPlatformLogins: checkPlatformLogins,
-  onSyncRplayFromTab: syncRplayFromTab,
-  onPromptManualRplayToken: promptManualRplayToken,
   onExportBackupToFile: exportBackupToFile,
   onExportBackup: exportBackup,
   onImportFile: handleImportFile,

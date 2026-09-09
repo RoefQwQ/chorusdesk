@@ -43,7 +43,7 @@ describe('isExtensionPageSender', () => {
 
   it('rejects content scripts (host-page origin despite same id)', () => {
     expect(
-      isExtensionPageSender(pageSender({ origin: 'https://rplay.live', url: 'https://rplay.live/feed' })),
+      isExtensionPageSender(pageSender({ origin: 'https://example.com', url: 'https://example.com/feed' })),
     ).toBe(false);
   });
 
@@ -68,8 +68,8 @@ describe('isContentScriptSenderOn', () => {
   it('accepts our content script on the exact host', () => {
     expect(
       isContentScriptSenderOn(
-        pageSender({ origin: 'https://rplay.live', url: 'https://rplay.live/live' }),
-        'rplay.live',
+        pageSender({ origin: 'https://example.com', url: 'https://example.com/live' }),
+        'example.com',
       ),
     ).toBe(true);
   });
@@ -77,8 +77,8 @@ describe('isContentScriptSenderOn', () => {
   it('accepts subdomains of the pinned host', () => {
     expect(
       isContentScriptSenderOn(
-        pageSender({ origin: 'https://www.rplay.live', url: 'https://www.rplay.live/x' }),
-        'rplay.live',
+        pageSender({ origin: 'https://www.example.com', url: 'https://www.example.com/x' }),
+        'example.com',
       ),
     ).toBe(true);
   });
@@ -86,20 +86,20 @@ describe('isContentScriptSenderOn', () => {
   it('rejects content scripts on other hosts', () => {
     expect(
       isContentScriptSenderOn(
-        pageSender({ origin: 'https://evil.example', url: 'https://evil.example/rplay.live' }),
-        'rplay.live',
+        pageSender({ origin: 'https://evil.example', url: 'https://evil.example/example.com' }),
+        'example.com',
       ),
     ).toBe(false);
     expect(
       isContentScriptSenderOn(
-        pageSender({ origin: 'https://rplay.live.attacker.tld', url: 'https://rplay.live.attacker.tld/' }),
-        'rplay.live',
+        pageSender({ origin: 'https://example.com.attacker.tld', url: 'https://example.com.attacker.tld/' }),
+        'example.com',
       ),
     ).toBe(false);
   });
 
   it('rejects extension pages and missing senders', () => {
-    expect(isContentScriptSenderOn(pageSender(), 'rplay.live')).toBe(false);
-    expect(isContentScriptSenderOn({} as Sender, 'rplay.live')).toBe(false);
+    expect(isContentScriptSenderOn(pageSender(), 'example.com')).toBe(false);
+    expect(isContentScriptSenderOn({} as Sender, 'example.com')).toBe(false);
   });
 });

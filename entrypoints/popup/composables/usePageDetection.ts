@@ -22,11 +22,6 @@ export function usePageDetection() {
   const manualUrl = ref('');
   const parsed = ref<ParsedProfile | null>(null);
   const detectedAuthorMeta = ref<AuthorMeta>({});
-
-  const isRplayTab = computed(() => {
-    return currentUrl.value.includes('rplay.live');
-  });
-
   const activeDisplayName = computed(() => {
     if (detectedAuthorMeta.value.name) return detectedAuthorMeta.value.name;
     if (parsed.value?.suggestedName && parsed.value.suggestedName !== parsed.value.accountId) {
@@ -286,7 +281,6 @@ export function usePageDetection() {
     manualUrl,
     parsed,
     detectedAuthorMeta,
-    isRplayTab,
     activeDisplayName,
     resolveUrl,
     getActiveTab,

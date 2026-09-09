@@ -19,8 +19,7 @@
 creator-feed-hub/
 ├─ entrypoints/                     # 扩展入口（薄）
 │  ├─ background.ts                 # MV3 Service Worker：生命周期 + 薄消息路由
-│  ├─ rplay-sync.content.ts         # rplay.live 内容脚本：凭证自动同步
-│  ├─ popup/                        # Popup 入口（App.vue + composables/useRplaySync.ts）
+│  ├─ popup/                        # Popup 入口（App.vue + composables）
 │  └─ dashboard/                    # Dashboard 入口（App.vue 组合层 + composables + views）
 ├─ src/
 │  ├─ types/index.ts                # Platform/Creator/Channel/Post/Settings 等共享类型
@@ -29,7 +28,7 @@ creator-feed-hub/
 │  │  └─ index.ts                   # 兼容导出（re-export registry）
 │  ├─ adapters/                     # 各平台实现 + 兼容桶
 │  │  ├─ types.ts                   # FetchOptions/FetchResult/PlatformAdapter 契约
-│  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts rplay.ts
+│  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts
 │  │  ├─ withny.ts xiaohongshu.ts weibo.ts youtube.ts rss.ts
 │  │  ├─ douyin.ts                  # 抖音 adapter（快照 → Post 映射）
 │  │  ├─ douyin/contract.ts         # 抖音快照校验/归一化（唯一了解页面结构的地方）
@@ -102,28 +101,18 @@ creator-feed-hub/
 1. `setupDeclarativeNetRules()`（`src/infrastructure/chrome/declarativeNetRequest.ts`）：幂等重建动态规则。
 2. `setupAutoSync()`（`src/infrastructure/chrome/autoSync.ts`）：按设置重建/清除 Alarm，并刷新角标。
 3. 事件注册：
-   - `chrome.runtime.onInstalled` → 重复 1、2；
+   - `chrome.runtime.onInstalled` → 重复 1、2（并清理已卸载平台遗留的孤儿凭证，如已移除的 `rplay_auth_token`）；
    - `chrome.alarms.onAlarm` → `handleAutoSyncAlarm(alarm)`；
-   - `chrome.runtime.onMessage` → 消息路由（§6）；
-   - `chrome.tabs.onUpdated`：当页面为 `rplay.live` 且加载完成时，用 `scripting.executeScript` 读 `localStorage._AUTHORIZATION_`，token 长度 > 8 则写入 `chrome.storage.local.rplay_auth_token`。
+   - `chrome.runtime.onMessage` → 消息路由（§6）。
 
 background.ts **只保留路由与生命周期注册**，消息实现全部下放到 `src/infrastructure/chrome/messages/`。
 
-### 3.2 `entrypoints/rplay-sync.content.ts`
-
-`matches: ['*://*.rplay.live/*']`，`runAt: 'document_idle'`。读取 `localStorage` 中 `_AUTHORIZATION_` / `token` / `pocketbase_auth`，token 存在且长度 > 8 时：
-- `chrome.storage.local.set({ rplay_auth_token })`；
-- `chrome.runtime.sendMessage({ type: 'SAVE_RPLAY_TOKEN', token })`。
-
-触发时机：页面加载、`storage` 事件（key 为凭证键时）、每 5 秒轮询（SPA 状态变更）。与 background 的 `tabs.onUpdated` 抓取互为双保险，最终都汇入 `chrome.storage.local.rplay_auth_token`（消费方见 §5.4）。
-
-### 3.3 `entrypoints/popup/`
+### 3.2 `entrypoints/popup/`
 
 - `main.ts` 挂载 `App.vue`；`index.html` 固定 `width: 380px`。
 - `App.vue`（单文件，未拆分）承担“快速关注”流程：识别当前页创作者 → 新建/绑定 → 首轮同步（详见 §5.1）。
-- `composables/useRplaySync.ts`：Popup 内 Rplay 一键同步横幅状态机（`idle/syncing/synced/failed`），调用 `SYNC_RPLAY_TOKEN` 消息，失败时回退读取已存 `rplay_auth_token`。
 
-### 3.4 `entrypoints/dashboard/`（页面组件已接入，组合层仍在收敛）
+### 3.3 `entrypoints/dashboard/`（页面组件已接入，组合层仍在收敛）
 
 - `main.ts` 挂载 `App.vue`；`index.html` 含 `<meta name="referrer" content="no-referrer">`。
 - `App.vue` 负责顶部导航、跨页面状态组合、全局弹窗与仍未下沉的应用动作。
@@ -135,7 +124,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 ### 4.1 类型契约 `src/types/index.ts`
 
-- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'rplay' | 'withny' | 'xiaohongshu' | 'weibo' | 'douyin' | 'rss' | (string & {})`。
+- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'withny' | 'xiaohongshu' | 'weibo' | 'douyin' | 'rss' | (string & {})`。
 - `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记。
 - 实体：
   - `Creator { id, name, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
@@ -152,7 +141,6 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 | twitter | `twitter_<tweetId>` |
 | pixiv | `pixiv_<illustId>` |
 | fantia | `fantia_<postId>` |
-| rplay | `rplay_<contentOid>` |
 | withny | `withny_<itemId>` |
 | xiaohongshu | `xiaohongshu_<noteId>` |
 | weibo | `weibo_<mblogId/bid>` |
@@ -193,7 +181,7 @@ export interface PlatformAdapter {
 }
 ```
 
-`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 10 个平台 adapter；`getAdapter(platform)` 找不到时**回退到 rss adapter**；`registerAdapter(key, adapter)` 供运行时注册。`src/platform/index.ts` 仅为 re-export 兼容层。
+`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。`src/platform/index.ts` 仅为 re-export 兼容层。
 
 各平台能力现状（`fetchLatest` 为必实现）：
 
@@ -203,7 +191,6 @@ export interface PlatformAdapter {
 | `twitter.ts` | 不直接发请求：`FETCH_TWITTER_TIMELINE` 消息 → background | `parseGraphQLResult`（归一化 GraphQL 响应） |
 | `pixiv.ts` | `www.pixiv.net/ajax/user/{uid}/profile/all` + `ajax/user/{uid}?full=1` | — |
 | `fantia.ts` | `fantia.jp/api/v1/fanclubs/{id}`（内嵌 recent posts） | — |
-| `rplay.ts` | `api.rplay.live`：`account/getuser`（userOid/customUrl/昵称三级解析）、`content?contentOid=` | — |
 | `withny.ts` | `withny.fun/api/users/{username}/posts` | — |
 | `xiaohongshu.ts` | 抓取 `www.xiaohongshu.com/user/profile/{userId}` 页面 HTML 解析 | `checkAuthStatus` |
 | `weibo.ts` | `m.weibo.cn/api/container/getIndex`（uid + containerid 翻页） | `fetchAjaxFallback`（`weibo.com/ajax/statuses/mymblog`）、`checkAuthStatus` |
@@ -341,7 +328,7 @@ getAdapter(channel.platform)（缺失回退 rss）
 - 自动同步：Alarm 每 30 分钟触发 `handleAutoSyncAlarm` → 设置关闭则清 Alarm，开启则 `syncAllChannels()`（串行）→ 刷角标。Dashboard 设置开关即时 `saveSettings` + `UPDATE_AUTO_SYNC` 消息让 background 重建 Alarm。
 - 深挖历史：Dashboard 弹窗对选中 channel 调 `deepSyncChannel`/`fetchChannelHistory`（可中止 `shouldStop`），进度经 `onProgress` 展示。
 
-### 5.4 跨域请求与 Rplay 凭证
+### 5.4 跨域请求
 
 ```text
 adapter → src/utils/http.ts bgFetch(url, options)
@@ -351,15 +338,10 @@ adapter → src/utils/http.ts bgFetch(url, options)
      - bilibili/hdslb：仅探测 SESSDATA/DedeUserID/buvid3 是否存在并告警；
        Cookie 由 credentials:'include' + host_permissions 自动携带
        （浏览器禁止 fetch 手工设置 Cookie/UA/Referer/Origin 等受限头）
-     - rplay.live：自动补 Referer/Origin/platform-type='web'，
-       并从 chrome.storage.local.rplay_auth_token 注入 Authorization（若调用方未给）
  → 响应 { ok, status, statusText, data }（失败 { ok:false, status:0, error }）
 ```
 
-Rplay 凭证采集有三条路径汇入 `chrome.storage.local['rplay_auth_token']`：
-1. `rplay-sync.content.ts`（localStorage 轮询 + storage 事件，发 `SAVE_RPLAY_TOKEN`）；
-2. background `tabs.onUpdated` 对 rplay.live 页注入读取 `_AUTHORIZATION_`；
-3. Dashboard `SYNC_RPLAY_TOKEN` 主动拉取 / 手动粘贴（`promptManualRplayToken`）。
+credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单内的域携带会话（`credentials: 'include'`），其余任意域（如用户自填的 RSS 源）一律 `credentials: 'omit'`。
 
 ### 5.5 图片加载链路
 
@@ -388,14 +370,12 @@ Rplay 凭证采集有三条路径汇入 `chrome.storage.local['rplay_auth_token'
 |---|---|---|---|---|---|
 | `UPDATE_AUTO_SYNC` | Dashboard 设置开关 | background 内联 | — | `{ success: true }` | 否 |
 | `OPEN_DASHBOARD` | **当前仓库无调用方**（Popup 直接 `chrome.tabs.create` 开 `dashboard.html`）；作为契约保留 | background 内联 | — | `{ success: true }` | 否 |
-| `SAVE_RPLAY_TOKEN` | `rplay-sync.content.ts` | background 内联 | `{ token: string }`（校验类型） | `{ success: true }` | 否 |
 | `BG_FETCH` | `src/utils/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ url, options: { method, headers, credentials } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
-| `SYNC_RPLAY_TOKEN` | Popup `useRplaySync`、Dashboard 设置页 | `messages/rplaySync.ts` `handleSyncRplayToken` | — | `{ success:true, token }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit, deep }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`；`deep=true` 时先滚动作品网格再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
 
-各 handler 文件顶部注释均固化了自己那一半契约（入参/出参），改动协议时这些注释与 `bgFetch`/`proxyImage`/`useRplaySync`/`twitterAdapter` 的调用面必须一并核对。
+各 handler 文件顶部注释均固化了自己那一半契约（入参/出参），改动协议时这些注释与 `bgFetch`/`proxyImage`/`twitterAdapter` 的调用面必须一并核对。
 
 ## 7. 存储键总览
 
@@ -403,7 +383,6 @@ Rplay 凭证采集有三条路径汇入 `chrome.storage.local['rplay_auth_token'
 |---|---|---|---|
 | IndexedDB | 库 `CreatorFeedHubDB`（5 表） | 业务数据 | `src/infrastructure/db/*` |
 | IndexedDB | 库 `FeedHubFSCache`，store `handles`，key `root_cache_dir` | 图片缓存根目录句柄 | `src/services/imageCache/fsManager.ts` |
-| `chrome.storage.local` | `rplay_auth_token` | Rplay 凭证 | content script / background / dashboard / bgFetch handler |
 | `localStorage`（dashboard 页） | `creator_feed_theme` | 明暗主题 | `useDarkMode.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_hidden_creators` / `creator_feed_hidden_platforms` | 隐藏创作者/平台偏好 | `App.vue`（未抽离） |
 | JSON 备份 | `{ version:'1.0', exportedAt, creators, channels, settings, posts }` | 导出/导入 | `App.vue`（`exportBackup`/`exportBackupToFile`/`handleImportFile`） |
@@ -428,5 +407,5 @@ Rplay 凭证采集有三条路径汇入 `chrome.storage.local['rplay_auth_token'
 3. App.vue 仍保留部分跨页面应用动作、全局弹窗、Chrome Storage 与数据库协调；这属于后续入口收敛边界，不代表 View 是空壳或重复实现。
 4. 兼容桶仍在被部分生产代码使用；新模块直接依赖真实模块，兼容桶保留用于旧调用方迁移。
 5. 消息 `OPEN_DASHBOARD` 保留 handler 但仓库内无发送方（Popup 直接开标签页）；删除/改造需先决定是否统一走消息。
-6. `Popup/App.vue` 仍为单体，仅 `useRplaySync.ts` 被抽离；Popup 尚无 `views/` 拆分计划落地。
+6. `Popup/App.vue` 仍为单体（composables 已抽离 `usePageDetection`/`useQuickFollow`/`usePopupNavigation`）；Popup 尚无 `views/` 拆分计划落地。
 7. 自动同步为串行单频道执行（无交错/无进度回传 UI），与 Dashboard 手动“全部刷新”的交错路径是两套实现；如需统一属功能变更，不在本次文档范围内。

@@ -4,7 +4,6 @@ export type Platform =
   | 'twitter'
   | 'pixiv'
   | 'fantia'
-  | 'rplay'
   | 'withny'
   | 'xiaohongshu'
   | 'weibo'
@@ -86,18 +85,6 @@ export const PLATFORM_REGISTRY: Record<string, PlatformMeta> = {
     authType: 'cookie',
     authTypeName: '共享浏览器 Cookie',
     description: '支持创作者粉丝俱乐部最新投稿，共享会员会话可看专属更新。',
-  },
-  rplay: {
-    key: 'rplay',
-    name: 'Rplay',
-    domain: 'rplay.live',
-    color: '#8B5CF6',
-    bgColor: 'bg-purple-600',
-    badgeBg: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800',
-    urlPlaceholder: 'https://rplay.live/c/creator_id',
-    authType: 'localstorage',
-    authTypeName: 'LocalStorage 令牌',
-    description: '单页架构应用，后台内置同步脚本，支持从打开的标签页一键同步身份。',
   },
   withny: {
     key: 'withny',

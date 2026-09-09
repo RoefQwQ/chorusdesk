@@ -8,15 +8,15 @@ import {
 
 describe('hostMatches', () => {
   it('matches exact domain', () => {
-    expect(hostMatches('rplay.live', 'rplay.live')).toBe(true);
+    expect(hostMatches('pixiv.net', 'pixiv.net')).toBe(true);
   });
 
   it('matches subdomains but not sibling prefixes', () => {
     expect(hostMatches('www.pixiv.net', 'pixiv.net')).toBe(true);
-    expect(hostMatches('api.rplay.live', 'rplay.live')).toBe(true);
+    expect(hostMatches('api.pixiv.net', 'pixiv.net')).toBe(true);
     // The 2026-09 BLOCKER: substring matching would accept both of these.
-    expect(hostMatches('rplay.live.attacker.tld', 'rplay.live')).toBe(false);
-    expect(hostMatches('evil.example', 'rplay.live')).toBe(false);
+    expect(hostMatches('pixiv.net.attacker.tld', 'pixiv.net')).toBe(false);
+    expect(hostMatches('evil.example', 'pixiv.net')).toBe(false);
   });
 
   it('is case-insensitive', () => {
@@ -33,11 +33,12 @@ describe('isPlatformHost', () => {
   });
 
   it('rejects attacker-controlled look-alikes', () => {
-    // Decoy query param — url.includes('rplay.live') matched this.
+    // Decoy query param — url.includes('pixiv.net') would have matched this.
     expect(isPlatformHost('evil.example')).toBe(false);
-    expect(isPlatformHost('rplay.live.evil.example')).toBe(false);
+    expect(isPlatformHost('pixiv.net.evil.example')).toBe(false);
     expect(isPlatformHost('notpixiv.net')).toBe(false);
     expect(isPlatformHost('weibo.com.malicious.tld')).toBe(false);
+    expect(isPlatformHost('rplay.live.evil.example')).toBe(false);
   });
 });
 

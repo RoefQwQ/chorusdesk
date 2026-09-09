@@ -3,8 +3,6 @@ import {
   Download,
   ExternalLink,
   FolderDown,
-  Key,
-  Link,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -32,7 +30,6 @@ export interface SettingsViewContext {
   creators: Creator[];
   dbStats: DashboardStatsView;
   platformLoginStatus: Record<string, boolean>;
-  currentRplayToken: string;
   deletedPostCount: number;
   deletedPostsList: DeletedPostRecord[];
   filteredDeletedPostsList: DeletedPostRecord[];
@@ -41,8 +38,6 @@ export interface SettingsViewContext {
   isCleaningStorage: boolean;
   onAddSource: () => void;
   onCheckPlatformLogins: () => void | Promise<void>;
-  onSyncRplayFromTab: () => void | Promise<void>;
-  onPromptManualRplayToken: () => void | Promise<void>;
   onExportBackupToFile: () => void | Promise<void>;
   onExportBackup: () => void | Promise<void>;
   onImportFile: (file: File) => void | Promise<void>;
@@ -145,7 +140,6 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
           <span>登录说明：</span>
         </div>
         <p>• <b>大多数平台</b>（B站、Pixiv、Fantia、Withny 等）自动使用浏览器登录状态，在主站登录即可生效。</p>
-        <p>• <b>单页应用 (SPA)</b>：Rplay 等站点可在卡片中点击“从当前页同步”。</p>
         <p>• <b>抗限流同源抓取</b>：X (Twitter) 结合浏览器活跃标签页与同源请求，保障同步稳定性。</p>
         <p>• <b>通用订阅协议</b>：支持标准 RSS 2.0 / Atom 1.0 与 RSSHub 源，订阅博客、Substack 等外部内容。</p>
       </div>
@@ -178,40 +172,8 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
 
           <!-- Contextual Action per Platform -->
           <div class="pt-2 border-t border-slate-200/50 dark:border-slate-800/80">
-            <!-- Rplay specific action -->
-            <div v-if="key === 'rplay'" class="space-y-2">
-              <div class="flex items-center justify-between text-[11px] px-0.5">
-                <span class="text-slate-500 dark:text-slate-400">登录状态:</span>
-                <span
-                  class="font-mono text-[10px] px-2 py-0.5 rounded-full font-medium"
-                  :class="context.platformLoginStatus['rplay'] ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'"
-                >
-                  {{ context.platformLoginStatus['rplay'] ? (context.currentRplayToken ? context.currentRplayToken.slice(0, 10) + '...' : '已配置') : '未配置' }}
-                </span>
-              </div>
-              <div class="flex gap-1.5">
-                <button
-                  @click="context.onSyncRplayFromTab"
-                  class="flex-1 py-1.5 px-2 text-xs font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg border border-indigo-200 dark:border-indigo-800 flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                  title="在浏览器中打开 rplay.live 后点击一键同步"
-                >
-                  <Link class="w-3.5 h-3.5" />
-                  <span>从当前页同步</span>
-                </button>
-                <button
-                  @click="context.onPromptManualRplayToken"
-                  class="py-1.5 px-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                  title="手动输入、粘贴或修改 Rplay Token"
-                >
-                  <Key class="w-3.5 h-3.5 text-slate-500" />
-                  <span>手动输入</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Twitter specific action -->
             <button
-              v-else-if="key === 'twitter'"
+              v-if="key === 'twitter'"
               @click="context.onCheckPlatformLogins"
               class="w-full py-1.5 px-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
             >

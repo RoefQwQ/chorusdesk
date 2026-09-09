@@ -11,7 +11,7 @@ export default defineConfig({
   }),
   manifest: {
     name: 'Chorus - 跨平台创作者聚合展台',
-    description: '聚合追踪B站、Twitter、Fantia、Pixiv、YouTube、Rplay等选定创作者动态，支持多平台博主归集与被动更新。',
+    description: '聚合追踪B站、Twitter、Fantia、Pixiv、YouTube等选定创作者动态，支持多平台博主归集与被动更新。',
     version: '1.0.0',
     permissions: [
       'storage',
@@ -32,7 +32,6 @@ export default defineConfig({
       '*://*.pixiv.net/*',
       '*://*.pximg.net/*',
       '*://*.fantia.jp/*',
-      '*://*.rplay.live/*',
       '*://*.withny.fun/*',
       '*://*.xiaohongshu.com/*',
       '*://*.xhslink.com/*',

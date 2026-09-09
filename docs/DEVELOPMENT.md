@@ -56,7 +56,7 @@
 5. 在 `src/types/index.ts` 增加 `Platform` 字面量、`PLATFORM_REGISTRY` 元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
 6. 在 `src/utils/urlParser.ts` 增加 URL → `{ platform, accountId, cleanUrl }` 分支（注意域名顺序：`weibo.cn` 在 `weibo.com` 前等，避免子串误判；XHS 短链 `xhslink.com`、YouTube `youtu.be` 这类别名要并进同平台分支）。
 7. 若走 Cookie 登录：在 Dashboard `App.vue` 的 `checkPlatformLogins` 的 `platformsToCheck` 增加 `{ key, domain, authCookieNames }` 行（登录状态灯）；并在 `wxt.config.ts` 增加最小必要 host permission。
-8. 若走页面令牌（如 rplay 的 localStorage）：仿照 `rplay-sync.content.ts` + `SAVE_RPLAY_TOKEN`/`SYNC_RPLAY_TOKEN` 链路设计凭证采集与注入，不要在 adapter 里直接假设凭证存在。
+8. 若走页面令牌（localStorage Token 型平台）：设计 content script 采集 + 受 sender 策略约束的保存/同步消息链路（sender policy 见 `background.ts` `SENDER_POLICY` 与 AGENTS.md 规则 4），不要在 adapter 里直接假设凭证存在。
 9. 平台头像/内容走“受限 CDN”：在 `src/infrastructure/chrome/declarativeNetRequest.ts` 增补规则时**必须分配新规则 id**（现占用 1001–1006，remove/add 列表同步扩展，保持幂等）。
 10. 验证不回归其他平台：增量过滤、去重、墓碑、收藏、图片缓存策略均与平台无关或按平台分支，新增平台不得改变既有分支行为。
 
@@ -80,12 +80,12 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 
 协议总表见 ARCHITECTURE.md §6。改动步骤：
 
-1. 先全局搜索该 type 的**发送方**与**接收方**（现网发送方：`utils/http.ts`、`utils/media.ts`、`popup/composables/useRplaySync.ts`、`popup/App.vue`、`dashboard/App.vue`、`rplay-sync.content.ts`；接收方：`entrypoints/background.ts` 路由 + `src/infrastructure/chrome/messages/*.ts` handler）。
+1. 先全局搜索该 type 的**发送方**与**接收方**（现网发送方：`utils/http.ts`、`utils/media.ts`、`popup/App.vue`、`dashboard/App.vue`；接收方：`entrypoints/background.ts` 路由 + `src/infrastructure/chrome/messages/*.ts` handler）。
 2. 同步修改五件套：
    - type 名称（涉及两端字符串字面量）；
    - 入参解析与校验（handler 内局部接口 + `typeof` 收窄；外部数据用 `unknown` 收窄，不用 `any`）；
    - `sendResponse` 出参结构（handler 文件顶部注释固化契约，一并更新）；
-   - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/rplaySync/twitterTimeline 四个 handler 均如此，新增 handler 照抄）；
+   - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/twitterTimeline/douyinSnapshot 四个 handler 均如此，新增 handler 照抄）；
    - 发送方错误处理（`chrome.runtime.lastError`、`res` 为空、`ok/success` 为 false 的文案）。
 3. handler 不直接承担 Vue 状态或数据库业务；复杂业务抽到 `src/sync` 或独立服务再被 handler 调用（参考 autoSync 的 `setupAutoSync/handleAutoSyncAlarm` 分层）。
 4. 同步类消息（如 `UPDATE_AUTO_SYNC`）要能被 Dashboard 设置页即时触发且幂等（先 clear 再 create Alarm 的写法）。
@@ -175,7 +175,6 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 对 `chrome://`、`edge://`、`about:`、`devtools:` 页面一律跳过 DOM 注入（Popup 已有该判断，新增注入点照做）。
 - 外部数据（平台 HTML/JSON、备份文件、消息载荷）一律当作 `unknown`/不可信输入：解析用可选链 + 类型收窄 + try/catch，禁止把响应直接当强类型用；新边界不用 `any`。
 - 删除类操作必须二次确认；清理动态不得触碰 `isBookmarked`（`cleanupOldPosts` 语义）；恢复操作前如有同名 id 用 put/bulkPut 覆盖语义而非报错。
-- Rplay 凭证是 `localStorage`/`chrome.storage.local` 明文令牌：只在本机扩展存储间流转，不随 JSON 备份导出（现状导出不含 `rplay_auth_token`，保持）。
 
 ## 11. 验证规范
 
@@ -190,7 +189,6 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
   - 收藏、已读、删除→回收站→还原/彻底删除、清理旧动态；
   - 标签/平台/隐藏/转发/纯文字过滤与搜索；
   - 导出 JSON 并重新导入；
-  - Rplay 凭证同步（页面自动/主动拉取/手动粘贴）与 rplay 抓取；
   - 图片直连/代理回退/失败占位/本地磁盘缓存绑定与批量缓存；
   - 自动同步开关与未读角标。
 - 无法运行扩展的场景：用**一次性脚本**做单元冒烟（例如非扩展环境 `bgFetch` 的直连兜底、纯函数如 `parseProfileUrl`/`toSecureMediaUrl`/`interleaveChannelsByPlatform`），跑完即删，不留在仓库当测试。

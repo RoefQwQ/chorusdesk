@@ -282,8 +282,7 @@ export async function updateChannel(
         currentName.startsWith('微博') ||
         currentName.startsWith('抖音') ||
         currentName.startsWith('Pixiv') ||
-        currentName.startsWith('Fantia') ||
-        currentName.startsWith('Rplay');
+        currentName.startsWith('Fantia');
 
       if (isPlaceholderName && authName) {
         updates.displayName = authName;
@@ -321,8 +320,7 @@ export async function updateChannel(
             creator.name.startsWith('抖音用户_') ||
             creator.name.startsWith('抖音作品_') ||
             creator.name.startsWith('Pixiv画师_') ||
-            creator.name.startsWith('Fantia俱乐部_') ||
-            creator.name.startsWith('Rplay_');
+            creator.name.startsWith('Fantia俱乐部_');
 
           if (isDefaultCreatorName && authName) {
             creatorUpdates.name = authName;

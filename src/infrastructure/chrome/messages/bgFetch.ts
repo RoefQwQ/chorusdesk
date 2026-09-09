@@ -43,11 +43,7 @@ function errorMessage(err: unknown): string {
  *  - cookies are attached (`credentials: 'include'`) ONLY for declared platform
  *    hosts. Arbitrary hosts — the RSS adapter accepts any user-entered feed
  *    URL — are fetched with `credentials: 'omit'`, so a hostile or mistyped
- *    feed URL can never carry the user's session;
- *  - the stored Rplay bearer token is injected only when the request host is
- *    actually rplay.live (or a subdomain), matched on the parsed hostname.
- *    A substring test such as `url.includes('rplay.live')` would also match
- *    `https://evil.example/?ref=rplay.live` and leak the token.
+ *    feed URL can never carry the user's session.
  *
  * Only GET is issued: every adapter call site is a read.
  */
@@ -85,22 +81,6 @@ export async function performBgFetch(
       }
     } catch (error) {
       console.warn('[Background] Bilibili cookie read failed:', error);
-    }
-  }
-
-  if (hostMatches(hostname, 'rplay.live')) {
-    if (!headers['Referer']) headers['Referer'] = 'https://rplay.live/';
-    if (!headers['Origin']) headers['Origin'] = 'https://rplay.live';
-    if (!headers['platform-type']) headers['platform-type'] = 'web';
-    if (chrome.storage?.local && !headers['Authorization'] && !headers['authorization']) {
-      try {
-        const stored = await chrome.storage.local.get('rplay_auth_token');
-        if (typeof stored?.rplay_auth_token === 'string' && stored.rplay_auth_token) {
-          headers['Authorization'] = stored.rplay_auth_token;
-        }
-      } catch (e) {
-        console.warn('[Background] Rplay token inject error:', e);
-      }
     }
   }
 

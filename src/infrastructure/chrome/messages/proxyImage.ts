@@ -44,7 +44,7 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
         sendResponse({ ok: false, error: 'Invalid URL' });
         return;
       }
-      const allowedHost = /(^|\.)((bilibili\.com|hdslb\.com|twimg\.com|x\.com|twitter\.com|pximg\.net|pixiv\.net|fantia\.jp|rplay\.live|withny\.fun|xhscdn\.com|xhscdn\.net|xiaohongshu\.com|sinaimg\.cn|weibo\.com|weibo\.cn|youtube\.com))$/i.test(parsedUrl.hostname);
+      const allowedHost = /(^|\.)((bilibili\.com|hdslb\.com|twimg\.com|x\.com|twitter\.com|pximg\.net|pixiv\.net|fantia\.jp|withny\.fun|xhscdn\.com|xhscdn\.net|xiaohongshu\.com|sinaimg\.cn|weibo\.com|weibo\.cn|youtube\.com))$/i.test(parsedUrl.hostname);
       if (!['http:', 'https:'].includes(parsedUrl.protocol) || !allowedHost || parsedUrl.username || parsedUrl.password) {
         sendResponse({ ok: false, error: 'Image host is not allowed' });
         return;

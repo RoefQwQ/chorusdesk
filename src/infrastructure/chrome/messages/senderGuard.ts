@@ -25,8 +25,9 @@ export function isExtensionPageSender(sender: chrome.runtime.MessageSender): boo
 
 /**
  * True when the message came from one of our own content scripts running on
- * `host` (or a subdomain of it) — used to accept the rplay.live token relay
- * without opening privileged handlers to every injected frame.
+ * `host` (or a subdomain of it), matched on the parsed sender URL hostname —
+ * never on a substring test (AGENTS.md rule 1). Pattern for future
+ * page-driven credential relays; no live content scripts exist today.
  */
 export function isContentScriptSenderOn(
   sender: chrome.runtime.MessageSender,

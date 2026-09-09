@@ -20,7 +20,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     if (!input.startsWith('http://') && !input.startsWith('https://')) {
       if (input.startsWith('@')) {
         input = `https://x.com/${input.slice(1)}`;
-      } else if (/^(?:www\.)?(?:bilibili|twitter|x|youtube|youtu|pixiv|fantia|rplay|withny|xiaohongshu|xhslink|weibo|douyin)\./i.test(input)) {
+      } else if (/^(?:www\.)?(?:bilibili|twitter|x|youtube|youtu|pixiv|fantia|withny|xiaohongshu|xhslink|weibo|douyin)\./i.test(input)) {
         input = `https://${input}`;
       } else if (/^\d{5,12}$/.test(input)) {
         // Pure digits -> likely Bilibili UID or Pixiv UID
@@ -181,21 +181,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
       }
     }
 
-    // 6. Rplay
-    if (host.includes('rplay.live')) {
-      const parts = pathname.split('/').filter(Boolean);
-      if (parts.length >= 2 && (parts[0] === 'c' || parts[0] === 'channel')) {
-        const creatorId = parts[1];
-        return {
-          platform: 'rplay',
-          accountId: creatorId,
-          cleanUrl: `https://rplay.live/c/${creatorId}`,
-          suggestedName: `Rplay_${creatorId}`,
-        };
-      }
-    }
-
-    // 7. Withny
+    // 6. Withny
     if (host.includes('withny.fun')) {
       const parts = pathname.split('/').filter(Boolean);
       if (parts.length >= 2 && (parts[0] === 'users' || parts[0] === 'channels')) {

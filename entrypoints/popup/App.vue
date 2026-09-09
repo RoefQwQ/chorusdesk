@@ -3,16 +3,14 @@ import { onMounted } from 'vue';
 import { ExternalLink, LayoutDashboard } from 'lucide-vue-next';
 import { usePageDetection } from './composables/usePageDetection';
 import { useQuickFollow } from './composables/useQuickFollow';
-import { useRplaySync } from './composables/useRplaySync';
 import { usePopupNavigation } from './composables/usePopupNavigation';
-import RplaySyncBanner from './components/RplaySyncBanner.vue';
 import TargetInfoCard from './components/TargetInfoCard.vue';
 import AlreadyFollowedCard from './components/AlreadyFollowedCard.vue';
 import QuickFollowForm from './components/QuickFollowForm.vue';
 import ManualAddCard from './components/ManualAddCard.vue';
 
 const page = usePageDetection();
-const { loading, manualUrl, parsed, detectedAuthorMeta, isRplayTab, activeDisplayName } = page;
+const { loading, manualUrl, parsed, detectedAuthorMeta, activeDisplayName } = page;
 
 const follow = useQuickFollow({
   parsed,
@@ -41,8 +39,6 @@ const {
   onUrlResolved,
   handleSave,
 } = follow;
-
-const { rplaySyncState, rplaySyncMessage, triggerRplaySync, markSyncedIfStored } = useRplaySync();
 const { openDashboard } = usePopupNavigation();
 
 /** Writes a detected author name back into the new-creator name field. */
@@ -82,13 +78,6 @@ onMounted(async () => {
         const name = await page.extractActiveTabAuthorMeta(tab.id, tab.url);
         applyDetectedName(name);
       }
-
-      if (tab.url.includes('rplay.live')) {
-        // Check if token already exists first
-        await markSyncedIfStored();
-        // Also trigger live sync from tab
-        triggerRplaySync();
-      }
     }
   } catch (e) {
     console.error('Failed to init popup', e);
@@ -118,15 +107,6 @@ onMounted(async () => {
         <span>打开面板</span>
       </button>
     </div>
-
-    <!-- Rplay Page Live Sync Banner -->
-    <RplaySyncBanner
-      v-if="isRplayTab"
-      :state="rplaySyncState"
-      :message="rplaySyncMessage"
-      @sync="triggerRplaySync"
-    />
-
     <!-- Body content -->
     <div class="my-3 flex-1">
       <!-- Loading -->

@@ -31,7 +31,6 @@ export const PLATFORM_DIR_NAMES: Record<string, string> = {
   pixiv: 'Pixiv',
   fantia: 'Fantia',
   youtube: 'YouTube',
-  rplay: 'Rplay',
   withny: 'Withny',
   rss: 'RSS',
 };

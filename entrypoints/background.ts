@@ -1,13 +1,9 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { handleProxyImage } from '../src/infrastructure/chrome/messages/proxyImage';
 import { handleBgFetch } from '../src/infrastructure/chrome/messages/bgFetch';
-import { handleSyncRplayToken } from '../src/infrastructure/chrome/messages/rplaySync';
 import { handleTwitterTimeline } from '../src/infrastructure/chrome/messages/twitterTimeline';
 import { handleDouyinSnapshot } from '../src/infrastructure/chrome/messages/douyinSnapshot';
-import {
-  isContentScriptSenderOn,
-  isExtensionPageSender,
-} from '../src/infrastructure/chrome/messages/senderGuard';
+import { isExtensionPageSender } from '../src/infrastructure/chrome/messages/senderGuard';
 import { setupDeclarativeNetRules } from '../src/infrastructure/chrome/declarativeNetRequest';
 import { handleAutoSyncAlarm, setupAutoSync, updateUnreadBadge } from '../src/infrastructure/chrome/autoSync';
 
@@ -20,22 +16,17 @@ import { handleAutoSyncAlarm, setupAutoSync, updateUnreadBadge } from '../src/in
  * `externally_connectable` ever be declared) a hostile web page could use the
  * background as an authenticated proxy over all our host permissions.
  *
- * `rplay-content` — our content script on rplay.live, which is the legitimate
- * origin of the token relay and is not an extension page.
- *
  * A type absent from this table is refused. Adding a message type REQUIRES
  * adding it here; see AGENTS.md rule 4.
  */
-const SENDER_POLICY: Record<string, 'page' | 'rplay-content'> = {
+const SENDER_POLICY: Record<string, 'page'> = {
   UPDATE_AUTO_SYNC: 'page',
   OPEN_DASHBOARD: 'page',
   BG_FETCH: 'page',
   PROXY_IMAGE: 'page',
-  SYNC_RPLAY_TOKEN: 'page',
   FETCH_TWITTER_TIMELINE: 'page',
   FETCH_DOUYIN_SNAPSHOT: 'page',
   REFRESH_BADGE: 'page',
-  SAVE_RPLAY_TOKEN: 'rplay-content',
 };
 
 export default defineBackground(() => {
@@ -53,6 +44,9 @@ export default defineBackground(() => {
       console.warn('[Chorus] DNR setup failed:', e)
     );
     void setupAutoSync().catch((e) => console.warn('[Chorus] Auto-sync setup failed:', e));
+    // Rplay support was removed (2026-09); purge the orphaned session token so
+    // the credential does not linger in storage forever. Idempotent.
+    void chrome.storage.local.remove('rplay_auth_token').catch(() => {});
   });
 
   chrome.alarms?.onAlarm.addListener((alarm) => {
@@ -62,12 +56,7 @@ export default defineBackground(() => {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const type = typeof message?.type === 'string' ? message.type : '';
     const policy = SENDER_POLICY[type];
-    const allowed =
-      policy === 'page'
-        ? isExtensionPageSender(sender)
-        : policy === 'rplay-content'
-          ? isContentScriptSenderOn(sender, 'rplay.live')
-          : false;
+    const allowed = policy === 'page' ? isExtensionPageSender(sender) : false;
 
     if (!allowed) {
       console.warn(`[Chorus] Refused '${type || '(untyped)'}' from`, sender?.url ?? sender?.id);
@@ -95,29 +84,12 @@ export default defineBackground(() => {
       return false;
     }
 
-    if (type === 'SAVE_RPLAY_TOKEN') {
-      // Sender is already pinned to an rplay.live content script by SENDER_POLICY.
-      if (message.token && typeof message.token === 'string') {
-        void chrome.storage.local
-          .set({ rplay_auth_token: message.token })
-          .then(() => sendResponse({ success: true }))
-          .catch((e) => sendResponse({ success: false, error: String(e) }));
-        return true;
-      }
-      sendResponse({ success: false, error: '缺少凭证内容' });
-      return false;
-    }
-
     if (type === 'BG_FETCH') {
       return handleBgFetch(message, sendResponse);
     }
 
     if (type === 'PROXY_IMAGE') {
       return handleProxyImage(message, sendResponse);
-    }
-
-    if (type === 'SYNC_RPLAY_TOKEN') {
-      return handleSyncRplayToken(message, sendResponse);
     }
 
     if (type === 'FETCH_TWITTER_TIMELINE') {
@@ -130,10 +102,4 @@ export default defineBackground(() => {
 
     return false;
   });
-
-  // Note: the former chrome.tabs.onUpdated token scrape was removed. It fired on
-  // every tab load, gated on `tab.url.includes('rplay.live')` (a substring match
-  // that also accepts hosts like `rplay.live.attacker.tld` — AGENTS.md rule 1),
-  // and read only `_AUTHORIZATION_`. The rplay.live content script already covers
-  // every case it did, reads more candidate keys, and needs no tab scanning.
 });
