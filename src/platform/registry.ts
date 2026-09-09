@@ -9,6 +9,7 @@ import { rplayAdapter } from '../adapters/rplay';
 import { withnyAdapter } from '../adapters/withny';
 import { xiaohongshuAdapter } from '../adapters/xiaohongshu';
 import { weiboAdapter } from '../adapters/weibo';
+import { douyinAdapter } from '../adapters/douyin';
 import { rssAdapter } from '../adapters/rss';
 
 const ADAPTER_MAP: Record<string, PlatformAdapter> = {
@@ -21,6 +22,7 @@ const ADAPTER_MAP: Record<string, PlatformAdapter> = {
   withny: withnyAdapter,
   xiaohongshu: xiaohongshuAdapter,
   weibo: weiboAdapter,
+  douyin: douyinAdapter,
   rss: rssAdapter,
 };
 

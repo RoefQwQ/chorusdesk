@@ -20,7 +20,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     if (!input.startsWith('http://') && !input.startsWith('https://')) {
       if (input.startsWith('@')) {
         input = `https://x.com/${input.slice(1)}`;
-      } else if (/^(?:www\.)?(?:bilibili|twitter|x|youtube|youtu|pixiv|fantia|rplay|withny|xiaohongshu|xhslink|weibo)\./i.test(input)) {
+      } else if (/^(?:www\.)?(?:bilibili|twitter|x|youtube|youtu|pixiv|fantia|rplay|withny|xiaohongshu|xhslink|weibo|douyin)\./i.test(input)) {
         input = `https://${input}`;
       } else if (/^\d{5,12}$/.test(input)) {
         // Pure digits -> likely Bilibili UID or Pixiv UID
@@ -302,8 +302,51 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
       }
     }
 
+    // 11. 抖音 (Douyin) — public creator profiles only. Live rooms
+    // (live.douyin.com) are deliberately out of scope.
+    if (isHostOrSubdomainOf(host, 'douyin.com') && !isHostOrSubdomainOf(host, 'live.douyin.com')) {
+      // Profile: douyin.com/user/MS4wLjABAAAA...
+      const userMatch = pathname.match(/\/user\/([A-Za-z0-9_-]{6,200})/);
+      if (userMatch) {
+        const secUid = userMatch[1];
+        return {
+          platform: 'douyin',
+          accountId: secUid,
+          cleanUrl: `https://www.douyin.com/user/${secUid}`,
+          suggestedName: `抖音用户_${secUid.slice(-6)}`,
+        };
+      }
+
+      // A work URL identifies the work, not its author: the author's sec_uid is
+      // not in the URL, and V1 does not guess one. Flag it so the UI can tell the
+      // user to paste the creator's profile instead of silently inventing a
+      // channel that cannot sync.
+      const workMatch = pathname.match(/\/(?:video|note)\/(\d{15,25})/);
+      if (workMatch) {
+        return {
+          platform: 'douyin',
+          accountId: workMatch[1],
+          cleanUrl: `https://www.douyin.com/video/${workMatch[1]}`,
+          suggestedName: `抖音作品_${workMatch[1].slice(-6)}`,
+          isContentUrl: true,
+        };
+      }
+    }
+
     return null;
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * Hostname-exact (or subdomain) match. `host.includes('douyin.com')` would also
+ * accept `douyin.com.attacker.example` and `evil.example/?ref=douyin.com` — see
+ * AGENTS.md rule 1. The platform decision feeds channel creation and, through it,
+ * which page the extension will inject a collector into, so it must be exact.
+ */
+function isHostOrSubdomainOf(hostname: string, domain: string): boolean {
+  const host = hostname.toLowerCase();
+  const base = domain.toLowerCase();
+  return host === base || host.endsWith(`.${base}`);
 }

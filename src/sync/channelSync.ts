@@ -257,6 +257,7 @@ export async function updateChannel(
         currentName.startsWith('B站') ||
         currentName.startsWith('小红书') ||
         currentName.startsWith('微博') ||
+        currentName.startsWith('抖音') ||
         currentName.startsWith('Pixiv') ||
         currentName.startsWith('Fantia') ||
         currentName.startsWith('Rplay');
@@ -294,6 +295,8 @@ export async function updateChannel(
             creator.name.startsWith('B站稿件_') ||
             creator.name.startsWith('小红书_') ||
             creator.name.startsWith('微博_') ||
+            creator.name.startsWith('抖音用户_') ||
+            creator.name.startsWith('抖音作品_') ||
             creator.name.startsWith('Pixiv画师_') ||
             creator.name.startsWith('Fantia俱乐部_') ||
             creator.name.startsWith('Rplay_');

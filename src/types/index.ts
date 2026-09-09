@@ -8,6 +8,7 @@ export type Platform =
   | 'withny'
   | 'xiaohongshu'
   | 'weibo'
+  | 'douyin'
   | 'rss'
   | (string & {});
 
@@ -133,6 +134,18 @@ export const PLATFORM_REGISTRY: Record<string, PlatformMeta> = {
     authType: 'cookie',
     authTypeName: '共享浏览器 Cookie',
     description: '支持微博博主原创动态、九宫格图文、长文与视频，自动识别转发并支持源头过滤。',
+  },
+  douyin: {
+    key: 'douyin',
+    name: '抖音',
+    domain: 'douyin.com',
+    color: '#FE2C55',
+    bgColor: 'bg-rose-600',
+    badgeBg: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800',
+    urlPlaceholder: 'https://www.douyin.com/user/MS4wLjABAAAA...',
+    authType: 'none',
+    authTypeName: '打开的抖音页面',
+    description: '支持创作者短视频与图文作品归集。抖音作品列表只能在真实页面中加载，同步前请先在浏览器打开该创作者主页。',
   },
   rss: {
     key: 'rss',

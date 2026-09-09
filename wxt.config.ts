@@ -41,6 +41,8 @@ export default defineConfig({
       '*://*.weibo.com/*',
       '*://*.weibo.cn/*',
       '*://*.sinaimg.cn/*',
+      '*://*.douyin.com/*',
+      '*://*.douyinpic.com/*',
     ],
     icons: {
       '16': 'icons/icon-16.png',

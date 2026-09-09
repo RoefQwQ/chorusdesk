@@ -31,6 +31,13 @@ export const PLATFORM_HOSTS = [
   'weibo.com',
   'weibo.cn',
   'sinaimg.cn',
+  'douyin.com',
+  // Douyin cover/avatar CDN. Added because Feed cards reference signed cover
+  // URLs served from `*.douyinpic.com` (verified during the 2026-09 acquisition
+  // spike: covers on p3-pc-sign.douyinpic.com, avatars on p3-pc.douyinpic.com).
+  // No other Douyin/ByteDance CDN is listed — only hosts observed serving the
+  // media a Post actually references belong here.
+  'douyinpic.com',
 ] as const;
 
 /** True when `hostname` equals `domain` or is a subdomain of it. */

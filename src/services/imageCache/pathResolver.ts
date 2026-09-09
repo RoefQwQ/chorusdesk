@@ -26,6 +26,7 @@ export const PLATFORM_DIR_NAMES: Record<string, string> = {
   xiaohongshu: '小红书',
   bilibili: '哔哩哔哩',
   weibo: '微博',
+  douyin: '抖音',
   twitter: 'Twitter',
   pixiv: 'Pixiv',
   fantia: 'Fantia',

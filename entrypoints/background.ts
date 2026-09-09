@@ -3,6 +3,7 @@ import { handleProxyImage } from '../src/infrastructure/chrome/messages/proxyIma
 import { handleBgFetch } from '../src/infrastructure/chrome/messages/bgFetch';
 import { handleSyncRplayToken } from '../src/infrastructure/chrome/messages/rplaySync';
 import { handleTwitterTimeline } from '../src/infrastructure/chrome/messages/twitterTimeline';
+import { handleDouyinSnapshot } from '../src/infrastructure/chrome/messages/douyinSnapshot';
 import {
   isContentScriptSenderOn,
   isExtensionPageSender,
@@ -32,6 +33,7 @@ const SENDER_POLICY: Record<string, 'page' | 'rplay-content'> = {
   PROXY_IMAGE: 'page',
   SYNC_RPLAY_TOKEN: 'page',
   FETCH_TWITTER_TIMELINE: 'page',
+  FETCH_DOUYIN_SNAPSHOT: 'page',
   SAVE_RPLAY_TOKEN: 'rplay-content',
 };
 
@@ -113,6 +115,10 @@ export default defineBackground(() => {
 
     if (type === 'FETCH_TWITTER_TIMELINE') {
       return handleTwitterTimeline(message, sendResponse);
+    }
+
+    if (type === 'FETCH_DOUYIN_SNAPSHOT') {
+      return handleDouyinSnapshot(message, sendResponse);
     }
 
     return false;
