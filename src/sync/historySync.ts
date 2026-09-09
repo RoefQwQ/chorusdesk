@@ -13,11 +13,25 @@ export async function fetchChannelHistory(
   onlyOriginal: boolean = false
 ): Promise<FetchResult> {
   if (channel.nextCursor === '__END__') {
-    return {
-      posts: [],
-      error: fetchError('not_found', '已到达该账号历史作品最底部，暂无更多更早内容。'),
-      hasMore: false,
-    };
+    // Page-driven platforms (Douyin) have no real pagination cursor — their
+    // "__END__" is a completeness GUESS recorded by an earlier dig, not a fact
+    // the platform itself stated. When the guess was wrong (grid was actually
+    // login-truncated), it permanently blocked works the page can serve today.
+    // The fix commit (ea6e539) stopped recording new wrong guesses; this path
+    // recovers channels already parked there: clear the stale marker and let
+    // the dig run. A genuine end gets re-recorded on this very round if the
+    // page truly has nothing more (adapter returns hasMore:false again), so
+    // the loop still terminates.
+    if (channel.platform === 'douyin') {
+      await db.channels.update(channel.id, { nextCursor: undefined });
+      channel = { ...channel, nextCursor: undefined };
+    } else {
+      return {
+        posts: [],
+        error: fetchError('not_found', '已到达该账号历史作品最底部，暂无更多更早内容。'),
+        hasMore: false,
+      };
+    }
   }
 
   return await updateChannel(channel, limit, true, {
