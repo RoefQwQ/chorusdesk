@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from 'vue';
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { Bookmark, ChevronRight, Clock, ExternalLink, Film, Video, ImageOff, Repeat2, Trash2 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
@@ -10,7 +10,9 @@ const props = withDefaults(defineProps<{
   creators: Creator[];
   channels: Channel[];
   bookmarked?: boolean;
-}>(), { bookmarked: false });
+  /** Mark the post read automatically once visible ~600ms (feed browsing). */
+  autoRead?: boolean;
+}>(), { bookmarked: false, autoRead: false });
 
 const emit = defineEmits<{
   bookmark: [post: Post];
@@ -53,6 +55,36 @@ function getMediaDisplayUrl(url: string): string {
   if (!url) return '';
   return localMediaUrls.value[url] || secure(url);
 }
+// Viewport auto-read: cards are display-only (the design has no clickable
+// card surface — media clicks, bookmark and delete all stop propagation), so
+// a card counts as seen the moment it enters the viewport. Unread rows are
+// then purely "not scrolled to yet", which is exactly what the toolbar
+// badge should report.
+const cardRoot = ref<HTMLElement | null>(null);
+let readObserver: IntersectionObserver | null = null;
+
+onMounted(() => {
+  if (!props.autoRead || props.post.isRead) return;
+  if (typeof IntersectionObserver === 'undefined') return;
+  const rootEl = cardRoot.value;
+  if (!rootEl) return;
+  readObserver = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      readObserver?.disconnect();
+      readObserver = null;
+      emit('read', props.post);
+    },
+    // Any visible sliver counts: a card edge on screen was scrolled past.
+    { threshold: 0 },
+  );
+  readObserver.observe(rootEl);
+});
+
+onBeforeUnmount(() => {
+  readObserver?.disconnect();
+  readObserver = null;
+});
 
 // Check local disk on mount and optionally auto-cache in background
 onMounted(async () => {
@@ -192,12 +224,11 @@ function toggleBookmark() {
   emit('bookmark', props.post);
 }
 </script>
-
 <template>
   <article
+    ref="cardRoot"
     class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ease-out flex flex-col group/card will-change-transform"
     :class="isBookmarked ? 'ring-1 ring-amber-500/30' : (post.isRead ? '' : 'ring-1 ring-indigo-400/40 dark:ring-indigo-600/50')"
-    @click="emit('read', post)"
   >
     <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
       <div class="flex items-center gap-2.5 min-w-0">

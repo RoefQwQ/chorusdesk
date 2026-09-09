@@ -42,6 +42,7 @@ import { useDeepSync } from './composables/useDeepSync';
 import { useSyncActions } from './composables/useSyncActions';
 import { useBackupManager } from './composables/useBackupManager';
 import { useMediaMaintenance } from './composables/useMediaMaintenance';
+import { notifyBadgeRefresh } from '../../src/utils/badge';
 
 // ==================== DATA & CROSS-PAGE STATE ====================
 const activeTab = ref<'feed' | 'creators' | 'bookmarks' | 'settings'>('feed');
@@ -245,6 +246,9 @@ const {
 async function reloadData() {
   await reloadFeedData();
   await refreshDeletedPostsList();
+  // reloadData is the convergence point for sync / restore / import / dig
+  // flows; each may add or remove unread posts the toolbar badge shows.
+  notifyBadgeRefresh();
 }
 
 // Global shortcut: [R] refreshes the feed on the feed tab.

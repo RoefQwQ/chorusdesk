@@ -64,7 +64,7 @@ async function syncAllChannels() {
  * (see AGENTS.md rule 5); querying `equals(0)` against boolean-valued rows
  * matched nothing, which is why the badge used to stay empty.
  */
-async function updateUnreadBadge() {
+export async function updateUnreadBadge() {
   try {
     const unreadCount = await db.posts.where('isRead').equals(0).count();
     await chrome.action?.setBadgeText({ text: unreadCount > 0 ? String(Math.min(unreadCount, 999)) : '' });

@@ -130,6 +130,9 @@ export const fantiaAdapter: PlatformAdapter = {
         };
       }
 
+      // Image posts whose media will be filled from their detail pages below.
+      const enrichTargets: Post[] = [];
+
       const posts: Post[] = parsedPosts.slice(0, limit).map((p) => {
         const mediaList: MediaItem[] = [];
         if (p.thumb?.main) {
@@ -144,7 +147,7 @@ export const fantiaAdapter: PlatformAdapter = {
         const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
         const postUrl = p.uri?.show ? `https://fantia.jp${p.uri.show}` : `https://fantia.jp/posts/${p.id}`;
 
-        return buildPost(channel, {
+        const post = buildPost(channel, {
           id: `fantia_${p.id}`,
           title: p.title || 'Fantia 投稿',
           content: (p.comment || p.title || '').slice(0, 300),
@@ -152,10 +155,15 @@ export const fantiaAdapter: PlatformAdapter = {
           originalUrl: postUrl,
           publishedAt: pubDate,
         });
+        enrichTargets.push(post);
+        return post;
       });
-
       // Sort strictly newest first
       posts.sort((a, b) => b.publishedAt - a.publishedAt);
+
+      // Fill image posts' media from their detail pages (the fanclub API only
+      // carries a single thumb per post).
+      await enrichFantiaPostMedia(enrichTargets);
 
       // No cursor pagination available on this endpoint
       const hasMore = false;
@@ -179,3 +187,92 @@ export const fantiaAdapter: PlatformAdapter = {
     }
   },
 };
+
+/** Detail fetch pacing and per-round cap — same rationale as the XHS adapter. */
+const FANTIA_ENRICH_MAX_PER_ROUND = 3;
+const FANTIA_ENRICH_INTERVAL_MS = 1200;
+
+/**
+ * Fill image posts' mediaList from the Fantia post-detail API.
+ *
+ * The fanclub endpoint only exposes `thumb.main` (one image). The post API
+ * (`/api/v1/posts/{id}`) carries `post_content` blocks; `photo` blocks hold
+ * the full `photos` list with `url` / `original_url`. Only posts whose sole
+ * media is that single thumb are candidates; failures are silent (the thumb
+ * stays, a later round retries).
+ */
+async function enrichFantiaPostMedia(posts: Post[]): Promise<void> {
+  const candidates = posts.filter(
+    (p) =>
+      p.mediaList.length <= 1 &&
+      p.mediaList.every((m) => m.type === 'image') &&
+      /^fantia_\d+$/.test(p.id),
+  );
+  let fetched = 0;
+
+  for (const post of candidates) {
+    if (fetched >= FANTIA_ENRICH_MAX_PER_ROUND) break;
+    if (fetched > 0) {
+      await new Promise((r) => setTimeout(r, FANTIA_ENRICH_INTERVAL_MS));
+    }
+    fetched++;
+
+    const postId = post.id.slice('fantia_'.length);
+    try {
+      const res = await bgFetch(`https://fantia.jp/api/v1/posts/${postId}`, {
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+      if (!res.ok) continue;
+
+      let json: unknown;
+      try {
+        json = JSON.parse(res.data);
+      } catch {
+        continue;
+      }
+      const postBody =
+        typeof json === 'object' && json !== null && 'post' in json
+          ? (json as Record<string, unknown>).post
+          : undefined;
+      const contents =
+        typeof postBody === 'object' && postBody !== null && 'post_content' in postBody
+          ? (postBody as Record<string, unknown>).post_content
+          : undefined;
+      if (!Array.isArray(contents)) continue;
+
+      const mediaList: MediaItem[] = [];
+      const seen = new Set<string>();
+      for (const block of contents) {
+        if (typeof block !== 'object' || block === null) continue;
+        const record = block as Record<string, unknown>;
+        if (record.category !== 'photo') continue;
+        const photos = record.photos;
+        if (!Array.isArray(photos)) continue;
+        for (const photo of photos) {
+          if (typeof photo !== 'object' || photo === null) continue;
+          const pr = photo as Record<string, unknown>;
+          const url =
+            (typeof pr.original_url === 'string' && pr.original_url) ||
+            (typeof pr.url === 'string' && pr.url) ||
+            '';
+          if (url && !seen.has(url)) {
+            seen.add(url);
+            mediaList.push({
+              type: 'image',
+              previewUrl: (typeof pr.url === 'string' && pr.url) || url,
+              originalUrl: url,
+            });
+          }
+        }
+      }
+      if (mediaList.length > post.mediaList.length) {
+        post.mediaList = mediaList;
+      }
+    } catch {
+      // Silent: thumb stays; retry on a later round.
+    }
+  }
+}

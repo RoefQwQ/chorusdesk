@@ -10,6 +10,7 @@ import {
   clearDeletedPostRecords,
 } from '../../../src/infrastructure/db/postRepository';
 import type { updateChannel as UpdateChannelFn } from '../../../src/sync/channelSync';
+import { notifyBadgeRefresh } from '../../../src/utils/badge';
 
 export interface RecycleBinActions {
   reloadData: () => Promise<void>;
@@ -66,6 +67,8 @@ export function useDeletedPosts(actions: RecycleBinActions) {
     await deletePostAndTombstone(post);
     actions.removePostFromFeed(post.id);
     await refreshDeletedCount();
+    // Deleting a post can remove it from the unread set the badge shows.
+    notifyBadgeRefresh();
   }
 
   async function openDeletedPostsModal() {

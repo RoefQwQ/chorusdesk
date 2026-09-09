@@ -369,6 +369,7 @@ onUnmounted(() => {
           :creators="context.creators"
           :channels="context.channels"
           :bookmarked="Boolean(post.isBookmarked)"
+          auto-read
           @bookmark="context.toggleBookmarkPost"
           @delete="context.handleDeletePost"
           @read="context.markPostRead"

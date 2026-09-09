@@ -110,11 +110,14 @@ export const rssAdapter: PlatformAdapter = {
           }
         }
 
-        // Also check any <img> tags inside description
+        // Also check any <img> tags inside description. Feeds decide how many
+        // images a post has; a low hard cap silently truncated long photo
+        // essays. The 35-image ceiling only guards against a hostile feed
+        // stuffing the mediaList (same bound the douyin contract uses).
         const imgTags = tempDiv.querySelectorAll('img');
         imgTags.forEach((img) => {
           const src = img.getAttribute('src');
-          if (src && mediaList.length < 4) {
+          if (src && mediaList.length < 35) {
             mediaList.push({
               type: 'image',
               previewUrl: src,

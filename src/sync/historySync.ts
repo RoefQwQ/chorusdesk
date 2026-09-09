@@ -10,7 +10,8 @@ import { updateChannel } from './channelSync';
 export async function fetchChannelHistory(
   channel: Channel,
   limit: number = 10,
-  onlyOriginal: boolean = false
+  onlyOriginal: boolean = false,
+  maxNewPosts?: number,
 ): Promise<FetchResult> {
   if (channel.nextCursor === '__END__') {
     // Page-driven platforms (Douyin) have no real pagination cursor — their
@@ -33,11 +34,11 @@ export async function fetchChannelHistory(
       };
     }
   }
-
   return await updateChannel(channel, limit, true, {
     cursor: channel.nextCursor,
     isHistory: true,
     onlyOriginal,
+    maxNewPosts: maxNewPosts && maxNewPosts > 0 ? maxNewPosts : undefined,
   });
 }
 
@@ -137,7 +138,14 @@ export async function deepSyncChannel(
       status: 'fetching',
     });
 
-    const res = await fetchChannelHistory(currentCh, 20, options.onlyOriginal);
+    // Per-round fetch limit: when a maxPosts budget is set, never ask for more
+    // than the remaining headroom (min page size stays at 1). Cursor platforms
+    // (bilibili/twitter) then stop exactly at the budget instead of one page
+    // past it; douyin ignores `limit` for deep digs anyway (windowed snapshot),
+    // so its budget is enforced by maxNewPosts inside updateChannel.
+    const remaining = maxPosts > 0 ? Math.max(maxPosts - totalNew, 1) : 0;
+    const roundLimit = maxPosts > 0 ? Math.min(20, remaining) : 20;
+    const res = await fetchChannelHistory(currentCh, roundLimit, options.onlyOriginal, remaining);
     const newCount = res.posts?.length || 0;
     const rawFetched = res.totalFetched ?? newCount;
     totalNew += newCount;

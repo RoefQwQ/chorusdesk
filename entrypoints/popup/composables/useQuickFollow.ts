@@ -8,6 +8,7 @@ import { creatorService, channelService } from '../../../src/application';
 import { db } from '../../../src/infrastructure/db/database';
 import { updateChannel, clearStaleUpdatingStatus } from '../../../src/sync';
 import type { AuthorMeta } from './usePageDetection';
+import { notifyBadgeRefresh } from '../../../src/utils/badge';
 
 export type AccountRole = 'main' | 'sub' | 'alt' | 'custom';
 export type FollowMode = 'new' | 'bind';
@@ -185,7 +186,9 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
 
 
       // Trigger on-demand initial fetch
-      updateChannel(newChannel, 5).catch(console.error);
+      updateChannel(newChannel, 5)
+        .then(() => notifyBadgeRefresh())
+        .catch(console.error);
 
       existingChannel.value = newChannel;
       existingCreator.value = (await db.creators.get(targetCreatorId)) || null;

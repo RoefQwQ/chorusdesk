@@ -1,4 +1,4 @@
-import type { Channel, Post } from '../types';
+import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
@@ -183,9 +183,14 @@ export const xiaohongshuAdapter: PlatformAdapter = {
 
       // When force refreshing, return all parsed posts so old items get updated/healed
       const targetPosts = isForce ? allPosts : allPosts.slice(offset, offset + limit);
+
+      // Image notes: the profile SSR cards carry only a single cover. Fetch
+      // each note's detail page (SSR embeds the full imageList) so picture
+      // posts show all their images, not just the first.
+      await enrichImageNoteMedia(channel, targetPosts);
+
       const nextOffset = offset + targetPosts.length;
       const hasMore = !isForce && nextOffset < allPosts.length;
-
       return {
         posts: targetPosts,
         authorMeta: {
@@ -252,4 +257,91 @@ function extractXhsInitialState(html: string): any {
   }
 
   return null;
+}
+
+/**
+ * Cap on detail-page fetches per sync round. XHS risk control is strict;
+ * hammering dozens of /explore/ pages in one go is how accounts get
+ * challenged. The remaining notes fall back to their profile-card cover and
+ * are enriched on a later round.
+ */
+const DETAIL_ENRICH_MAX_PER_ROUND = 3;
+/** Pacing between detail fetches (ms), mirroring the sync layer's pacing. */
+const DETAIL_ENRICH_INTERVAL_MS = 1200;
+
+/**
+ * Fill image notes' mediaList from their detail-page SSR.
+ *
+ * The profile page's SSR cards only carry a single `cover`; the note detail
+ * page (`/explore/{noteId}`) embeds the full `imageList` for the note. Only
+ * image-type posts with at most one image are candidates (video notes keep
+ * their cover+link; already-multi-image posts came from a detail-shaped
+ * source). Failures are silent: the cover stays, enrichment retries next
+ * round.
+ */
+async function enrichImageNoteMedia(channel: Channel, posts: Post[]): Promise<void> {
+  const candidates = posts.filter(
+    (p) =>
+      p.mediaList.length <= 1 &&
+      p.mediaList.every((m) => m.type === 'image') &&
+      /^xiaohongshu_[0-9a-f]{24}$/.test(p.id),
+  );
+  let fetched = 0;
+
+  for (const post of candidates) {
+    if (fetched >= DETAIL_ENRICH_MAX_PER_ROUND) break;
+    if (fetched > 0) {
+      await new Promise((r) => setTimeout(r, DETAIL_ENRICH_INTERVAL_MS));
+    }
+    fetched++;
+
+    const noteId = post.id.slice('xiaohongshu_'.length);
+    try {
+      const res = await bgFetch(`https://www.xiaohongshu.com/explore/${noteId}`, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          Referer: `https://www.xiaohongshu.com/user/profile/${channel.accountId}`,
+        },
+      });
+      if (!res.ok) continue;
+
+      const state = extractXhsInitialState(res.data);
+      const note = state?.note?.noteDetailMap?.[noteId]?.note;
+      const imageList: unknown = note?.imageList || note?.imagesList;
+      if (!Array.isArray(imageList) || imageList.length === 0) continue;
+
+      const mediaList: MediaItem[] = [];
+      for (const img of imageList) {
+        const url =
+          (typeof img === 'object' && img !== null
+            ? (img as Record<string, unknown>).urlDefault ||
+              (img as Record<string, unknown>).urlPre ||
+              (img as Record<string, unknown>).url ||
+              firstInfoListUrl((img as Record<string, unknown>).infoList)
+            : undefined) as string | undefined;
+        if (typeof url === 'string' && url) {
+          const secureUrl = toSecureMediaUrl(url);
+          mediaList.push({ type: 'image', previewUrl: secureUrl, originalUrl: secureUrl });
+        }
+      }
+      // Only replace when the detail page actually provided more images;
+      // otherwise keep the cover (a failed parse must not blank the post).
+      if (mediaList.length > post.mediaList.length) {
+        post.mediaList = mediaList;
+      }
+    } catch {
+      // Silent: cover stays; retry on a later round.
+    }
+  }
+}
+
+function firstInfoListUrl(infoList: unknown): string | undefined {
+  if (!Array.isArray(infoList) || infoList.length === 0) return undefined;
+  const first = infoList[0];
+  if (typeof first === 'object' && first !== null) {
+    const url = (first as Record<string, unknown>).url;
+    if (typeof url === 'string') return url;
+  }
+  return undefined;
 }

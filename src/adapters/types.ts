@@ -11,6 +11,12 @@ export interface FetchOptions {
   restoreDeleted?: boolean;
   /** If true, ignore sinceTimestamp watermark to force-refresh and update existing posts in local DB */
   forceRefresh?: boolean;
+  /**
+   * Budget for genuinely NEW posts this fetch may persist. History digs
+   * upsert duplicates without consuming budget; only new-id rows are counted
+   * and sliced. Absent/0 = unconstrained.
+   */
+  maxNewPosts?: number;
 }
 
 /**

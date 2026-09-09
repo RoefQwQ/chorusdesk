@@ -144,12 +144,35 @@ export async function updateChannel(
           // Quietly upsert existing posts to ensure their media and details are fresh/healed
           const duplicatePosts = result.posts.filter(p => existingIds.has(p.id));
           if (duplicatePosts.length > 0) {
-            await db.posts.bulkPut(duplicatePosts.map(p => ({
-              ...p,
-              channelLabel: p.channelLabel || channel.label,
-            })));
+            // bulkGet keeps order aligned with duplicatePosts; a miss (or a
+            // read failure) simply means no regression guard for that row.
+            let existingRows: (Post | undefined)[] = [];
+            try {
+              existingRows = await db.posts.bulkGet(duplicatePosts.map(p => p.id));
+            } catch {}
+            await db.posts.bulkPut(duplicatePosts.map((p, i) => {
+              // Never regress an enriched media list: adapter detail-fetch
+              // enrichment is capped per round (risk control), so a later
+              // adapter round may return only the profile cover for a post
+              // whose DB row already holds the full image set. More media wins.
+              const existing = existingRows[i];
+              if (existing && existing.mediaList.length > p.mediaList.length) {
+                return {
+                  ...p,
+                  mediaList: existing.mediaList,
+                  channelLabel: p.channelLabel || channel.label,
+                };
+              }
+              return { ...p, channelLabel: p.channelLabel || channel.label };
+            }));
           }
           newPosts = result.posts.filter(p => !existingIds.has(p.id));
+          // History-dig budget: only genuinely new ids consume the quota.
+          // Duplicates are upserted above (healing) without counting toward
+          // it, so a re-run dig over an already-fetched window costs nothing.
+          if (options?.maxNewPosts && options.maxNewPosts > 0) {
+            newPosts = newPosts.slice(0, options.maxNewPosts);
+          }
         } catch {}
       } else if (sinceTimestamp > 0) {
         newPosts = result.posts.filter(p => p.publishedAt > sinceTimestamp);

@@ -9,7 +9,7 @@ import {
   isExtensionPageSender,
 } from '../src/infrastructure/chrome/messages/senderGuard';
 import { setupDeclarativeNetRules } from '../src/infrastructure/chrome/declarativeNetRequest';
-import { handleAutoSyncAlarm, setupAutoSync } from '../src/infrastructure/chrome/autoSync';
+import { handleAutoSyncAlarm, setupAutoSync, updateUnreadBadge } from '../src/infrastructure/chrome/autoSync';
 
 /**
  * Who may invoke each message type.
@@ -34,6 +34,7 @@ const SENDER_POLICY: Record<string, 'page' | 'rplay-content'> = {
   SYNC_RPLAY_TOKEN: 'page',
   FETCH_TWITTER_TIMELINE: 'page',
   FETCH_DOUYIN_SNAPSHOT: 'page',
+  REFRESH_BADGE: 'page',
   SAVE_RPLAY_TOKEN: 'rplay-content',
 };
 
@@ -76,6 +77,12 @@ export default defineBackground(() => {
 
     if (type === 'UPDATE_AUTO_SYNC') {
       void setupAutoSync().catch((e) => console.warn('[Chorus] Auto-sync update failed:', e));
+      sendResponse({ success: true });
+      return false;
+    }
+
+    if (type === 'REFRESH_BADGE') {
+      void updateUnreadBadge().catch((e) => console.warn('[Chorus] Badge refresh failed:', e));
       sendResponse({ success: true });
       return false;
     }

@@ -1,6 +1,7 @@
 import { triggerRef, type Ref, type ShallowRef } from 'vue';
 import type { Post } from '../../../src/types';
 import { postService } from '../../../src/application';
+import { notifyBadgeRefresh } from '../../../src/utils/badge';
 import type { DashboardStats } from './useDashboardData';
 
 export interface PostActionsDependencies {
@@ -37,7 +38,6 @@ export function usePostActions(deps: PostActionsDependencies) {
       }
     }
   }
-
   async function markPostRead(post: Post) {
     if (post.isRead) return;
     post.isRead = 1;
@@ -45,6 +45,8 @@ export function usePostActions(deps: PostActionsDependencies) {
       triggerRef(deps.posts);
     }
     await postService.markRead(post.id);
+    // Persisting isRead shrinks the unread set the toolbar badge shows.
+    notifyBadgeRefresh();
   }
 
   return { toggleBookmarkPost, markPostRead };
