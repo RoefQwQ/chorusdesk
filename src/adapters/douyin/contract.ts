@@ -74,6 +74,10 @@ export interface RawDouyinSnapshot {
   /** Set when the page showed a login wall / captcha instead of content. */
   requiresAuth?: unknown;
   requiresVerify?: unknown;
+  /** Work count stated in the profile header, when it was a plain integer. */
+  statedTotal?: unknown;
+  /** Set when scrolling stopped yielding new works. */
+  saturated?: unknown;
 }
 
 /** A single validated work. All fields are safe to persist. */
@@ -95,6 +99,14 @@ export interface DouyinSnapshot {
   authorName: string;
   authorAvatar: string;
   items: DouyinItem[];
+  /**
+   * Work count the profile header stated, or 0 when it was absent/abbreviated.
+   * Compared against `items.length` to tell a complete grid from one that was
+   * cut short by a login wall.
+   */
+  statedTotal: number;
+  /** True when scrolling stopped producing new works. */
+  saturated: boolean;
 }
 
 function asText(value: unknown, max = MAX_TEXT_LEN): string {
@@ -287,10 +299,19 @@ export function normalizeSnapshot(raw: unknown): DouyinSnapshot | null {
   // waterfall layout break strict ordering, so never trust the page's order.
   items.sort((a, b) => b.publishedAt - a.publishedAt);
 
+  // A stated total is only useful when it is a sane positive integer; anything
+  // else is treated as "unknown" (0) rather than driving a bogus completeness
+  // check downstream.
+  const rawTotal = Number(snapshot.statedTotal);
+  const statedTotal =
+    Number.isFinite(rawTotal) && rawTotal > 0 && rawTotal < 1_000_000 ? Math.floor(rawTotal) : 0;
+
   return {
     secUid,
     authorName,
     authorAvatar: normalizeMediaUrl(snapshot.authorAvatar),
     items,
+    statedTotal,
+    saturated: snapshot.saturated === true,
   };
 }

@@ -15,7 +15,7 @@
  * handler additionally verifies that the tab it scrapes is genuinely on
  * douyin.com (hostname match, never a substring — AGENTS rule 1).
  */
-import { collectDouyinSnapshot } from '../../../adapters/douyin/collector';
+import { collectDouyinSnapshot, deepCollectDouyinSnapshot } from '../../../adapters/douyin/collector';
 import { MAX_ITEMS_PER_SNAPSHOT } from '../../../adapters/douyin/contract';
 import { hostMatches } from './hosts';
 
@@ -23,6 +23,8 @@ interface DouyinSnapshotMessage {
   type: 'FETCH_DOUYIN_SNAPSHOT';
   secUid?: unknown;
   limit?: unknown;
+  /** When true, scroll the grid to pull in older works before scraping. */
+  deep?: unknown;
 }
 
 type SendResponse = (response?: unknown) => void;
@@ -117,11 +119,20 @@ export function handleDouyinSnapshot(
         return;
       }
 
-      const injected = await chrome.scripting.executeScript({
-        target: { tabId: target.id },
-        func: collectDouyinSnapshot,
-        args: [limit],
-      });
+      const deep = message.deep === true;
+      const injected = deep
+        ? await chrome.scripting.executeScript({
+            target: { tabId: target.id },
+            func: deepCollectDouyinSnapshot,
+            // Scroll rounds are bounded so a dig cannot spin forever against a
+            // grid that is gated rather than finished.
+            args: [limit, 40],
+          })
+        : await chrome.scripting.executeScript({
+            target: { tabId: target.id },
+            func: collectDouyinSnapshot,
+            args: [limit],
+          });
 
       const snapshot = injected?.[0]?.result;
       if (!snapshot || typeof snapshot !== 'object') {

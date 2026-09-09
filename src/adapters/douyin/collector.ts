@@ -28,6 +28,17 @@ export interface CollectedSnapshot {
   gridError: boolean;
   requiresAuth: boolean;
   requiresVerify: boolean;
+  /**
+   * The work count the profile header states ("作品 29"), when present.
+   *
+   * Lets the adapter tell "this creator really has 18 works" apart from "the page
+   * stopped loading at 18 of 29" — anonymous browsing hits a login wall partway
+   * down the grid, and without this the sync layer would report a truncated dig
+   * as a complete one.
+   */
+  statedTotal: number | null;
+  /** True when scrolling stopped producing new works (deep collect only). */
+  saturated: boolean;
 }
 
 /**
@@ -125,6 +136,17 @@ export function collectDouyinSnapshot(maxItems: number): CollectedSnapshot {
     });
   }
 
+  // The header states the creator's total work count ("作品 29"). Captured so the
+  // adapter can detect a grid that stopped short of it.
+  let statedTotal: number | null = null;
+  const tabCount = document.querySelector('[data-e2e="user-tab-count"]');
+  if (tabCount) {
+    const raw = text((tabCount as HTMLElement).innerText, 20);
+    // Plain integers only: Douyin abbreviates large counts ("5.9万"), and a
+    // guessed expansion would produce a bogus completeness check.
+    if (/^\d+$/.test(raw)) statedTotal = Number(raw);
+  }
+
   return {
     secUid: secUidFromPath(),
     authorName,
@@ -134,5 +156,79 @@ export function collectDouyinSnapshot(maxItems: number): CollectedSnapshot {
     gridError: gridError && items.length === 0,
     requiresAuth,
     requiresVerify,
+    statedTotal,
+    saturated: false,
   };
+}
+
+/**
+ * Deep collect: scroll the grid until it stops yielding new works, then scrape.
+ *
+ * Why this is not just `collectDouyinSnapshot` in a loop: the creator page does
+ * NOT scroll the window. The grid lives inside `.route-scroll-container`, whose
+ * own `scrollTop` drives the lazy loader — a `window.scrollTo` never triggers it,
+ * which is what made the original spike conclude Douyin had no usable pagination.
+ *
+ * Anonymous browsing hits a login wall partway down the grid (measured: 18 of a
+ * stated 29 works, then no further growth no matter how far it is scrolled), so
+ * `saturated` reports only that scrolling stopped helping. Whether that means
+ * "reached the end" or "blocked" is decided by the adapter, which compares the
+ * count against `statedTotal`.
+ */
+export async function deepCollectDouyinSnapshot(
+  maxItems: number,
+  maxScrolls: number,
+): Promise<CollectedSnapshot> {
+  const countWorks = (): number => {
+    const grid = document.querySelector('[data-e2e="user-post-list"]');
+    if (!grid) return 0;
+    const hrefs = Array.from(grid.querySelectorAll('a[href*="/video/"], a[href*="/note/"]'))
+      .map((a) => a.getAttribute('href') || '')
+      .filter((h) => /\/(?:video|note)\/\d{15,25}/.test(h));
+    return new Set(hrefs).size;
+  };
+
+  /** Drive every scrollable ancestor of the grid, plus the last card into view. */
+  const scrollGrid = (): void => {
+    const grid = document.querySelector('[data-e2e="user-post-list"]');
+    if (grid) {
+      const cards = grid.querySelectorAll('li');
+      if (cards.length) cards[cards.length - 1].scrollIntoView({ block: 'end' });
+      // Walk ancestors rather than scanning the whole document: only a container
+      // that actually holds the grid can be the feed's scroller.
+      let node: HTMLElement | null = grid as HTMLElement;
+      while (node) {
+        if (node.scrollHeight > node.clientHeight + 20) node.scrollTop = node.scrollHeight;
+        node = node.parentElement;
+      }
+    }
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  };
+
+  let stagnant = 0;
+  let previous = countWorks();
+  let saturated = false;
+
+  for (let round = 0; round < maxScrolls; round++) {
+    if (previous >= maxItems) break;
+    scrollGrid();
+    // The lazy loader needs a moment; 900ms matches the pacing the sync layer
+    // already uses between paginated requests.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const current = countWorks();
+    if (current <= previous) {
+      stagnant++;
+      // Three quiet rounds: the grid is done growing, whether finished or gated.
+      if (stagnant >= 3) {
+        saturated = true;
+        break;
+      }
+    } else {
+      stagnant = 0;
+    }
+    previous = current;
+  }
+
+  const snapshot = collectDouyinSnapshot(maxItems);
+  return { ...snapshot, saturated };
 }

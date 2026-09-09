@@ -377,6 +377,35 @@ describe('buildDouyinPosts', () => {
   });
 });
 
+describe('history dig — grid completeness', () => {
+  // The creator page does not scroll the window: the grid sits in
+  // `.route-scroll-container`, whose own scrollTop drives the lazy loader. The
+  // original V1 spike scrolled the window, saw no growth, and wrongly concluded
+  // Douyin had no usable pagination — hence history was declared unsupported.
+  // Anonymous browsing then stops partway down (measured: 18 of a stated 29).
+  it('carries the stated work total through validation', () => {
+    const snapshot = normalizeSnapshot({ ...videoSnapshot, statedTotal: 29 })!;
+    expect(snapshot.statedTotal).toBe(29);
+    expect(snapshot.items.length).toBeLessThan(29);
+  });
+
+  it('treats an absent or abbreviated total as unknown', () => {
+    // Douyin abbreviates large counts ("5.9万"); guessing an expansion would
+    // drive a bogus completeness check.
+    expect(normalizeSnapshot(videoSnapshot)!.statedTotal).toBe(0);
+    expect(normalizeSnapshot({ ...videoSnapshot, statedTotal: '5.9万' })!.statedTotal).toBe(0);
+    expect(normalizeSnapshot({ ...videoSnapshot, statedTotal: -3 })!.statedTotal).toBe(0);
+    expect(normalizeSnapshot({ ...videoSnapshot, statedTotal: Number.NaN })!.statedTotal).toBe(0);
+  });
+
+  it('reports whether scrolling saturated', () => {
+    expect(normalizeSnapshot({ ...videoSnapshot, saturated: true })!.saturated).toBe(true);
+    expect(normalizeSnapshot(videoSnapshot)!.saturated).toBe(false);
+    // Only a real boolean counts; a truthy string must not pass for saturation.
+    expect(normalizeSnapshot({ ...videoSnapshot, saturated: 'yes' })!.saturated).toBe(false);
+  });
+});
+
 describe('douyin adapter surface', () => {
   it('does not advertise a history implementation it cannot deliver', () => {
     // `fetchChannelHistory` routes digs back through `fetchLatest`, so a

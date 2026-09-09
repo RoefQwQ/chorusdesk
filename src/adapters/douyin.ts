@@ -56,9 +56,12 @@ export const douyinAdapter: PlatformAdapter = {
 
     let response: SnapshotResponse;
     try {
+      // A history dig (or an explicit force-refresh) asks the page to scroll the
+      // grid first, which is the only way older works enter the DOM.
+      const deep = isDeepRequest(options);
       response = await new Promise<SnapshotResponse>((resolve) => {
         chrome.runtime.sendMessage(
-          { type: 'FETCH_DOUYIN_SNAPSHOT', secUid, limit },
+          { type: 'FETCH_DOUYIN_SNAPSHOT', secUid, limit: deep ? MAX_HISTORY_ITEMS : limit, deep },
           (res) => {
             if (chrome.runtime.lastError) {
               resolve({ success: false, code: 'network', error: chrome.runtime.lastError.message });
@@ -91,7 +94,34 @@ export const douyinAdapter: PlatformAdapter = {
       };
     }
 
-    const posts = buildDouyinPosts(channel, snapshot, limit, options);
+    // A dig wants everything the scrolled grid yielded, not just one page's worth.
+    const buildLimit = isDeepRequest(options) ? MAX_HISTORY_ITEMS : limit;
+    const posts = buildDouyinPosts(channel, snapshot, buildLimit, options);
+
+    // Did the grid stop short of the creator's stated work count? Anonymous
+    // browsing hits a login wall partway down (measured: 18 of a stated 29, with
+    // no further growth however far it is scrolled), and the works behind it are
+    // exactly the older ones a history dig is after. Saying "已到底" there would
+    // be a lie, so the truncation is surfaced as an auth error instead — the sync
+    // layer shows the message and does NOT park the cursor at __END__.
+    const isDeep = isDeepRequest(options);
+    const truncated =
+      snapshot.statedTotal > 0 && snapshot.items.length < snapshot.statedTotal;
+
+    if (isDeep && truncated && posts.length === 0) {
+      return {
+        posts: [],
+        authorMeta: {
+          name: snapshot.authorName || undefined,
+          avatar: snapshot.authorAvatar || undefined,
+        },
+        error: fetchError(
+          'auth',
+          `抖音页面只加载出 ${snapshot.items.length} / ${snapshot.statedTotal} 篇作品便停止。更早的作品需要在抖音标签页中登录后向下滚动加载，请登录后重试。`,
+        ),
+        totalFetched: snapshot.items.length,
+      };
+    }
 
     return {
       posts,
@@ -99,18 +129,32 @@ export const douyinAdapter: PlatformAdapter = {
         name: snapshot.authorName || undefined,
         avatar: snapshot.authorAvatar || undefined,
       },
-      // History digging is NOT supported: the spike found no reliable, bounded
-      // pagination for the DOM grid, and faking it would silently skip works.
-      // `hasMore: false` is the contract's end-of-history signal, so
-      // `channelSync` parks the cursor at `__END__` and the dashboard's deep-sync
-      // stops after one round instead of looping against a source that cannot
-      // page. (A `fetchHistory` override would be dead code: `fetchChannelHistory`
-      // routes every dig back through `fetchLatest`.)
-      hasMore: false,
+      // `hasMore: false` is the end-of-history signal, so only claim it when the
+      // grid actually looks complete. A grid cut short by a login wall must stay
+      // resumable: parking the cursor at __END__ would permanently stop the user
+      // from digging the rest after they log in.
+      hasMore: truncated ? undefined : false,
       totalFetched: snapshot.items.length,
     };
   },
 };
+
+/**
+ * Ceiling for a history dig's page payload. Bounded because a dig scrolls the
+ * grid, and an unbounded scrape of a prolific creator would ship a huge snapshot
+ * across the message channel in one go.
+ */
+const MAX_HISTORY_ITEMS = 200;
+
+/**
+ * True when this fetch should scroll the grid before scraping.
+ *
+ * A dig, a cursor-driven page and a force-refresh all want older works, which
+ * only enter the DOM once the grid's own scroll container is driven.
+ */
+function isDeepRequest(options?: FetchOptions): boolean {
+  return Boolean(options?.isHistory || options?.cursor !== undefined || options?.forceRefresh);
+}
 
 /** Map validated works onto Posts, applying the incremental watermark. */
 export function buildDouyinPosts(
