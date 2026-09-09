@@ -148,6 +148,26 @@ Two further invariants this exposed, both easy to miss:
   keeps its `平台用户_xxxx` placeholder forever, because the real nickname is only allowed to
   overwrite a name the sync layer recognizes as a placeholder.
 
+## 10. Probe the page's real scroll container before declaring "no pagination"
+
+Douyin's creator page does not scroll the window: the work grid lives inside
+`.route-scroll-container`, and only that element's `scrollTop` drives its lazy loader. The V1 spike
+drove `window.scrollTo`, watched the item count never move, and recorded "no reliable pagination" —
+a wrong conclusion baked into the adapter and the docs, because the window never scrolls at all
+there (document height stays under the viewport), so that probe could only ever fail.
+
+Before concluding a feed cannot page: enumerate elements whose `scrollHeight > clientHeight` and
+check which one contains the feed. Walk the feed's scrollable ancestors and drive those.
+
+Equally important — **a grid that stops growing is not proof it is finished.** Douyin serves
+anonymous visitors a truncated grid (measured: 18 of a stated 29 works, then nothing however far it
+scrolls). So distinguish the two cases from evidence, don't guess:
+
+- Capture whatever total the page states, and compare it against what loaded.
+- Short of the total ⇒ do NOT return `hasMore: false`. That is the end-of-history signal, and
+  `channelSync` writes `__END__`, permanently blocking the dig from ever resuming.
+- Report the shortfall as a real error naming it, never as a successful sync with 0 new posts.
+
 ---
 
 ## Fix queue

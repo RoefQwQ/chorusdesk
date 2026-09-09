@@ -393,7 +393,7 @@ Rplay 凭证采集有三条路径汇入 `chrome.storage.local['rplay_auth_token'
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
 | `SYNC_RPLAY_TOKEN` | Popup `useRplaySync`、Dashboard 设置页 | `messages/rplaySync.ts` `handleSyncRplayToken` | — | `{ success:true, token }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
-| `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
+| `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit, deep }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`；`deep=true` 时先滚动作品网格再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
 
 各 handler 文件顶部注释均固化了自己那一半契约（入参/出参），改动协议时这些注释与 `bgFetch`/`proxyImage`/`useRplaySync`/`twitterAdapter` 的调用面必须一并核对。
 
