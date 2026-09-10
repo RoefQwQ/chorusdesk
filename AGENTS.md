@@ -434,6 +434,45 @@ Both of that user's last two log pastes had to be trimmed by hand to find the us
 
 ---
 
+## 21. A comment that asserts upstream behaviour is a guess — and a fixture built on it ships the bug green
+
+`twitter.ts` carried this claim:
+
+> `display_text_range` is the `[0, end]` slice of `full_text` that is the author's text. X
+> appends the media / quoted-tweet `t.co` URL to `full_text` but **excludes it from this
+> range**…
+
+The second half is wrong. `display_text_range` exists to exclude **leading @mentions**; on a
+real media tweet it spans the whole string, appended link included. So a caption rendered as
+`正文… https://t.co/xxxx`, and a short caption's title line — which is the body's first line —
+became `caption https://t.co/…` in bold.
+
+The expensive part is what the wrong belief did to the **test suite**: the fixture set
+`display_text_range = [0, caption.length]`, i.e. it encoded the assumption as expected
+behaviour. `strips the media link X appends to a caption` therefore passed for months while
+every real payload leaked. Worse, the fixture's media entity had **no `url` field** — the very
+value the correct fix keys on — so nothing in the suite could observe the difference.
+
+**X's own clients do not use the range for this**: they take each media entity's `url` and
+remove that exact substring. Do the same — it works whether or not the range happens to
+exclude the link.
+
+Rules that follow:
+
+- **Never rely on an upstream field for a behaviour you have not measured.** If a comment says
+  what an API does, it needs a fixture taken from a real payload behind it, or it is a guess
+  wearing a citation.
+- **A fixture must contain the fields the fix depends on.** Removing the entity `url` from the
+  fixture silently made the whole area untestable; the fix and its test then agreed with each
+  other and with nothing real.
+- **Only remove what the payload says it appended.** Author-typed links live in
+  `entities.urls`, never in a media entity, so they are never in the appended set. Stripping
+  those would delete content the author wrote — and the repair rule must be equally narrow
+  (stored text must *begin with* the fresh text and end in nothing but t.co links), because
+  "starts with" alone would match any row the author continued writing.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -451,4 +490,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 363 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 384 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
