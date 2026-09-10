@@ -28,6 +28,8 @@ let gridResult: boolean;
 let navigatedAwayTo: string | null;
 /** How many grid-probe injections fail (rejected or valueless) before one runs. */
 let probeFailures: number;
+/** Arguments the grid probe is injected with; `[0]` is its wait budget. */
+let gridProbeArgs: unknown[] | undefined;
 /** How many collector injections fail before one runs. */
 let collectFailures: number;
 /** When true, a failed injection resolves without a value instead of rejecting. */
@@ -52,6 +54,7 @@ function installChrome() {
   gridResult = true;
   navigatedAwayTo = null;
   probeFailures = 0;
+  gridProbeArgs = undefined;
   collectFailures = 0;
   failSilently = false;
 
@@ -110,6 +113,7 @@ function installChrome() {
         // asserted at all.
         if (opts.func === awaitDouyinGrid) {
           events.push('await-grid');
+          gridProbeArgs = opts.args;
           if (probeFailures > 0) {
             probeFailures--;
             // A destroyed frame surfaces either as a rejection OR as a
@@ -182,6 +186,49 @@ describe('douyin snapshot — grid readiness', () => {
 
     expect(events).toContain('inject');
     expect(res.success).toBe(true);
+  });
+});
+
+describe('douyin snapshot — the readiness wait is the point', () => {
+  it('gives the grid probe a real waiting budget, not a retry gap', async () => {
+    // This is the regression that got through: the probe was deleted in favour of
+    // "the collector is the readiness check", which cut the wait from ~10s to
+    // three attempts 700ms apart (~1.4s). Every Douyin channel had been failing
+    // for months precisely because the grid was not given time to render, so
+    // shortening the budget reintroduced the original defect while the retry
+    // tests all stayed green.
+    //
+    // A Douyin page load plus a client-rendered grid is seconds, not fractions of
+    // one: the client-side navigation that follows `load` alone accounts for the
+    // first few. The budget must stay in that order of magnitude.
+    probeFailures = 0;
+
+    await run();
+
+    expect(gridProbeArgs).toBeDefined();
+    const budget = Number(gridProbeArgs![0]);
+    expect(Number.isFinite(budget)).toBe(true);
+    expect(budget).toBeGreaterThanOrEqual(8_000);
+  });
+
+  it('does not retry a probe that already spent its budget', async () => {
+    // `ready: false` from a probe that ran is a real answer, and it arrived after
+    // the full wait — retrying would spend a second ten seconds on the same
+    // question. The wait is the budget, so it is spent once. (A probe that never
+    // *ran* is different: that is retried, because it cost nothing.)
+    gridResult = false;
+
+    await run();
+
+    expect(events.filter((e) => e === 'await-grid')).toHaveLength(1);
+  });
+
+  it('does not retry the probe once the grid is ready', async () => {
+    gridResult = true;
+
+    await run();
+
+    expect(events.filter((e) => e === 'await-grid')).toHaveLength(1);
   });
 });
 

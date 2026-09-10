@@ -103,19 +103,19 @@ export function handleDouyinSnapshot(
         (t) => t.id && typeof t.url === 'string' && t.url.includes(secUid) && isDouyinTabUrl(t.url),
       );
 
-      // Probe for the one open question this path depends on: without the `tabs`
-      // permission, does `tabs.query` still hand back URLs for pages we hold host
-      // permission for? If it does not, `url` is undefined, every lookup falls
-      // through to "no tab found", and both Douyin and Twitter tab targeting
-      // break. Log the counts so a single sync answers it instead of a guess.
       const douyinTabs = tabs.filter((t) => isDouyinTabUrl(t.url));
       const urlsReadable = douyinTabs.filter((t) => typeof t.url === 'string' && t.url.length > 0).length;
+      // Debug only, and the hint is informational. It used to append "⚠ 若确实开着
+      // 抖音页，说明 tabs.query 在无 tabs 权限下不返回 URL" whenever no Douyin tab
+      // was found — but that is the ordinary case, because this handler opens its
+      // own tab. It fired on nearly every sync and read as a problem when nothing
+      // was wrong. The counts still answer the question they were added for: the
+      // `tabs.query`-without-`tabs`-permission concern is settled (URLs are
+      // returned), so nothing here needs to raise an alarm.
       devLog.debug(
         'douyin',
         `标签页扫描：共 ${tabs.length} 个，抖音 ${douyinTabs.length} 个，其中 URL 可读 ${urlsReadable} 个`,
-        tabs.length > 0 && douyinTabs.length === 0
-          ? '⚠ 未识别出抖音页；若确实开着抖音页，说明 tabs.query 在无 tabs 权限下不返回 URL'
-          : undefined,
+        douyinTabs.length > 0 ? undefined : '未找到可复用的抖音页，将新建临时页采集',
       );
 
       let targetId: number | undefined = exact?.id;
