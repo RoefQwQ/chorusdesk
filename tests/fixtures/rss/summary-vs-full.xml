@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>橘鸦AI早报</title>
+    <link>https://daily.juya.uk/</link>
+    <item>
+      <title>2026-09-10</title>
+      <link>https://daily.juya.uk/2026/09/10</link>
+      <guid isPermaLink="false">https://daily.juya.uk/2026/09/10</guid>
+      <pubDate>Thu, 10 Sep 2026 01:36:41 GMT</pubDate>
+      <description>AI 早报 2026 09 10 视频版 ：哔哩哔哩 ｜ YouTube 概览 要闻 DeepSeek 计划9月10日前后正式发布 V4.1 Flash ↗ 1 Tibo 称或暂停新的 ChatGPT Pro 订阅 ↗ 2 OpenAI 修复 Codex 用量额度意外重置异常 ↗ 3 OpenAI 更新 ChatGPT Voice 功能并调整用量规则 ↗ 4 OpenAI 为 ChatGPT 推出 Library 分享功能 ↗ 5 模型发布 Suno 发布新一代音乐模型 v6，v6 mini 向所有用户开放 ↗ 6 腾讯混元开源语音生成与编辑基础模型 AuK ↗ 7 欧洲端侧AI实验室Desert Ant Labs成立，18个小模型同步发布 ↗ 8 开发生态 GLM 5.3 Flash 在 OpenCode…</description>
+      <content:encoded>&lt;div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Hiragino Sans GB,sans-serif;font-size:16px;line-height:1.75;color:#18181b;max-width:760px;"&gt;&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/20260910/202609100909171130398ca1_cover_650d.png" alt=""&gt;&lt;/p&gt;
+&lt;h1&gt;AI 早报 2026-09-10&lt;/h1&gt;
+&lt;p&gt;&lt;strong&gt;视频版&lt;/strong&gt;：&lt;a href="https://www.bilibili.com/video/BV12iYK6mEmo" rel="noopener noreferrer"&gt;哔哩哔哩&lt;/a&gt; ｜ &lt;a href="https://www.youtube.com/watch?v=-a8ht3K7qQ0" rel="noopener noreferrer"&gt;YouTube&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;概览&lt;/h2&gt;
+&lt;h3&gt;要闻&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;DeepSeek 计划9月10日前后正式发布 V4.1 Flash &lt;a href="https://x.com/tianyi/status/2097584362770530674" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#1&lt;/code&gt;&lt;/li&gt;&lt;li&gt;Tibo 称或暂停新的 ChatGPT Pro 订阅 &lt;a href="https://x.com/thsottiaux/status/2097559315150426222" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#2&lt;/code&gt;&lt;/li&gt;&lt;li&gt;OpenAI 修复 Codex 用量额度意外重置异常 &lt;a href="https://x.com/thsottiaux/status/2097752790177370535" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#3&lt;/code&gt;&lt;/li&gt;&lt;li&gt;OpenAI 更新 ChatGPT Voice 功能并调整用量规则 &lt;a href="https://x.com/athyuttamre/status/2097761258497855488" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#4&lt;/code&gt;&lt;/li&gt;&lt;li&gt;OpenAI 为 ChatGPT 推出 Library 分享功能 &lt;a href="https://help.openai.com/en/articles/6825453-chatgpt-release-notes?utm_source=chatgpt.com" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#5&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;模型发布&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;Suno 发布新一代音乐模型 v6，v6-mini 向所有用户开放 &lt;a href="https://suno.com/blog/introducing-v6" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#6&lt;/code&gt;&lt;/li&gt;&lt;li&gt;腾讯混元开源语音生成与编辑基础模型 AuK &lt;a href="https://auk-project.github.io/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#7&lt;/code&gt;&lt;/li&gt;&lt;li&gt;欧洲端侧AI实验室Desert Ant Labs成立，18个小模型同步发布 &lt;a href="https://desertant.com/blog/introducing-desert-ant-labs/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#8&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;开发生态&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;GLM 5.3 Flash 在 OpenCode Go 上的限额翻倍 &lt;a href="https://x.com/opencode/status/2097822126296252482" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#9&lt;/code&gt;&lt;/li&gt;&lt;li&gt;ClaudeDevs 发布平台降本指南 &lt;a href="https://claude.com/blog/reducing-cost-and-improving-performance-with-claude-platform" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#10&lt;/code&gt;&lt;/li&gt;&lt;li&gt;Unity 发布 Claude Code 官方插件 &lt;a href="https://unity.com/blog/unity-plugin-for-claude-code" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#11&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;产品应用&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;WorkBuddy调整Hy4 preview限免权益 &lt;a href="https://mp.weixin.qq.com/s/vPQeT1PGH3QgYkB1PbzoKQ" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#12&lt;/code&gt;&lt;/li&gt;&lt;li&gt;千问推出大学生和教师专属会员优惠 &lt;a href="https://mp.weixin.qq.com/s/v4hIhXEdhCDfPq0maP_reg" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#13&lt;/code&gt;&lt;/li&gt;&lt;li&gt;谷歌为 Google AI 订阅方案推出语音功能等更新 &lt;a href="https://blog.google/products-and-platforms/products/google-one/fall-2026-ai-plan-updates/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#14&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;技术与洞察&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;Anthropic 对齐负责人称 AI 十年内灭绝人类概率超 10% &lt;a href="https://anthropic.com/aug-2026-risk-report" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#15&lt;/code&gt;&lt;/li&gt;&lt;li&gt;Anthropic 发布四起 Claude 模型未经授权访问真实系统事件的对齐评估报告 &lt;a href="https://www.anthropic.com/research/alignment-assessment-cybersecurity-incidents" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#16&lt;/code&gt;&lt;/li&gt;&lt;li&gt;Anthropic 发布经济情景探索工具，模拟 AI 对 2030 年经济的影响 &lt;a href="https://www.anthropic.com/features/econ-scenarios" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#17&lt;/code&gt;&lt;/li&gt;&lt;li&gt;OpenAI公开Defense Factory架构与防御手册 &lt;a href="https://openai.com/the-defense-factory/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#18&lt;/code&gt;&lt;/li&gt;&lt;li&gt;Google 开发者博客详解 AI 编程 Agent 行为评估方法 &lt;a href="https://developers.googleblog.com/the-anatomy-of-harness-engineering-how-to-evaluate-iterate-and-guard-ai-coding-agents/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#19&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;行业动态&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;Paul Christiano 加入 OpenAI Foundation 董事会 &lt;a href="https://openai.com/index/paul-christiano-joins-openai-foundation-board/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#20&lt;/code&gt;&lt;/li&gt;&lt;li&gt;三星宣布与 Mistral AI 战略合作 &lt;a href="https://news.samsung.com/global/samsung-and-mistral-ai-announce-strategic-partnership-for-intelligence-driven-semiconductor-infrastructure" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#21&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;前瞻与传闻&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;路透社：DeepSeek 计划今年启动科创板上市进程 &lt;a href="https://www.reuters.com/world/chinas-deepseek-taps-citic-securities-domestic-ipo-sources-say-2026-09-09/" rel="noopener noreferrer"&gt;↗&lt;/a&gt; &lt;code&gt;#22&lt;/code&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;hr&gt;
+&lt;h2&gt;要闻&lt;/h2&gt;
+&lt;h3&gt;&lt;a href="https://x.com/tianyi/status/2097584362770530674" rel="noopener noreferrer"&gt;DeepSeek 计划9月10日前后正式发布 V4.1 Flash&lt;/a&gt; &lt;code&gt;#1&lt;/code&gt;&lt;/h3&gt;
+&lt;blockquote&gt;DeepSeek 宣布计划于北京时间 2026 年 9 月 10 日前后正式发布 V4.1 Flash。该模型已于9 月 8 日开启测试。DeepSeek 称，内部及外部多方测试显示，V4.1 Flash 在性能、费用、速度和任务总用时等指标上已超过 V4 Pro；正式上线后至 V4.1 Pro 推出前，V4 Pro 请求将全部路由至 V4.1 Flash，并按 V4.1 Flash 单价计费。&lt;/blockquote&gt;
+&lt;p&gt;DeepSeek 在开放平台公告中称，计划于北京时间2026年9月10日前后正式发布 V4.1 Flash 模型，经内部、外部多方测试，该模型在性能、费用、速度、总用时等指标上已全面超越 V4 Pro。公告表示，在 V4.1 Flash 正式上线之后、V4.1 Pro 上线之前，会把对 V4 Pro 的请求全部路由到 V4.1 Flash，并按 V4.1 Flash 单价计费，用户如对比测试中发现问题可及时反馈。&lt;/p&gt;
+&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/866452d5-ac30-4fe1-a90d-d89fd65a2042/m001_aaad3336.png" alt=""&gt;&lt;/p&gt;
+&lt;p&gt;相关链接：&lt;/p&gt;
+&lt;ul&gt;&lt;li&gt;&lt;a href="https://x.com/tianyi/status/2097584362770530674" rel="noopener noreferrer"&gt;https://x.com/tianyi/status/2097584362770530674&lt;/a&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;hr&gt;
+&lt;h3&gt;&lt;a href="https://x.com/thsottiaux/status/2097559315150426222" rel="noopener noreferrer"&gt;Tibo 称或暂停新的 ChatGPT Pro 订阅&lt;/a&gt; &lt;code&gt;#2&lt;/code&gt;&lt;/h3&gt;
+&lt;blockquote&gt;Codex负责人Tibo表示，Astra需求前所未有，团队正全力支撑，优先保障现有用户体验。若需求持续，可能暂停新的 ChatGPT Pro 档位订阅。但目前该暂停尚未发生，也有用户称 Tibo 是在推销 ChatGPT 订阅。&lt;/blockquote&gt;
+&lt;p&gt;Codex 负责人 Tibo 在 X 上发帖称，Astra 的需求&amp;quot;前所未有&amp;quot;，团队正动用一切可能的手段来支撑该需求，但他此前经历过的陡峭增长中也没见过这种情况。他表示，优先级始终是为现有用户保持优质服务，但如果需求持续，可能不得不暂时暂停新的 Pro 订阅一段时间。Tibo 的表述是条件式的&amp;quot;可能&amp;quot;，该暂停目前尚未发生。回帖则集中讨论用量消耗过快、Astra 在低档位表现变差，以及 resets 是否受影响。&lt;/p&gt;
+&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/afd1a105-b8a2-46c0-a8c8-a1130b79c45f/m001_eb36e6f7.png" alt=""&gt;&lt;/p&gt;
+&lt;p&gt;相关链接：&lt;/p&gt;
+&lt;ul&gt;&lt;li&gt;&lt;a href="https://x.com/thsottiaux/status/2097559315150426222" rel="noopener noreferrer"&gt;https://x.com/thsottiaux/status/2097559315150426222&lt;/a&gt;&lt;/li&gt;&lt;/ul&gt;
+&lt;hr&gt;
+&lt;h3&gt;&lt;a href="https://x.com/thsottiaux/status/2097752790177370535" rel="noopener noreferrer"&gt;OpenAI 修复 Codex 用量额度意外重置异常&lt;/a&gt; &lt;code&gt;#3&lt;/code&gt;&lt;/h3&gt;
+&lt;blockquote&gt;OpenAI 状态页显示，部分 Codex 用户遭遇意外的用量额度重置，受影响服务目前已全部恢复。Tibo 表示，受影响时间窗口内使用过额度重置的用户将获得补发和致歉邮件。&lt;/blockquote&gt;
+&lt;p&gt;OpenAI 在状态页记录并处理了一起用量额度事故：部分 Codex 用户遭遇意外的用量额度重置，OpenAI 随后定位问题并应用缓解措施，最终确认所有受影响服务已完全恢复。Tibo 随后说明，当天早些时候部分已累积的额度重置在 ChatGPT Work 和 Codex 中使用时未能完全生效，在受影响时间窗口内使用过额度重置的每位用户都将获得一次补发，并收到致歉邮件。&lt;/p&gt;
+&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/1dacadbd-e07b-4c75-adfd-9d750cb4a8d5/m001_5204eef3.png" alt=""&gt;&lt;/p&gt;
+&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/1dacadbd-e07b-4c75-adfd-9d750cb4a8d5/m002_2744a997.png" alt=""&gt;&lt;/p&gt;
+&lt;p&gt;&lt;p&gt;SENTINEL_ARTICLE_TAIL：这一句只存在于全文，摘要里没有。&lt;/p&gt;</content:encoded>
+    </item>
+  </channel>
+</rss>

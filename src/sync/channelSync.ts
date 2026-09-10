@@ -37,17 +37,23 @@ function friendlyError(err: FetchError): string {
 }
 
 /**
- * A body stored by the old RSS 350-character cap.
+ * An RSS row whose stored body is a summary where the feed has a full article.
  *
- * The removed code produced exactly `cleanText.slice(0, 350) + '...'`, so a stored
- * body of 353 characters ending in `...` is that artefact and nothing else —
- * the marker is the bug's own fingerprint. Combined with "the freshly fetched
- * body is longer", this can only ever replace a truncated row with a fuller one,
- * which is why the repair is safe to run on the incremental path that otherwise
- * never rewrites existing rows.
+ * The adapter used to read `<description>`, which many feeds truncate themselves.
+ * Rows written then are short; the freshly parsed body comes from
+ * `<content:encoded>` and is the article. "The freshly parsed body is strictly
+ * longer" is therefore the whole test — and it is self-limiting: once the row is
+ * replaced, both sides come from the same source and are equal, so it never
+ * matches again.
+ *
+ * An earlier version of this rule keyed off "stored length is exactly 353 and
+ * ends with `...`" — the fingerprint of an old 350-character cap. That rule never
+ * matched a single row in practice, because the data on disk was the feed's own
+ * summary (measured 359 characters ending in a single `…`), not the cap's output.
+ * The assumption, not the data, was wrong.
  */
-export function isLegacyTruncatedRssContent(stored: string, fetched: string): boolean {
-  return stored.length === 353 && stored.endsWith('...') && fetched.length > stored.length;
+export function isRssBodySuperseded(stored: Post, fresh: Post): boolean {
+  return fresh.content.length > stored.content.length;
 }
 
 /**
@@ -67,14 +73,15 @@ function isBareShortLink(text: string): boolean {
 /**
  * Whether a stored row's text should be replaced by what the adapter just parsed.
  *
- * Deliberately per-platform and narrow. Both rules match only shapes that can
- * *only* be artefacts of a bug this project shipped, so the replacement can never
- * discard correct content: the RSS rule needs the old cap's exact fingerprint,
- * and the Twitter rule needs a body consisting solely of a media link.
+ * Deliberately per-platform and narrow. Each rule matches only a shape that can
+ * *only* be an artefact of a bug this project shipped, so the replacement can
+ * never discard correct content: the RSS rule needs the freshly parsed body to be
+ * strictly longer (bodies only ever get more complete), and the Twitter rule needs
+ * a body consisting solely of a media link.
  */
 export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
   if (stored.platform !== fresh.platform) return false;
-  if (stored.platform === 'rss') return isLegacyTruncatedRssContent(stored.content, fresh.content);
+  if (stored.platform === 'rss') return isRssBodySuperseded(stored, fresh);
   if (stored.platform === 'twitter') {
     return isBareShortLink(stored.content) && fresh.content !== stored.content;
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeRssContent } from '../src/adapters/rss';
+import { RSS_MAX_CONTENT_CHARS, normalizeRssContent } from '../src/adapters/rss';
 
 /**
  * RSS body storage.
@@ -26,17 +26,22 @@ describe('normalizeRssContent', () => {
     expect(normalizeRssContent('  正文  ')).toBe('正文');
   });
 
-  it('caps a pathological body and marks the cut', () => {
-    // A feed that puts a whole book in one <description> must not bloat storage.
-    const huge = 'x'.repeat(10_000);
-    const stored = normalizeRssContent(huge);
+  it('keeps a real article whole but caps a pathological body', () => {
+    // Sized from real data: measured articles run 3.7k-14.9k plain-text
+    // characters, so the ceiling must sit above that or it truncates the very
+    // articles this feature exists to store.
+    const realArticle = 'x'.repeat(14_885);
+    expect(normalizeRssContent(realArticle)).toBe(realArticle);
 
-    expect(stored.length).toBeLessThanOrEqual(4001);
+    // A feed that puts a whole book in one field still must not bloat storage.
+    const huge = 'x'.repeat(50_000);
+    const stored = normalizeRssContent(huge);
+    expect(stored.length).toBeLessThanOrEqual(RSS_MAX_CONTENT_CHARS + 1);
     expect(stored.endsWith('…')).toBe(true);
   });
 
   it('does not add an ellipsis to a body exactly at the ceiling', () => {
-    const exact = 'y'.repeat(4000);
+    const exact = 'y'.repeat(RSS_MAX_CONTENT_CHARS);
     expect(normalizeRssContent(exact)).toBe(exact);
   });
 

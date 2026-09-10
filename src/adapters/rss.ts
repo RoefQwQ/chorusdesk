@@ -7,11 +7,12 @@ import { bgFetch } from '../utils/http';
 /**
  * Storage ceiling for one RSS body.
  *
- * Generous on purpose: RSS items are articles, and the card shows them in full.
- * This only stops a pathological feed (a whole book in one `<description>`) from
- * bloating IndexedDB; it is not a display length.
+ * Sized from real articles: the measured plain-text length of a full post in a
+ * representative newsletter feed is 3.7k-14.9k characters, so this covers all of
+ * them while still bounding a pathological feed (a whole book in one field).
+ * A cap that truncates would defeat the point of storing the article at all.
  */
-const RSS_MAX_CONTENT_CHARS = 4000;
+export const RSS_MAX_CONTENT_CHARS = 20000;
 
 /**
  * Normalize a feed item's body for storage.
@@ -105,13 +106,28 @@ export const rssAdapter: PlatformAdapter = {
           link ||
           `${title}|${publishedAt}`;
 
-        const desc =
-          item.querySelector('description, summary, content')?.textContent || '';
+        // Prefer the FULL article over the feed's summary.
+        //
+        // A feed commonly carries a truncated summary in `<description>` /
+        // `<summary>` and the complete article in `<content:encoded>` (RSS) or
+        // `<content>` (Atom). Reading only the summary is why an RSS post stopped
+        // mid-sentence with the feed's own ellipsis: measured on a real
+        // newsletter feed, `<description>` was 359 characters ending in "…" while
+        // `<content:encoded>` carried 31144 characters of article.
+        //
+        // `getElementsByTagName` is used for the namespaced name because a CSS
+        // selector would need the colon escaped and the qualified name is exact.
+        const fullArticle = item.getElementsByTagName('content:encoded')[0]?.textContent;
+        const atomContent = item.querySelector('content')?.textContent;
+        const summary = item.querySelector('description, summary')?.textContent;
+        // A `<description>` may itself be an HTML-escaped document, so it goes
+        // through the same tag-stripping pass as the full article below.
+        const rawBody = fullArticle || atomContent || summary || '';
 
-        // Clean HTML tags from content preview
+        // Strip markup: assign the (entity-decoded) HTML and read the text back.
         const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = desc;
-        const cleanText = tempDiv.textContent || tempDiv.innerText || '';
+        tempDiv.innerHTML = rawBody;
+        const cleanText = (tempDiv.textContent || tempDiv.innerText || '').trim();
 
         // Media enclosures
         const mediaList: MediaItem[] = [];

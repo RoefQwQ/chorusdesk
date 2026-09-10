@@ -1,62 +1,45 @@
 import { describe, expect, it } from 'vitest';
-import { isLegacyTruncatedRssContent, shouldRepairStoredContent } from '../src/sync/channelSync';
+import { isRssBodySuperseded, shouldRepairStoredContent } from '../src/sync/channelSync';
 import type { Post } from '../src/types';
 
 /**
- * Auto-repair of RSS bodies truncated by the removed 350-character cap.
+ * Auto-repair of RSS rows that stored the feed's SUMMARY instead of the article.
  *
- * The old adapter stored `cleanText.slice(0, 350) + '...'`. Users who had already
- * synced those items keep the truncated text — a normal sync never rewrites
- * existing rows, so the fix could not reach them without the user discovering
- * `Shift + click`. This predicate is the narrow rule that lets the incremental
- * path repair exactly those rows and nothing else.
+ * The adapter used to read `<description>`, which feeds commonly truncate
+ * themselves. Measured against a real newsletter feed, that summary was 359
+ * characters ending in a single "…" while `<content:encoded>` held the full
+ * article (31144 characters of markup, 3.7k-14.9k of plain text). Users who had
+ * already synced those items kept the summary, because a normal sync never
+ * rewrites existing rows.
  *
- * The rule must be provably safe: it may only ever replace a truncated body with
- * a longer one, never shorten or overwrite a healthy body.
+ * An earlier attempt keyed the repair off "stored length is exactly 353 and ends
+ * with `...`" — the fingerprint of a 350-character cap. It never matched a single
+ * row, because the data was the feed's own summary rather than the cap's output.
+ * The rule below is derived from the data instead of from an assumption about it:
+ * if the freshly parsed body is longer, the stored one came from a less complete
+ * source. It can only ever replace a body with more content, and it converges —
+ * once replaced, both sides are parsed the same way and compare equal.
  */
 
-/** A body exactly as the old cap produced it. */
-function legacyBody(): string {
-  return 'x'.repeat(350) + '...';
+/** The real numbers, kept as literals so the test states its own evidence. */
+const SUMMARY_LEN = 359;
+const ARTICLE_LEN = 12798;
+
+function rssPost(content: string): Post {
+  return {
+    id: 'rss_1',
+    creatorId: 'c1',
+    channelId: 'rss:daily',
+    platform: 'rss',
+    title: '2026-09-10',
+    content,
+    mediaList: [],
+    originalUrl: 'https://daily.juya.uk/2026/09/10',
+    publishedAt: 1,
+    fetchedAt: 1,
+    isRead: 0,
+  };
 }
-
-describe('isLegacyTruncatedRssContent', () => {
-  it('recognizes the old cap\'s exact fingerprint', () => {
-    // 350 stored characters plus the literal '...' the old code appended.
-    expect(isLegacyTruncatedRssContent(legacyBody(), 'y'.repeat(1000))).toBe(true);
-  });
-
-  it('does not touch a body of the right length that was not cut', () => {
-    // 353 characters is only the fingerprint when it ENDS with the marker.
-    const notTruncated = 'z'.repeat(353);
-    expect(isLegacyTruncatedRssContent(notTruncated, 'y'.repeat(1000))).toBe(false);
-  });
-
-  it('does not touch a body ending in an ellipsis of a different length', () => {
-    // The new implementation caps at 4000 with a single '…', so a long body that
-    // merely *ends* with '...' is not the legacy artefact — requiring exactly 353
-    // characters is what keeps the rule from overwriting healthy rows that happen
-    // to end that way.
-    expect(isLegacyTruncatedRssContent('y'.repeat(600) + '...', 'z'.repeat(5000))).toBe(false);
-    expect(isLegacyTruncatedRssContent('y'.repeat(100) + '...', 'z'.repeat(5000))).toBe(false);
-    // And the new style's own marker is not the legacy one.
-    expect(isLegacyTruncatedRssContent('y'.repeat(4000) + '…', 'z'.repeat(5000))).toBe(false);
-  });
-
-  it('never shortens a row: a fresh body that is not longer is ignored', () => {
-    const stored = legacyBody();
-    expect(isLegacyTruncatedRssContent(stored, stored)).toBe(false);
-    expect(isLegacyTruncatedRssContent(stored, 'short')).toBe(false);
-  });
-
-  it('ignores a healthy long body', () => {
-    expect(isLegacyTruncatedRssContent('z'.repeat(1000), 'y'.repeat(1200))).toBe(false);
-  });
-
-  it('ignores an empty or missing stored body', () => {
-    expect(isLegacyTruncatedRssContent('', 'y'.repeat(1000))).toBe(false);
-  });
-});
 
 /**
  * The same repair mechanism serves Twitter's media-link bodies.
@@ -67,6 +50,43 @@ describe('isLegacyTruncatedRssContent', () => {
  * held the old text. Caption-less tweets stored the media link as their body, so
  * the repair has to reach the rows already in the database.
  */
+describe('isRssBodySuperseded', () => {
+  it('replaces a summary with the full article (real measurements)', () => {
+    const stored = rssPost('概览 '.repeat(SUMMARY_LEN / 3));
+    const fresh = rssPost('正文 '.repeat(ARTICLE_LEN / 3));
+
+    expect(isRssBodySuperseded(stored, fresh)).toBe(true);
+  });
+
+  it('converges: two bodies parsed the same way are equal, so it stops matching', () => {
+    // After the first repair both sides come from <content:encoded>. If this rule
+    // matched again, every sync would rewrite the whole page forever.
+    const same = rssPost('正文 '.repeat(1000));
+    expect(isRssBodySuperseded(same, rssPost('正文 '.repeat(1000)))).toBe(false);
+  });
+
+  it('never shortens a row', () => {
+    // A feed that shortens its own text must not cost the user content.
+    const stored = rssPost('长'.repeat(5000));
+    const fresh = rssPost('短'.repeat(100));
+    expect(isRssBodySuperseded(stored, fresh)).toBe(false);
+  });
+
+  it('may fill an empty stored body, never shorten a non-empty one', () => {
+    // The invariant that matters is "content is never lost". Filling an empty
+    // body with the freshly parsed text satisfies it; replacing longer text with
+    // shorter would not, and is rejected below.
+    expect(isRssBodySuperseded(rssPost(''), rssPost('正文'))).toBe(true);
+    expect(isRssBodySuperseded(rssPost('正文'), rssPost(''))).toBe(false);
+  });
+
+  it('leaves a normal incremental row alone when the body is unchanged', () => {
+    // The day-to-day case: same item, same text, nothing to do.
+    const body = 'AI 早报 '.repeat(200);
+    expect(isRssBodySuperseded(rssPost(body), rssPost(body))).toBe(false);
+  });
+});
+
 describe('shouldRepairStoredContent', () => {
   function post(over: Partial<Post>): Post {
     return {
@@ -122,16 +142,24 @@ describe('shouldRepairStoredContent', () => {
     expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
   });
 
-  it('still applies the RSS rule', () => {
-    const stored = post({ platform: 'rss', content: 'x'.repeat(350) + '...' });
-    const fresh = post({ platform: 'rss', content: 'y'.repeat(1000) });
+  it('still applies the RSS rule for a rss-vs-rss comparison', () => {
+    const stored = post({ platform: 'rss', content: '摘要 '.repeat(120) });
+    const fresh = post({ platform: 'rss', content: '全文 '.repeat(4000) });
 
     expect(shouldRepairStoredContent(stored, fresh)).toBe(true);
   });
 
+  it('routes the RSS rule through platform equality too', () => {
+    // Same lengths, different platform: the platform guard has to win.
+    const stored = post({ platform: 'rss', content: '短' });
+    const fresh = post({ platform: 'twitter', content: '更长的正文' });
+
+    expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
+  });
+
   it('refuses to compare rows from different platforms', () => {
-    const stored = post({ platform: 'rss', content: 'x'.repeat(350) + '...' });
-    const fresh = post({ platform: 'twitter', content: 'y'.repeat(1000) });
+    const stored = post({ platform: 'rss', content: '短' });
+    const fresh = post({ platform: 'twitter', content: '很长的正文'.repeat(50) });
 
     expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
   });
