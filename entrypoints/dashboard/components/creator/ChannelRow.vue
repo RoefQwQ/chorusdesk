@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { History, RefreshCw, Trash2, AlertCircle, ExternalLink } from 'lucide-vue-next';
-import type { Channel } from '../../../../src/types';
+import { ACCOUNT_ROLE_BADGE_CLASS, ACCOUNT_ROLE_LABELS, type Channel } from '../../../../src/types';
 
 /**
  * 创作者卡片内单个已绑定账号行：角色徽章（点击轮换）、平台链接、同步
@@ -66,16 +66,10 @@ const emit = defineEmits<{
         class="rounded text-[10px] font-medium border cursor-pointer shrink-0 transition-colors"
         :class="[
           compact ? 'px-1 py-0.2' : 'px-1.5 py-0.5',
-          channel.accountRole === 'sub'
-            ? 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800'
-            : channel.accountRole === 'alt'
-              ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
-              : channel.accountRole === 'custom'
-                ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800'
-                : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800',
+          ACCOUNT_ROLE_BADGE_CLASS[channel.accountRole || 'main'],
         ]"
       >
-        {{ channel.label || (channel.accountRole === 'sub' ? '日常小号' : channel.accountRole === 'alt' ? '里号/差分' : channel.accountRole === 'custom' ? '自定义频道' : '主账号') }}
+        {{ channel.label || ACCOUNT_ROLE_LABELS[channel.accountRole || 'main'] }}
       </button>
       <div
         v-if="!compact"

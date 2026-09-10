@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Bookmark, Filter, Search, X, UserRound } from 'lucide-vue-next';
-import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
+import { PLATFORM_REGISTRY, ACCOUNT_ROLE_LABELS, ACCOUNT_ROLE_ORDER, type Channel, type Creator, type Post } from '../../../src/types';
 import PostCard from '../components/PostCard.vue';
 
 export interface MediaPayload {
@@ -38,14 +38,13 @@ const bookmarkSelectedRole = ref<string>('all');
 
 /** Roles actually present among bookmarked posts' source channels. */
 const bookmarkRoles = computed(() => {
-  const ROLE_LABELS: Record<string, string> = { main: '主账号', sub: '日常小号', alt: '里号/差分', custom: '自定义频道' };
   const present = new Set<string>();
   for (const p of props.context.posts) {
     if (!p.isBookmarked) continue;
     const ch = props.context.channels.find(c => c.id === p.channelId);
     if (ch) present.add(ch.accountRole || 'main');
   }
-  return [...present].map(key => ({ key, label: ROLE_LABELS[key] || key }));
+  return ACCOUNT_ROLE_ORDER.filter(r => present.has(r)).map(key => ({ key, label: ACCOUNT_ROLE_LABELS[key] }));
 });
 function isTextOnlyPost(p: Post): boolean {
   return !p.mediaList || p.mediaList.length === 0;

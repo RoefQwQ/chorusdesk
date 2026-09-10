@@ -160,6 +160,35 @@ export interface Creator {
   updatedAt: number;
 }
 
+export type AccountRole = 'main' | 'sub' | 'alt' | 'custom';
+
+/** 账号角色展示顺序：筛选行、排序权重与「最高优先角色」判定均以此为准。 */
+export const ACCOUNT_ROLE_ORDER: AccountRole[] = ['main', 'sub', 'alt', 'custom'];
+
+/** 角色徽章标签（长式，账号行 / 徽章展示）。 */
+export const ACCOUNT_ROLE_LABELS: Record<AccountRole, string> = {
+  main: '主账号',
+  sub: '日常小号',
+  alt: '里号/差分',
+  custom: '自定义频道',
+};
+
+/** 角色短标签（筛选胶囊 / 选择器，与 AddCreatorModal 的四个选项一致）。 */
+export const ACCOUNT_ROLE_SHORT_LABELS: Record<AccountRole, string> = {
+  main: '主账号',
+  sub: '小号',
+  alt: '里号',
+  custom: '自定义',
+};
+
+/** 角色徽章配色（浅底 + 描边 + 文字，含暗色变体）。 */
+export const ACCOUNT_ROLE_BADGE_CLASS: Record<AccountRole, string> = {
+  main: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800',
+  sub: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800',
+  alt: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800',
+  custom: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800',
+};
+
 export interface Channel {
   id: string; // 唯一键，例如 "bilibili:123456" 或 "twitter:artist_sub"
   creatorId: string; // 关联到 Creator.id
@@ -167,7 +196,7 @@ export interface Channel {
   accountId: string; // 平台内ID/用户名
   displayName: string; // 平台昵称
   label?: string; // 用户自定义账号角色标签，例如 "主账号", "日常摸鱼号", "里号/R18", "熟肉切片"
-  accountRole?: 'main' | 'sub' | 'alt' | 'custom';
+  accountRole?: AccountRole;
   profileUrl: string; // 原始主页链接
   avatarUrl?: string; // 平台专属头像
   lastCheckAt?: number;

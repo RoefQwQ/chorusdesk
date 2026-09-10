@@ -25,6 +25,9 @@ export interface CreatorsViewContext {
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
   PLATFORM_REGISTRY,
+  ACCOUNT_ROLE_ORDER,
+  ACCOUNT_ROLE_SHORT_LABELS,
+  type AccountRole,
   type Platform,
   type Creator,
   type Channel,
@@ -44,6 +47,7 @@ import {
   History,
   AlertCircle,
   Users,
+  UserRound,
   ChevronDown,
   LayoutGrid,
   List,
@@ -141,6 +145,8 @@ function toggleExpandCreator(id: string) {
 const creatorSearch = ref('');
 const creatorPlatformFilter = ref('all');
 const creatorTagFilter = ref('all');
+/** 账号类型筛选：'all' | AccountRole。按创作者名下是否存在该类型账号过滤。 */
+const creatorRoleFilter = ref<'all' | AccountRole>('all');
 const creatorSortOptions = [
   { value: 'updated', label: '最近活跃' },
   { value: 'posts', label: '作品数量' },
@@ -223,6 +229,19 @@ const creatorChannelMap = computed(() => {
   return map;
 });
 
+// Creators per account role (filter pill badges) — counts creators, not channels.
+const creatorCountByRole = computed<Record<string, number>>(() => {
+  const counts: Record<string, number> = { all: context.value.creators.length };
+  for (const role of ACCOUNT_ROLE_ORDER) counts[role] = 0;
+  for (const c of context.value.creators) {
+    const roles = new Set(
+      context.value.channels.filter(ch => ch.creatorId === c.id).map(ch => ch.accountRole || 'main')
+    );
+    for (const r of roles) counts[r] = (counts[r] || 0) + 1;
+  }
+  return counts;
+});
+
 // Filtered and sorted creators list for Directory tab
 const filteredCreatorsList = computed(() => {
   let list = [...context.value.creators];
@@ -264,7 +283,14 @@ const filteredCreatorsList = computed(() => {
     list = list.filter(c => c.tags?.includes(creatorTagFilter.value));
   }
 
-  // 4. Sorting
+  // 4. Account-type filter: creator has at least one channel of that role.
+  if (creatorRoleFilter.value !== 'all') {
+    list = list.filter(c =>
+      context.value.channels.some(ch => ch.creatorId === c.id && (ch.accountRole || 'main') === creatorRoleFilter.value)
+    );
+  }
+
+  // 5. Sorting
   list.sort((a, b) => {
     if (creatorSortBy.value === 'platform') {
       // Group by the creator's first platform (in user's sidebar order),
@@ -628,6 +654,35 @@ function loadDemoData() {
         </template>
       </div>
 
+      <!-- Account-Type Filter Pills -->
+      <div class="flex flex-wrap items-center gap-1 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+        <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
+          <UserRound class="w-3 h-3" />
+          账号类型:
+        </span>
+        <button
+          @click="creatorRoleFilter = 'all'"
+          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer"
+          :class="creatorRoleFilter === 'all'
+            ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
+            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
+        >
+          全部 ({{ context.creators.length }})
+        </button>
+        <button
+          v-for="role in ACCOUNT_ROLE_ORDER"
+          :key="'role-' + role"
+          @click="creatorRoleFilter = role"
+          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
+          :class="creatorRoleFilter === role
+            ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
+            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
+        >
+          <span>{{ ACCOUNT_ROLE_SHORT_LABELS[role] }}</span>
+          <span class="text-[10px] opacity-75">({{ creatorCountByRole[role] || 0 }})</span>
+        </button>
+      </div>
+
       <!-- Collapsible Tags Filter Row -->
       <div v-if="allTags.length > 0 && isTagsExpanded" class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs animate-fade-in">
         <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
@@ -813,16 +868,11 @@ function loadDemoData() {
               <button
                 type="button"
                 @click="toggleExpandCreator(c.id)"
-                class="relative p-1.5 text-slate-400 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                :title="expandedCreatorIds.has(c.id) ? `收起账号详情（共 ${context.channels.filter(ch => ch.creatorId === c.id).length} 个账号）` : `展开管理各平台账号（共 ${context.channels.filter(ch => ch.creatorId === c.id).length} 个账号）`"
+                class="inline-flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-indigo-600 dark:text-slate-500 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+                :title="expandedCreatorIds.has(c.id) ? '收起账号列表' : '展开账号列表'"
               >
-                <Users class="w-4 h-4" />
-                <span
-                  class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-white text-[9px] font-mono font-bold flex items-center justify-center leading-none"
-                >
-                  {{ context.channels.filter(ch => ch.creatorId === c.id).length }}
-                </span>
-                <ChevronDown class="w-3 h-3 absolute -bottom-0.5 -right-0.5 text-indigo-500 dark:text-indigo-400 transition-transform duration-200 bg-white dark:bg-slate-900 rounded-full" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
+                <span>{{ context.channels.filter(ch => ch.creatorId === c.id).length }} 个账号</span>
+                <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
               </button>
             </div>
           </div>
@@ -875,6 +925,7 @@ function loadDemoData() {
                 </button>
               </th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-56 sm:w-64">创作者</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-40">标签</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300">已绑平台账号</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-24 text-center">作品数</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-32">同步状态</th>
@@ -924,35 +975,41 @@ function loadDemoData() {
                       </span>
                     </div>
 
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="font-semibold text-xs text-slate-900 dark:text-slate-100 truncate max-w-[130px] sm:max-w-[180px]">{{ c.name }}</span>
-                        <!-- Quick Tag List -->
-                        <span
-                          v-for="t in (c.tags || []).slice(0, 2)"
-                          :key="t"
-                          class="px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer border border-slate-200/50 dark:border-slate-700/50"
-                          @click="cycleTagFilter(t)"
-                        >
-                          #{{ t }}
-                        </span>
-                      </div>
-                    </div>
+                    <span class="font-semibold text-xs text-slate-900 dark:text-slate-100 truncate max-w-[150px] sm:max-w-[200px]">{{ c.name }}</span>
+                  </div>
+                </td>
+
+                <!-- Tags (dedicated column: keeps the creator cell tidy and
+                     the platform-accounts cell's toggle vertically aligned) -->
+                <td class="py-2.5 px-3">
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <span
+                      v-for="t in c.tags"
+                      :key="t"
+                      class="px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer border border-slate-200/50 dark:border-slate-700/50"
+                      @click="cycleTagFilter(t)"
+                      :title="'点击过滤标签 #' + t"
+                    >
+                      #{{ t }}
+                    </span>
+                    <span v-if="!c.tags?.length" class="text-[11px] text-slate-300 dark:text-slate-600">未分类</span>
                   </div>
                 </td>
 
                 <!-- Attached Platform Badges -->
                 <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
-                      <PlatformBadge :platform="platform as string" :count="chs.length" />
-                    </template>
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
+                        <PlatformBadge :platform="platform as string" :count="chs.length" />
+                      </template>
+                    </div>
                     <button
                       @click="toggleExpandCreator(c.id)"
-                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer ml-1 shadow-2xs"
+                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer shrink-0"
                     >
                       <span>{{ expandedCreatorIds.has(c.id) ? '收起明细' : '查看全部' }}</span>
-                      <span class="text-[10px] text-slate-400">({{ context.channels.filter(ch => ch.creatorId === c.id).length }})</span>
+                      <span class="text-[10px] text-slate-400 font-mono">({{ context.channels.filter(ch => ch.creatorId === c.id).length }})</span>
                       <ChevronDown class="w-3 h-3 text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
                     </button>
                   </div>
@@ -1037,7 +1094,7 @@ function loadDemoData() {
 
               <!-- Nested Table Row if Expanded -->
               <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-800/40">
-                <td :colspan="isBatchMode ? 6 : 5" class="p-3">
+                <td :colspan="isBatchMode ? 7 : 6" class="p-3">
                   <div class="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
                     <div class="flex items-center justify-between text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
                       <span class="font-bold text-slate-700 dark:text-slate-200">【{{ c.name }}】全部已绑定平台账号</span>

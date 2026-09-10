@@ -1,5 +1,6 @@
 import { ref, type Ref, type ShallowRef } from 'vue';
-import type { Creator, Channel, Post } from '../../../src/types';
+import type { Creator, Channel, Post, AccountRole } from '../../../src/types';
+import { ACCOUNT_ROLE_LABELS, ACCOUNT_ROLE_ORDER } from '../../../src/types';
 import { creatorService, channelService } from '../../../src/application';
 import { updateChannel } from '../../../src/sync';
 import { parseProfileUrl } from '../../../src/utils/urlParser';
@@ -95,18 +96,12 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
   // ---- Account role & multi-account grouping helpers ----
   function getRoleLabel(role?: string, label?: string) {
     if (label) return label;
-    switch (role) {
-      case 'sub': return '日常小号';
-      case 'alt': return '里号/差分';
-      case 'custom': return '自定义频道';
-      default: return '主账号';
-    }
+    return ACCOUNT_ROLE_LABELS[(role as AccountRole) || 'main'] || ACCOUNT_ROLE_LABELS.main;
   }
 
   async function cycleChannelRole(ch: Channel) {
-    const roles: Array<'main' | 'sub' | 'alt' | 'custom'> = ['main', 'sub', 'alt', 'custom'];
-    const currentIndex = roles.indexOf(ch.accountRole || 'main');
-    const nextRole = roles[(currentIndex + 1) % roles.length];
+    const currentIndex = ACCOUNT_ROLE_ORDER.indexOf(ch.accountRole || 'main');
+    const nextRole = ACCOUNT_ROLE_ORDER[(currentIndex + 1) % ACCOUNT_ROLE_ORDER.length];
     ch.accountRole = nextRole;
     ch.label = getRoleLabel(nextRole);
     await channelService.setRole(ch);
