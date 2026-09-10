@@ -8,6 +8,7 @@ import BaseModal from '../entrypoints/dashboard/components/BaseModal.vue';
 import AppSelect from '../entrypoints/dashboard/components/AppSelect.vue';
 import DevLogModal from '../entrypoints/dashboard/components/DevLogModal.vue';
 import PostReaderModal from '../entrypoints/dashboard/components/PostReaderModal.vue';
+import PostCard from '../entrypoints/dashboard/components/PostCard.vue';
 import type { Channel, Creator, Post } from '../src/types';
 
 const creator: Creator = {
@@ -206,6 +207,52 @@ describe('PostReaderModal renders', () => {
     // The body still renders; the duplicated heading does not.
     expect(html).toContain('露露卡');
     expect(html).not.toContain('<h2');
+  });
+});
+
+describe('PostCard reader entry', () => {
+  const rssPost: Post = {
+    id: 'rss_1',
+    creatorId: 'creator_1',
+    channelId: 'rss:daily',
+    platform: 'rss',
+    title: '2026-09-08',
+    content: 'AI 早报正文。'.repeat(30),
+    mediaList: [],
+    originalUrl: 'https://daily.juya.uk/2026/09/08',
+    publishedAt: Date.UTC(2026, 8, 8),
+    fetchedAt: Date.now(),
+    isRead: 0,
+  };
+
+  async function renderCard(post: Post) {
+    return render(PostCard, { post, creators: [creator], channels: [] });
+  }
+
+  it('offers the reader on every RSS card', async () => {
+    // RSS bodies are articles, so the entry must not depend on the overflow
+    // measurement (which cannot run without a layout engine, and mis-measured
+    // while the clamp is applied). The user reported the button simply missing.
+    const html = await renderCard(rssPost);
+    expect(html).toContain('展开全文');
+  });
+
+  it('does not offer the reader on a short caption card', async () => {
+    // Captions are not articles; a button on every fitting card would be noise.
+    // The SSR environment reports no layout, so the measurement says "fits".
+    const html = await renderCard({
+      ...rssPost,
+      platform: 'twitter',
+      content: '短推文',
+    });
+    expect(html).not.toContain('展开全文');
+  });
+
+  it('clamps the RSS preview rather than inlining the whole article', async () => {
+    // The card stays a preview on purpose: a 4000-character article at ~410px of
+    // column width is unreadable and skews the masonry columns.
+    const html = await renderCard(rssPost);
+    expect(html).toContain('line-clamp-8');
   });
 });
 

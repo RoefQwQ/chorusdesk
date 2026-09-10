@@ -102,6 +102,21 @@ export function handleDouyinSnapshot(
         (t) => t.id && typeof t.url === 'string' && t.url.includes(secUid) && isDouyinTabUrl(t.url),
       );
 
+      // Probe for the one open question this path depends on: without the `tabs`
+      // permission, does `tabs.query` still hand back URLs for pages we hold host
+      // permission for? If it does not, `url` is undefined, every lookup falls
+      // through to "no tab found", and both Douyin and Twitter tab targeting
+      // break. Log the counts so a single sync answers it instead of a guess.
+      const douyinTabs = tabs.filter((t) => isDouyinTabUrl(t.url));
+      const urlsReadable = douyinTabs.filter((t) => typeof t.url === 'string' && t.url.length > 0).length;
+      devLog.debug(
+        'douyin',
+        `标签页扫描：共 ${tabs.length} 个，抖音 ${douyinTabs.length} 个，其中 URL 可读 ${urlsReadable} 个`,
+        tabs.length > 0 && douyinTabs.length === 0
+          ? '⚠ 未识别出抖音页；若确实开着抖音页，说明 tabs.query 在无 tabs 权限下不返回 URL'
+          : undefined,
+      );
+
       let targetId: number | undefined = exact?.id;
 
       if (targetId === undefined) {

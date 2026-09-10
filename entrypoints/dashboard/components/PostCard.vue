@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { Bookmark, ChevronRight, Clock, ExternalLink, Video, ImageOff, Image as ImageIcon, Repeat2, Trash2 } from 'lucide-vue-next';
+import { Bookmark, ChevronRight, Clock, ExternalLink, Video, ImageOff, Image as ImageIcon, Maximize2, Repeat2, Trash2 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
 import { imageCacheService } from '../../../src/services/imageCache';
@@ -62,6 +62,19 @@ const fullBody = computed(() => showsFullBody(props.post.platform));
  */
 const bodyEl = ref<HTMLElement | null>(null);
 const bodyOverflows = ref(false);
+
+/**
+ * Whether to offer the full-text reader.
+ *
+ * RSS is offered unconditionally: its body *is* the article, and the card
+ * deliberately shows only a preview, so the entry is never noise there. That
+ * also removes the dependency on a runtime measurement for the one case where
+ * losing it matters most.
+ *
+ * Every other platform's body is a caption, where the button would be clutter
+ * on the (common) cards that fit — so it stays gated on the measurement.
+ */
+const showExpand = computed(() => bodyOverflows.value || fullBody.value);
 
 /**
  * Measure whether the clamped body actually hides text.
@@ -422,12 +435,14 @@ function toggleBookmark() {
           :class="fullBody ? 'line-clamp-8' : 'line-clamp-4'"
         >{{ post.content }}</p>
         <button
-          v-if="bodyOverflows"
+          v-if="showExpand"
           type="button"
-          class="mt-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 cursor-pointer"
+          class="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/70 dark:border-indigo-800/70 transition-colors cursor-pointer"
+          title="在阅读视图中打开全文"
           @click.stop="emit('openReader', post)"
         >
-          展开全文
+          <Maximize2 class="w-3 h-3" />
+          <span>展开全文</span>
         </button>
       </div>
       <div v-if="post.mediaList?.length" class="pt-1">
