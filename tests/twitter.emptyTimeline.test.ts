@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { twitterAdapter } from '../src/adapters/twitter';
+import { stripAppendedLinks, twitterAdapter } from '../src/adapters/twitter';
 import type { Channel } from '../src/types';
 
 /**
@@ -149,27 +149,60 @@ function noteTweetEntry(id: string, body: string, where: 'result' | 'legacy') {
 }
 
 /**
- * An image-only tweet, exactly as measured in the 2026-09 logs:
- * `full_text` is just the media's t.co link (23 chars) and `display_text_range`
- * is `[0, 0]` — X's way of saying "the author wrote no text".
+ * A tweet with an image, in the shape X actually returns.
+ *
+ * The media entity carries a `url` field — the `t.co` link X appends to
+ * `full_text` — and this fixture used to omit it, which is why nothing caught
+ * the appended link leaking into captions: the entity value the whole fix keys
+ * on was simply absent from the fixture.
+ *
+ * `rangeFull` reproduces the shape that leaked: `display_text_range` spanning the
+ * whole string, including the appended link. It only ever trims *leading*
+ * @mentions, so this is what a real media tweet looks like — the earlier
+ * assumption that the range excluded the media link was never measured, and a
+ * fixture written to match it is what let the bug ship green.
  */
 function mediaOnlyEntry(
   id: string,
-  opts: { text?: string; omitRange?: boolean } = {},
+  opts: { text?: string; omitRange?: boolean; rangeFull?: boolean; authorUrl?: boolean; quoted?: boolean } = {},
 ) {
   const caption = opts.text ?? '';
   const mediaLink = 'https://t.co/abc1234567';
+  const fullText = caption ? `${caption} ${mediaLink}` : mediaLink;
+  const media = {
+    type: 'photo',
+    media_url_https: `https://pbs.twimg.com/${id}.jpg`,
+    // The appended link, as the payload names it.
+    url: mediaLink,
+    expanded_url: `https://x.com/artist/status/${id}/photo/1`,
+  };
   const legacy: Record<string, unknown> = {
     id_str: id,
-    full_text: caption ? `${caption} ${mediaLink}` : mediaLink,
+    full_text: fullText,
     created_at: 'Wed Sep 10 10:00:00 +0000 2026',
     // Author-typed URLs are listed here; X's appended media link is not.
-    entities: { media: [{ type: 'photo', media_url_https: `https://pbs.twimg.com/${id}.jpg` }], urls: [] },
-    extended_entities: { media: [{ type: 'photo', media_url_https: `https://pbs.twimg.com/${id}.jpg` }] },
+    entities: {
+      media: [media],
+      urls: opts.authorUrl
+        ? [{ url: 'https://t.co/author01', expanded_url: 'https://example.com/a' }]
+        : [],
+    },
+    extended_entities: { media: [media] },
   };
+  if (opts.quoted) {
+    legacy.quoted_status_permalink = {
+      url: 'https://t.co/quoted01',
+      expanded: 'https://x.com/other/status/99',
+    };
+    legacy.full_text = `${fullText} https://t.co/quoted01`;
+  }
   // The range covers the caption only; [0,0] when there is none. Some payloads
-  // omit it entirely — the case that used to leak the media link through.
-  if (!opts.omitRange) legacy.display_text_range = [0, caption.length];
+  // omit it entirely, and real media payloads span the whole string.
+  if (!opts.omitRange) {
+    legacy.display_text_range = opts.rangeFull
+      ? [0, (legacy.full_text as string).length]
+      : [0, caption.length];
+  }
   const result: Record<string, unknown> = {
     __typename: 'Tweet',
     rest_id: id,
@@ -420,5 +453,125 @@ describe('twitter parseGraphQLResult', () => {
     expect(unreadable.totalFetched).toBe(2);
     // …but it also must not report posts that were never extracted.
     expect(unreadable.posts).toHaveLength(0);
+  });
+});
+
+/**
+ * The link X appends to the end of a tweet's text.
+ *
+ * Observed by the user: a caption rendered as `正文… https://t.co/xxxx`, with the
+ * shortened link glued to the end of the body (and, for a short caption, to the
+ * end of the bolded title line). It appeared because the parser trusted
+ * `display_text_range` to exclude it — an assumption that had never been
+ * measured against a real payload, and which the fixture then encoded as
+ * expected behaviour by setting the range to end at the caption.
+ *
+ * X's own clients do not rely on the range: they remove each media entity's
+ * `url` from the text. That is what this does, which is why the fix works
+ * whether or not the range happens to exclude the link.
+ */
+describe('twitter appended links', () => {
+  it('removes the media link when display_text_range spans the whole text', () => {
+    // The real shape, and the one that leaked: the range is the entire string.
+    const res = parse(payload([mediaOnlyEntry('t1', { text: '今天画了新的图', rangeFull: true })]));
+
+    expect(res.posts[0].content).toBe('今天画了新的图');
+  });
+
+  it('removes the link when display_text_range is missing entirely', () => {
+    // The other real variant: no range at all, so the raw text comes through and
+    // the appended link is only findable from the entities.
+    const res = parse(payload([mediaOnlyEntry('t0', { text: '今天画了新的图', omitRange: true })]));
+
+    expect(res.posts[0].content).toBe('今天画了新的图');
+  });
+
+  it('does not put the link in the title', () => {
+    // The title is the body's first line, so a leaked link turned a short
+    // caption into `caption https://t.co/…` in bold above the same caption.
+    const res = parse(payload([mediaOnlyEntry('t2', { text: '今天画了新的图', rangeFull: true })]));
+
+    expect(res.posts[0].title).toBe('今天画了新的图');
+  });
+
+  it('removes a link X appended after several lines of caption', () => {
+    const res = parse(payload([mediaOnlyEntry('t3', { text: '第一行\n第二行', rangeFull: true })]));
+
+    expect(res.posts[0].content).toBe('第一行\n第二行');
+  });
+
+  it('removes the quoted tweet\'s appended link as well', () => {
+    // A quote gets the same treatment from X, and it is equally not the
+    // author's text.
+    const res = parse(payload([mediaOnlyEntry('t4', { text: '看看这个', rangeFull: true, quoted: true })]));
+
+    expect(res.posts[0].content).toBe('看看这个');
+    expect(res.posts[0].content).not.toContain('t.co');
+  });
+
+  it('keeps a link the author typed, even alongside media', () => {
+    // The author's link lives in `entities.urls`, never in a media entity, so it
+    // is not in the appended set. Removing it would delete content they wrote.
+    const res = parse(payload([mediaOnlyEntry('t5', { text: '参考 https://t.co/author01', rangeFull: true, authorUrl: true })]));
+
+    expect(res.posts[0].content).toContain('https://t.co/author01');
+    expect(res.posts[0].content).not.toContain('https://t.co/abc1234567');
+  });
+
+  it('leaves a body with no appended link untouched', () => {
+    const res = parse(payload([tweetEntry('1', { fullText: '普通的推文，没有链接' })]));
+
+    expect(res.posts[0].content).toBe('普通的推文，没有链接');
+  });
+
+  it('still blanks an image-only tweet whose range spans the link', () => {
+    // No caption at all: the "range covers everything" case for a media-only
+    // tweet, which must end up empty rather than showing the link as the body.
+    const res = parse(payload([mediaOnlyEntry('t6', { rangeFull: true })]));
+
+    expect(res.posts[0].content).toBe('');
+    expect(res.posts[0].title).toBe('');
+  });
+});
+
+describe('stripAppendedLinks', () => {
+  const MEDIA = 'https://t.co/abc1234567';
+
+  it('removes the link and the gap it leaves', () => {
+    expect(stripAppendedLinks(`正文 ${MEDIA}`, [MEDIA])).toBe('正文');
+  });
+
+  it('collapses the double space a mid-body link leaves behind', () => {
+    expect(stripAppendedLinks(`前 ${MEDIA} 后`, [MEDIA])).toBe('前 后');
+  });
+
+  it('removes a link alone on its own trailing line', () => {
+    expect(stripAppendedLinks(`第一行\n第二行\n${MEDIA}`, [MEDIA])).toBe('第一行\n第二行');
+  });
+
+  it('keeps line breaks that were not around a link', () => {
+    expect(stripAppendedLinks('第一行\n第二行', [MEDIA])).toBe('第一行\n第二行');
+  });
+
+  it('handles several appended links', () => {
+    const second = 'https://t.co/def7654321';
+    expect(stripAppendedLinks(`正文 ${MEDIA} ${second}`, [MEDIA, second])).toBe('正文');
+  });
+
+  it('is a no-op when nothing was appended', () => {
+    expect(stripAppendedLinks('正文', [])).toBe('正文');
+  });
+
+  it('ignores anything that is not a t.co URL', () => {
+    // The values come from untrusted payload JSON. A non-URL must not be able to
+    // blank out text by matching a substring of it, so it is rejected outright
+    // rather than used as a search string.
+    expect(stripAppendedLinks('正文 https://example.com/a', ['https://example.com/a']))
+      .toBe('正文 https://example.com/a');
+    expect(stripAppendedLinks('abcdef', ['abc'])).toBe('abcdef');
+  });
+
+  it('ignores a non-string entry rather than throwing', () => {
+    expect(stripAppendedLinks('正文', [null, undefined, 42, { url: MEDIA }])).toBe('正文');
   });
 });

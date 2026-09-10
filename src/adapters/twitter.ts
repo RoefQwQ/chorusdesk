@@ -48,6 +48,64 @@ export function isMediaOnlyLinkText(text: string, hasMedia: boolean, authorUrlCo
   return /^https:\/\/t\.co\/\w+$/.test(text.trim());
 }
 
+/**
+ * Remove the `t.co` URLs X appends to a tweet's text.
+ *
+ * X glues a shortened URL to the end of `full_text` for every attached medium
+ * and for a quoted tweet. `display_text_range` was believed to exclude them, and
+ * it does on some payloads — but not reliably, which is why a caption rendered as
+ * `正文… https://t.co/xxxx` with the link stuck to the end, and why a short
+ * caption's title line became the caption *plus* the link.
+ *
+ * X's own clients do not lean on the range for this: they take each media
+ * entity's `url` and remove that exact substring. Same approach, which is why
+ * this only ever removes URLs the payload itself names as appended.
+ *
+ * An author-typed link is **never** removed: it lives in `entities.urls`, not in
+ * a media entity, so it is absent from `appendedUrls`. Dropping it would silently
+ * delete something the author actually wrote.
+ */
+export function stripAppendedLinks(text: string, appendedUrls: readonly unknown[]): string {
+  let out = text;
+  for (const raw of appendedUrls) {
+    const url = typeof raw === 'string' ? raw.trim() : '';
+    // Only a real t.co URL: a malformed entity value must not be able to blank
+    // out arbitrary text by matching a substring of it.
+    if (!/^https:\/\/t\.co\/\w+$/.test(url)) continue;
+    // Removed occurrence by occurrence rather than with one `replace`, so the
+    // pass cannot restart inside text it already rewrote.
+    out = out.split(url).join(' ');
+  }
+  // A removed link leaves a gap where it stood: a stray double space when it was
+  // mid-caption, a blank line when it was alone on the last one. Collapse both so
+  // the body reads as the author wrote it.
+  return out
+    .replace(/[^\S\n]{2,}/g, ' ')
+    .replace(/[^\S\n]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * The `t.co` URLs this payload says were appended to the tweet's text.
+ *
+ * Read from the entities rather than pattern-matched, because that is the only
+ * way to tell X's appended link apart from one the author typed. Values are
+ * passed through unvalidated — `stripAppendedLinks` is the single place that
+ * decides what counts as an appended link.
+ */
+function appendedLinkUrls(mediaItems: readonly unknown[], tweet: JsonRecord): unknown[] {
+  const urls: unknown[] = [];
+  for (const raw of mediaItems) {
+    const url = asRecord(raw).url;
+    if (typeof url === 'string' && url) urls.push(url);
+  }
+  // A quoted tweet is appended the same way, from its permalink entity.
+  const quotedPermalink = asRecord(tweet.quoted_status_permalink).url;
+  if (typeof quotedPermalink === 'string' && quotedPermalink) urls.push(quotedPermalink);
+  return urls;
+}
+
 export const twitterAdapter: PlatformAdapter = {
   platform: 'twitter',
 
@@ -411,6 +469,11 @@ export const twitterAdapter: PlatformAdapter = {
           });
         }
       }
+
+      // X appends a `t.co` URL per attached medium and for a quoted tweet.
+      // Removed here, before the title is derived from the first line, so a short
+      // caption does not become "caption https://t.co/…" in bold.
+      fullText = stripAppendedLinks(fullText, appendedLinkUrls(mediaItems, tweet));
 
       // Clean title. A bare link (or a body we could not read) makes a useless
       // card title, so fall back to the account-based one rather than printing

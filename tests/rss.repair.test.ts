@@ -134,6 +134,55 @@ describe('shouldRepairStoredContent', () => {
     expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
   });
 
+  it('repairs a stored body that keeps X\'s appended link', () => {
+    // The shape the trailing-link bug stored: the caption plus the media link
+    // glued on. A normal sync never rewrites existing rows, so without this the
+    // user would keep seeing the link after the parser was fixed.
+    const stored = post({
+      platform: 'twitter',
+      content: '今天画了新的图 https://t.co/abc1234567',
+    });
+    const fresh = post({ platform: 'twitter', content: '今天画了新的图' });
+
+    expect(shouldRepairStoredContent(stored, fresh)).toBe(true);
+  });
+
+  it('repairs a stored body with several appended links', () => {
+    const stored = post({
+      platform: 'twitter',
+      content: '正文 https://t.co/aaaaaaaaaa https://t.co/bbbbbbbbbb',
+    });
+    const fresh = post({ platform: 'twitter', content: '正文' });
+
+    expect(shouldRepairStoredContent(stored, fresh)).toBe(true);
+  });
+
+  it('leaves a stored body whose suffix is not a t.co link', () => {
+    // The rule must not become "replace any stored text that starts with the
+    // fresh text" — that would discard whatever the author actually wrote after
+    // it.
+    const stored = post({ platform: 'twitter', content: '正文 以及我补的一句话' });
+    const fresh = post({ platform: 'twitter', content: '正文' });
+
+    expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
+  });
+
+  it('leaves a stored body that merely shares a prefix', () => {
+    const stored = post({ platform: 'twitter', content: '正文续写 https://example.com/x' });
+    const fresh = post({ platform: 'twitter', content: '正文' });
+
+    expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
+  });
+
+  it('never shortens a stored body to nothing but a link', () => {
+    // The fresh body is a link and the stored body is longer text: shortening it
+    // would lose the author's words.
+    const stored = post({ platform: 'twitter', content: '作者写的正文 https://t.co/abc1234567' });
+    const fresh = post({ platform: 'twitter', content: 'https://t.co/zzz9999999' });
+
+    expect(shouldRepairStoredContent(stored, fresh)).toBe(false);
+  });
+
   it('does not apply the Twitter rule to other platforms', () => {
     // A bilibili post whose body happens to be a link is not this bug.
     const stored = post({ platform: 'bilibili', content: 'https://t.co/abc1234567' });

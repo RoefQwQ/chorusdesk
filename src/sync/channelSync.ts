@@ -76,19 +76,43 @@ function isBareShortLink(text: string): boolean {
 }
 
 /**
+ * A stored body that is the fresh one with X's appended link still on the end.
+ *
+ * The shape the trailing-link bug produced: `正文… https://t.co/xxxx` stored while
+ * the adapter now parses `正文…`. The rule is exact rather than "similar" — the
+ * stored text must *begin with* the fresh text and have nothing after it but
+ * t.co URLs — so a row whose body legitimately differs can never match. It also
+ * never shortens content: the only thing removed is a link X appended.
+ */
+function isStoredWithAppendedLink(stored: string, fresh: string): boolean {
+  const body = fresh.trim();
+  // An empty fresh body belongs to the bare-link rule above, which owns that
+  // shape; keeping them disjoint means each is provable on its own terms.
+  if (!body) return false;
+
+  const text = stored.trim();
+  if (!text.startsWith(body)) return false;
+
+  const suffix = text.slice(body.length).trim();
+  return /^(https:\/\/t\.co\/\w+[ \t]*)+$/.test(suffix);
+}
+
+/**
  * Whether a stored row's text should be replaced by what the adapter just parsed.
  *
  * Deliberately per-platform and narrow. Each rule matches only a shape that can
  * *only* be an artefact of a bug this project shipped, so the replacement can
  * never discard correct content: the RSS rule needs the freshly parsed body to be
- * strictly longer (bodies only ever get more complete), and the Twitter rule needs
- * a body consisting solely of a media link.
+ * strictly longer (bodies only ever get more complete), and the Twitter rules
+ * need a body that is either solely a media link or the fresh text plus nothing
+ * but trailing t.co links.
  */
 export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
   if (stored.platform !== fresh.platform) return false;
   if (stored.platform === 'rss') return isRssBodySuperseded(stored, fresh);
   if (stored.platform === 'twitter') {
-    return isBareShortLink(stored.content) && fresh.content !== stored.content;
+    return (isBareShortLink(stored.content) || isStoredWithAppendedLink(stored.content, fresh.content))
+      && fresh.content !== stored.content;
   }
   return false;
 }
