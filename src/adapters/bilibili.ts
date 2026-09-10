@@ -4,6 +4,8 @@ import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 import { toSecureMediaUrl } from '../utils/media';
+import type { JsonRecord } from '../utils/json';
+import { asRecord } from '../utils/json';
 
 // Mirror the real site's UA. Bilibili risk-control rejects the default fetch UA.
 const BILI_UA =
@@ -70,24 +72,26 @@ export const bilibiliAdapter: PlatformAdapter = {
       });
 
       if (res.ok && res.data) {
-        const json = JSON.parse(res.data);
+        const json = JSON.parse(res.data) as JsonRecord;
         if (json.code !== 0) {
-          lastDynamicCode = json.code;
+          lastDynamicCode = json.code as number;
           console.warn('[Bilibili] dynamic feed returned code', json.code, json.message);
-        } else if (json.data?.items) {
-          const items: any[] = json.data.items;
-          if (json.data.has_more) hasMore = true;
-          if (json.data.offset) nextCursor = String(json.data.offset);
+        } else if (json.data) {
+          const data = asRecord(json.data);
+          const items = Array.isArray(data.items) ? data.items : [];
+          if (data.has_more) hasMore = true;
+          if (data.offset) nextCursor = String(data.offset);
 
-          for (const item of items) {
-            const modules = item.modules || {};
-            const moduleAuthor = modules.module_author || {};
-            const moduleDynamic = modules.module_dynamic || {};
+          for (const rawItem of items) {
+            const item = asRecord(rawItem);
+            const modules = asRecord(item.modules);
+            const moduleAuthor = asRecord(modules.module_author);
+            const moduleDynamic = asRecord(modules.module_dynamic);
 
-            if (moduleAuthor.name) authorName = moduleAuthor.name;
-            if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(moduleAuthor.face);
+            if (moduleAuthor.name) authorName = String(moduleAuthor.name);
+            if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(String(moduleAuthor.face));
 
-            const pubTime = moduleAuthor.pub_ts ? moduleAuthor.pub_ts * 1000 : 0;
+            const pubTime = moduleAuthor.pub_ts ? Number(moduleAuthor.pub_ts) * 1000 : 0;
 
             // WATERMARK CHECK: dynamic feed is newest-first, stop as soon as we hit old content
             if (sinceTs > 0 && pubTime > 0 && pubTime <= sinceTs) {
@@ -99,47 +103,61 @@ export const bilibiliAdapter: PlatformAdapter = {
             const isForward = item.type === 'DYNAMIC_TYPE_FORWARD' || Boolean(item.orig);
             if (options?.onlyOriginal && isForward) continue;
 
-            const archiveBvid = moduleDynamic.major?.archive?.bvid;
+            const major = asRecord(moduleDynamic.major);
+            const archive = asRecord(major.archive);
+            const archiveBvid = typeof archive.bvid === 'string' ? archive.bvid : undefined;
             if (archiveBvid && seenBvids.has(archiveBvid)) continue;
             if (archiveBvid) seenBvids.add(archiveBvid);
 
-            const idStr = item.id_str || String(item.basic?.comment_id_str || item.id || '');
+            const idStr =
+              (typeof item.id_str === 'string' && item.id_str) ||
+              String(asRecord(item.basic).comment_id_str ?? item.id ?? '');
             if (!archiveBvid && !idStr) continue; // no stable identity — skip rather than fabricate
             const postId = archiveBvid
               ? `bilibili_video_${archiveBvid}`
               : `bilibili_${idStr}`;
 
-            const text = moduleDynamic.desc?.text || moduleDynamic.major?.archive?.desc || '';
-            const title = moduleDynamic.major?.archive?.title || '';
+            const text =
+              (typeof asRecord(moduleDynamic.desc).text === 'string' && asRecord(moduleDynamic.desc).text) ||
+              (typeof archive.desc === 'string' && archive.desc) ||
+              '';
+            const title = typeof archive.title === 'string' ? archive.title : '';
 
-            const mediaList: any[] = [];
-            const major = moduleDynamic.major || {};
+            const mediaList: Post['mediaList'] = [];
             if (major.archive) {
               mediaList.push({
                 type: 'video',
-                previewUrl: major.archive.cover,
-                originalUrl: `https://www.bilibili.com/video/${major.archive.bvid}`,
+                previewUrl: String(archive.cover ?? ''),
+                originalUrl: `https://www.bilibili.com/video/${archiveBvid}`,
               });
             }
-            if (major.draw?.items) {
-              for (const img of major.draw.items) {
-                mediaList.push({ type: 'image', previewUrl: img.src, originalUrl: img.src });
+            const draw = asRecord(major.draw);
+            if (Array.isArray(draw.items)) {
+              for (const rawImg of draw.items) {
+                const img = asRecord(rawImg);
+                const src = typeof img.src === 'string' ? img.src : '';
+                if (src) mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
               }
             }
             // Forward posts: archive/draw media live on the original item, not the forward wrapper.
-            if (isForward && item.orig?.modules?.module_dynamic?.major) {
-              const origMajor = item.orig.modules.module_dynamic.major;
-              if (origMajor.archive && !mediaList.some((m) => m.type === 'video' && m.originalUrl?.endsWith(origMajor.archive.bvid))) {
+            if (isForward && item.orig) {
+              const origMajor = asRecord(asRecord(asRecord(asRecord(item.orig).modules).module_dynamic).major);
+              const origArchive = asRecord(origMajor.archive);
+              const origBvid = typeof origArchive.bvid === 'string' ? origArchive.bvid : '';
+              if (origMajor.archive && origBvid && !mediaList.some((m) => m.type === 'video' && m.originalUrl.endsWith(origBvid))) {
                 mediaList.push({
                   type: 'video',
-                  previewUrl: origMajor.archive.cover,
-                  originalUrl: `https://www.bilibili.com/video/${origMajor.archive.bvid}`,
+                  previewUrl: String(origArchive.cover ?? ''),
+                  originalUrl: `https://www.bilibili.com/video/${origBvid}`,
                 });
               }
-              if (origMajor.draw?.items) {
-                for (const img of origMajor.draw.items) {
-                  if (!mediaList.some((m) => m.type === 'image' && m.previewUrl === img.src)) {
-                    mediaList.push({ type: 'image', previewUrl: img.src, originalUrl: img.src });
+              const origDraw = asRecord(origMajor.draw);
+              if (Array.isArray(origDraw.items)) {
+                for (const rawImg of origDraw.items) {
+                  const img = asRecord(rawImg);
+                  const src = typeof img.src === 'string' ? img.src : '';
+                  if (src && !mediaList.some((m) => m.type === 'image' && m.previewUrl === src)) {
+                    mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
                   }
                 }
               }
@@ -148,7 +166,7 @@ export const bilibiliAdapter: PlatformAdapter = {
             allPosts.push(buildPost(channel, {
               id: postId,
               title,
-              content: text || title || '（分享动态）',
+              content: typeof text === 'string' ? (text || title || '（分享动态）') : (title || '（分享动态）'),
               mediaList,
               originalUrl: archiveBvid
                 ? `https://www.bilibili.com/video/${archiveBvid}`
@@ -284,63 +302,79 @@ export const bilibiliAdapter: PlatformAdapter = {
       });
 
       if (res.ok && res.data) {
-        const json = JSON.parse(res.data);
-        if (json.code === 0 && json.data?.items) {
-          const items: any[] = json.data.items;
-          hasMore = Boolean(json.data.has_more);
-          if (json.data.offset) nextCursor = String(json.data.offset);
+        const json = JSON.parse(res.data) as JsonRecord;
+        const data = asRecord(json.data);
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (json.code === 0 && items.length > 0) {
+          hasMore = Boolean(data.has_more);
+          if (data.offset) nextCursor = String(data.offset);
 
-          for (const item of items) {
-            const modules = item.modules || {};
-            const moduleAuthor = modules.module_author || {};
-            const moduleDynamic = modules.module_dynamic || {};
+          for (const rawItem of items) {
+            const item = asRecord(rawItem);
+            const modules = asRecord(item.modules);
+            const moduleAuthor = asRecord(modules.module_author);
+            const moduleDynamic = asRecord(modules.module_dynamic);
 
-            if (moduleAuthor.name) authorName = moduleAuthor.name;
-            if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(moduleAuthor.face);
+            if (moduleAuthor.name) authorName = String(moduleAuthor.name);
+            if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(String(moduleAuthor.face));
 
             const isForward = item.type === 'DYNAMIC_TYPE_FORWARD' || Boolean(item.orig);
             if (options.onlyOriginal && isForward) continue;
 
-            const archiveBvid = moduleDynamic.major?.archive?.bvid;
+            const major = asRecord(moduleDynamic.major);
+            const archive = asRecord(major.archive);
+            const archiveBvid = typeof archive.bvid === 'string' ? archive.bvid : undefined;
             if (archiveBvid && seenBvids.has(archiveBvid)) continue;
             if (archiveBvid) seenBvids.add(archiveBvid);
-            const idStr = item.id_str || String(item.basic?.comment_id_str || item.id || '');
+            const idStr =
+              (typeof item.id_str === 'string' && item.id_str) ||
+              String(asRecord(item.basic).comment_id_str ?? item.id ?? '');
             if (!archiveBvid && !idStr) continue; // no stable identity — skip rather than fabricate
             const postId = archiveBvid
               ? `bilibili_video_${archiveBvid}`
               : `bilibili_${idStr}`;
-            const pubTime = moduleAuthor.pub_ts ? moduleAuthor.pub_ts * 1000 : Date.now();
-            const text = moduleDynamic.desc?.text || moduleDynamic.major?.archive?.desc || '';
-            const title = moduleDynamic.major?.archive?.title || '';
+            const pubTime = moduleAuthor.pub_ts ? Number(moduleAuthor.pub_ts) * 1000 : Date.now();
+            const text =
+              (typeof asRecord(moduleDynamic.desc).text === 'string' && asRecord(moduleDynamic.desc).text) ||
+              (typeof archive.desc === 'string' && archive.desc) ||
+              '';
+            const title = typeof archive.title === 'string' ? archive.title : '';
 
-            const mediaList: any[] = [];
-            const major = moduleDynamic.major || {};
+            const mediaList: Post['mediaList'] = [];
             if (major.archive) {
               mediaList.push({
                 type: 'video',
-                previewUrl: major.archive.cover,
-                originalUrl: `https://www.bilibili.com/video/${major.archive.bvid}`,
+                previewUrl: String(archive.cover ?? ''),
+                originalUrl: `https://www.bilibili.com/video/${archiveBvid}`,
               });
             }
-            if (major.draw?.items) {
-              for (const img of major.draw.items) {
-                mediaList.push({ type: 'image', previewUrl: img.src, originalUrl: img.src });
+            const draw = asRecord(major.draw);
+            if (Array.isArray(draw.items)) {
+              for (const rawImg of draw.items) {
+                const img = asRecord(rawImg);
+                const src = typeof img.src === 'string' ? img.src : '';
+                if (src) mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
               }
             }
             // Forward posts: archive/draw media live on the original item, not the forward wrapper.
-            if (isForward && item.orig?.modules?.module_dynamic?.major) {
-              const origMajor = item.orig.modules.module_dynamic.major;
-              if (origMajor.archive && !mediaList.some((m) => m.type === 'video' && m.originalUrl?.endsWith(origMajor.archive.bvid))) {
+            if (isForward && item.orig) {
+              const origMajor = asRecord(asRecord(asRecord(asRecord(item.orig).modules).module_dynamic).major);
+              const origArchive = asRecord(origMajor.archive);
+              const origBvid = typeof origArchive.bvid === 'string' ? origArchive.bvid : '';
+              if (origMajor.archive && origBvid && !mediaList.some((m) => m.type === 'video' && m.originalUrl.endsWith(origBvid))) {
                 mediaList.push({
                   type: 'video',
-                  previewUrl: origMajor.archive.cover,
-                  originalUrl: `https://www.bilibili.com/video/${origMajor.archive.bvid}`,
+                  previewUrl: String(origArchive.cover ?? ''),
+                  originalUrl: `https://www.bilibili.com/video/${origBvid}`,
                 });
               }
-              if (origMajor.draw?.items) {
-                for (const img of origMajor.draw.items) {
-                  if (!mediaList.some((m) => m.type === 'image' && m.previewUrl === img.src)) {
-                    mediaList.push({ type: 'image', previewUrl: img.src, originalUrl: img.src });
+              const origDraw = asRecord(origMajor.draw);
+              if (Array.isArray(origDraw.items)) {
+                for (const rawImg of origDraw.items) {
+                  const img = asRecord(rawImg);
+                  const src = typeof img.src === 'string' ? img.src : '';
+                  if (src && !mediaList.some((m) => m.type === 'image' && m.previewUrl === src)) {
+                    mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
                   }
                 }
               }
@@ -349,7 +383,7 @@ export const bilibiliAdapter: PlatformAdapter = {
             allPosts.push(buildPost(channel, {
               id: postId,
               title,
-              content: text || title || '（分享动态）',
+              content: typeof text === 'string' ? (text || title || '（分享动态）') : (title || '（分享动态）'),
               mediaList,
               originalUrl: archiveBvid
                 ? `https://www.bilibili.com/video/${archiveBvid}`

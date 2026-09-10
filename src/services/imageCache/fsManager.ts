@@ -101,12 +101,15 @@ export async function verifyDirectoryPermission(
  * Interactively prompt user to select a root directory for image cache.
  */
 export async function promptSelectDirectory(): Promise<FileSystemDirectoryHandle | null> {
-  if (typeof window === 'undefined' || !('showDirectoryPicker' in window)) {
+  const picker = typeof window !== 'undefined'
+    ? (window as unknown as Record<string, unknown>).showDirectoryPicker
+    : undefined;
+  if (typeof picker !== 'function') {
     throw new Error('当前浏览器环境不支持 File System Access API（showDirectoryPicker）。请确保在 Chrome 桌面端使用。');
   }
 
   try {
-    const handle = await (window as any).showDirectoryPicker({
+    const handle = await (picker as (opts: unknown) => Promise<FileSystemDirectoryHandle>)({
       id: 'creator-feed-hub-image-cache',
       mode: 'readwrite',
       startIn: 'pictures',
@@ -115,8 +118,8 @@ export async function promptSelectDirectory(): Promise<FileSystemDirectoryHandle
       await saveRootDirectoryHandle(handle);
       return handle;
     }
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
       return null; // User cancelled
     }
     throw err;

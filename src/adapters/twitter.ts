@@ -3,6 +3,8 @@ import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { IS_SERVICE_WORKER } from '../utils/runtime';
+import type { JsonRecord, JsonValue } from '../utils/json';
+import { asRecord } from '../utils/json';
 
 export const twitterAdapter: PlatformAdapter = {
   platform: 'twitter',
@@ -83,8 +85,8 @@ export const twitterAdapter: PlatformAdapter = {
 
   parseGraphQLResult(
     channel: Channel,
-    tweetData: any,
-    userData: any,
+    tweetData: unknown,
+    userData: unknown,
     limit: number,
     onlyOriginal?: boolean,
     bottomCursor?: string
@@ -93,19 +95,20 @@ export const twitterAdapter: PlatformAdapter = {
     const username = channel.accountId.replace(/^@/, '').trim();
 
     // Extract author profile with multiple GraphQL fallback paths
-    const userRes = userData?.data?.user?.result;
-    const userLegacy = userRes?.legacy;
+    const userRes = asRecord(asRecord(asRecord(asRecord(userData).data).user).result);
+    const userLegacy = asRecord(userRes.legacy);
+    const str = (v: unknown): string => (typeof v === 'string' ? v : '');
     let authorName =
-      userLegacy?.name ||
-      userRes?.name ||
+      str(userLegacy.name) ||
+      str(userRes.name) ||
       channel.displayName ||
       `@${username}`;
 
     let authorAvatar =
-      userLegacy?.profile_image_url_https ||
-      userRes?.avatar?.image_url ||
-      userLegacy?.avatar?.image_url ||
-      userRes?.profile_image_url_https ||
+      str(userLegacy.profile_image_url_https) ||
+      str(asRecord(userRes.avatar).image_url) ||
+      str(asRecord(userLegacy.avatar).image_url) ||
+      str(userRes.profile_image_url_https) ||
       channel.avatarUrl ||
       '';
 
@@ -116,48 +119,57 @@ export const twitterAdapter: PlatformAdapter = {
       authorAvatar = authorAvatar.replace('_normal', '_bigger');
     }
 
-    const instructions =
-      tweetData?.data?.user?.result?.timeline_v2?.timeline?.instructions ||
-      tweetData?.data?.user?.result?.timeline?.timeline?.instructions ||
-      [];
+    const timelineRoot = asRecord(
+      asRecord(asRecord(asRecord(asRecord(asRecord(tweetData).data).user).result).timeline_v2).timeline ||
+      asRecord(asRecord(asRecord(asRecord(asRecord(tweetData).data).user).result).timeline).timeline
+    );
+    const rawInstructions = timelineRoot.instructions;
+    const instructions: JsonValue[] = Array.isArray(rawInstructions) ? rawInstructions : [];
 
     // Collect all timeline entries (ignore pinned tweets when paginating history)
-    const rawEntries: any[] = [];
+    const rawEntries: JsonRecord[] = [];
     const isHistoryDig = Boolean(bottomCursor && bottomCursor.length > 0);
-    for (const inst of instructions) {
+    for (const rawInst of instructions) {
+      const inst = asRecord(rawInst);
       if (inst.type === 'TimelinePinEntry' && inst.entry && !isHistoryDig) {
-        rawEntries.push(inst.entry);
+        rawEntries.push(asRecord(inst.entry));
       } else if (inst.type === 'TimelineAddEntries' && Array.isArray(inst.entries)) {
-        rawEntries.push(...inst.entries);
+        rawEntries.push(...inst.entries.map((e) => asRecord(e)));
       }
     }
-
     const seenTweetIds = new Set<string>();
+
 
     for (const entry of rawEntries) {
       if (posts.length >= limit) break;
-      const entryId = entry.entryId || '';
+      const entryId = typeof entry.entryId === 'string' ? entry.entryId : '';
       if (!entryId.startsWith('tweet-')) continue;
 
+      const content = asRecord(entry.content);
+      const item = asRecord(entry.item);
+      const itemContent = asRecord(content.itemContent ?? item.itemContent);
       const tweetResult =
-        entry.content?.itemContent?.tweet_results?.result ||
-        entry.item?.itemContent?.tweet_results?.result ||
-        entry.itemContent?.tweet_results?.result;
+        asRecord(asRecord(asRecord(itemContent.tweet_results).tweet_results).result) ||
+        asRecord(asRecord(asRecord(item.itemContent).tweet_results).result);
 
-      if (!tweetResult) continue;
+      if (!tweetResult || !Object.keys(tweetResult).length) continue;
+
+      const tweetResultTweet = asRecord(tweetResult.tweet);
 
       // Extract author meta from tweet core if not yet present
       if (!authorAvatar || !authorName || authorName.startsWith('@')) {
+        const coreUserResults =
+          asRecord(asRecord(asRecord(tweetResult.core).user_results).result) ||
+          asRecord(asRecord(asRecord(tweetResultTweet.core).user_results).result);
         const tweetCoreUser =
-          tweetResult.core?.user_results?.result?.legacy ||
-          tweetResult.tweet?.core?.user_results?.result?.legacy ||
-          tweetResult.core?.user_results?.result ||
-          tweetResult.tweet?.core?.user_results?.result;
+          asRecord(coreUserResults.legacy) ||
+          coreUserResults ||
+          asRecord(asRecord(coreUserResults).legacy);
 
         const candidateAvatar =
-          tweetCoreUser?.profile_image_url_https ||
-          tweetCoreUser?.avatar?.image_url ||
-          tweetCoreUser?.legacy?.profile_image_url_https;
+          str(tweetCoreUser.profile_image_url_https) ||
+          str(asRecord(tweetCoreUser.avatar).image_url) ||
+          str(asRecord(tweetCoreUser.legacy).profile_image_url_https);
 
         if (!authorAvatar && candidateAvatar) {
           authorAvatar = candidateAvatar.includes('_normal.')
@@ -166,29 +178,29 @@ export const twitterAdapter: PlatformAdapter = {
         }
 
         const candidateName =
-          tweetCoreUser?.name ||
-          tweetCoreUser?.legacy?.name;
+          str(tweetCoreUser.name) ||
+          str(asRecord(tweetCoreUser.legacy).name);
 
         if ((!authorName || authorName.startsWith('@')) && candidateName) {
           authorName = candidateName;
         }
       }
 
-      let tweet = tweetResult.legacy;
+      let tweet = asRecord(tweetResult.legacy);
       if (tweetResult.__typename === 'TweetWithVisibilityResults' && tweetResult.tweet) {
-        tweet = tweetResult.tweet.legacy;
+        tweet = asRecord(tweetResultTweet.legacy);
       }
-      if (!tweet) continue;
+      if (!tweet || !Object.keys(tweet).length) continue;
 
-      const tweetId = tweet.id_str || entryId.replace('tweet-', '');
+      const tweetId = str(tweet.id_str) || entryId.replace('tweet-', '');
       if (seenTweetIds.has(tweetId)) continue;
       seenTweetIds.add(tweetId);
 
       // Support long-form text (NoteTweets)
-      let fullText = tweet.full_text || tweet.text || '';
+      let fullText = str(tweet.full_text) || str(tweet.text);
       const noteText =
-        tweetResult.note_tweet?.note_tweet_results?.result?.text ||
-        tweetResult.tweet?.note_tweet?.note_tweet_results?.result?.text;
+        str(asRecord(asRecord(asRecord(tweetResult.note_tweet).note_tweet_results).result).text) ||
+        str(asRecord(asRecord(asRecord(tweetResultTweet.note_tweet).note_tweet_results).result).text);
       if (noteText) {
         fullText = noteText;
       }
@@ -202,45 +214,49 @@ export const twitterAdapter: PlatformAdapter = {
       }
 
       if (isRetweet) {
-        const origLegacy =
-          tweet.retweeted_status_result?.result?.legacy ||
-          tweet.retweeted_status_result?.result?.tweet?.legacy;
-        const origUser =
-          tweet.retweeted_status_result?.result?.core?.user_results?.result?.legacy?.name ||
-          tweet.retweeted_status_result?.result?.core?.user_results?.result?.legacy?.screen_name;
-        if (origLegacy && origUser) {
-          fullText = `[转推 @${origUser}]:\n${origLegacy.full_text || origLegacy.text || fullText}`;
+        const rtResult = asRecord(asRecord(tweet.retweeted_status_result).result);
+        const rtLegacy = asRecord(rtResult.legacy) || asRecord(asRecord(rtResult.tweet).legacy);
+        const rtUserLegacy = asRecord(asRecord(asRecord(asRecord(rtResult.core).user_results).result).legacy);
+        const origUser = str(rtUserLegacy.name) || str(rtUserLegacy.screen_name);
+        if (Object.keys(rtLegacy).length && origUser) {
+          fullText = `[转推 @${origUser}]:\n${str(rtLegacy.full_text) || str(rtLegacy.text) || fullText}`;
         }
       }
 
-      const parsedTime = tweet.created_at ? new Date(tweet.created_at).getTime() : Date.now();
+      const parsedTime = str(tweet.created_at) ? new Date(str(tweet.created_at)).getTime() : Date.now();
       const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
 
       // Extract media
-      const mediaList: any[] = [];
-      const mediaItems =
-        tweet.extended_entities?.media ||
-        tweet.entities?.media ||
-        tweet.retweeted_status_result?.result?.legacy?.extended_entities?.media ||
+      const mediaList: Post['mediaList'] = [];
+      const mediaSource =
+        asRecord(tweet.extended_entities).media ||
+        asRecord(tweet.entities).media ||
+        asRecord(asRecord(asRecord(tweet.retweeted_status_result).result).legacy).extended_entities ||
+        asRecord(asRecord(asRecord(asRecord(tweet.retweeted_status_result).result).tweet).legacy).extended_entities ||
         [];
+      const mediaItems = Array.isArray(mediaSource) ? mediaSource : [];
 
-      for (const m of mediaItems) {
+      for (const rawM of mediaItems) {
+        const m = asRecord(rawM);
+        const mediaUrlHttps = str(m.media_url_https) || str(m.media_url);
         if (m.type === 'photo') {
           mediaList.push({
             type: 'image',
-            previewUrl: m.media_url_https || m.media_url,
-            originalUrl: `${m.media_url_https || m.media_url}?name=orig`,
+            previewUrl: mediaUrlHttps,
+            originalUrl: `${mediaUrlHttps}?name=orig`,
           });
         } else if (m.type === 'video' || m.type === 'animated_gif') {
-          const variants = m.video_info?.variants || [];
+          const rawVariants = asRecord(m.video_info).variants;
+          const variants: JsonValue[] = Array.isArray(rawVariants) ? rawVariants : [];
           const best = variants
-            .filter((v: any) => v.content_type === 'video/mp4')
-            .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+            .map((v) => asRecord(v))
+            .filter((v) => v.content_type === 'video/mp4')
+            .sort((a, b) => Number(b.bitrate ?? 0) - Number(a.bitrate ?? 0))[0];
 
           mediaList.push({
             type: 'video',
-            previewUrl: m.media_url_https,
-            originalUrl: best?.url || m.media_url_https,
+            previewUrl: mediaUrlHttps,
+            originalUrl: str(best?.url) || mediaUrlHttps,
           });
         }
       }

@@ -29,7 +29,7 @@ function errorMessage(err: unknown): string {
  * handlers exactly; only the location changed.
  */
 export function useCreatorsManager(deps: CreatorsManagerDependencies) {
-  const { creators, channels, posts, reloadData, clearTagFromFilters } = deps;
+  const { channels, posts, reloadData, clearTagFromFilters } = deps;
 
   // ---- Add Creator / Bind Channel modal state ----
   const addModalOpenRequest = ref<AddModalOpenRequest | null>(null);

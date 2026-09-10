@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Folder, FolderCheck, HardDrive, DownloadCloud, AlertCircle, RefreshCw, XCircle } from 'lucide-vue-next';
+import { Folder, FolderCheck, HardDrive, DownloadCloud, RefreshCw, XCircle } from 'lucide-vue-next';
 import { imageCacheService } from '../../../src/services/imageCache';
 import type { AppSettings, Post, Creator } from '../../../src/types';
 
@@ -46,8 +46,8 @@ async function handleSelectDirectory() {
     } else if (res.error && res.error !== '已取消选择目录') {
       alert('绑定失败: ' + res.error);
     }
-  } catch (err: any) {
-    alert('操作异常: ' + (err?.message || err));
+  } catch (err: unknown) {
+    alert('操作异常: ' + (err instanceof Error ? err.message : String(err)));
   } finally {
     isBinding.value = false;
     checkStatus();
@@ -96,8 +96,8 @@ async function handleBatchCacheExisting() {
       batchProgress.value.success += count;
     }
     alert(`【离线归档完成】共扫描 ${targetPosts.length} 条图文动态，成功下载并归档 ${batchProgress.value.success} 张图片到 "${boundDirName.value}" 文件夹！`);
-  } catch (err: any) {
-    alert('批量缓存异常: ' + (err?.message || err));
+  } catch (err: unknown) {
+    alert('批量缓存异常: ' + (err instanceof Error ? err.message : String(err)));
   } finally {
     isBatchCaching.value = false;
   }

@@ -110,7 +110,7 @@ export function handleDouyinSnapshot(
       const onTargetCreator = typeof live.url === 'string' && live.url.includes(secUid);
       if (!onTargetCreator) {
         await chrome.tabs.update(target.id, { url: profileUrl }).catch(() => null);
-        await waitForTabLoad(target.id, profileUrl);
+        await waitForTabLoad(target.id);
       }
 
       const confirmed = await chrome.tabs.get(target.id).catch(() => null);
@@ -164,7 +164,7 @@ export function handleDouyinSnapshot(
 }
 
 /** Wait (bounded) for a tab to finish loading the creator page. */
-function waitForTabLoad(tabId: number, _url: string): Promise<void> {
+function waitForTabLoad(tabId: number): Promise<void> {
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {

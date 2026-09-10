@@ -74,14 +74,18 @@ const emit = defineEmits<{
 // ==================== CREATORS DIRECTORY FILTER & SORT & BATCH STATE ====================
 const VIEW_MODE_STORAGE_KEY = 'creator_feed_creators_view_mode';
 const viewMode = ref<'grid' | 'list' | 'detailed'>(
-  (typeof localStorage !== 'undefined' && (localStorage.getItem(VIEW_MODE_STORAGE_KEY) as any)) || 'grid'
+  (typeof localStorage !== 'undefined' &&
+    (localStorage.getItem(VIEW_MODE_STORAGE_KEY) as 'grid' | 'list' | 'detailed' | null)) ||
+  'grid'
 );
 
 function setViewMode(mode: 'grid' | 'list' | 'detailed') {
   viewMode.value = mode;
   try {
     localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
-  } catch {}
+  } catch {
+    // Storage write blocked: view mode stays in memory for this session.
+  }
 }
 
 const isTagsExpanded = ref(false);

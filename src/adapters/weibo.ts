@@ -3,6 +3,9 @@ import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
+import { asRecord } from '../utils/json';
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 export const weiboAdapter: PlatformAdapter = {
   platform: 'weibo',
@@ -27,24 +30,24 @@ export const weiboAdapter: PlatformAdapter = {
         return await this.fetchAjaxFallback!(channel, limit, page, options);
       }
 
-      let indexJson: any;
+      let indexJson: Record<string, unknown>;
       try {
         indexJson = JSON.parse(indexRes.data);
       } catch {
         return await this.fetchAjaxFallback!(channel, limit, page, options);
       }
 
-      const userInfo = indexJson.data?.userInfo || {};
-      const authorName = userInfo.screen_name || channel.displayName;
-      const authorAvatar = userInfo.avatar_hd || userInfo.profile_image_url || channel.avatarUrl;
+      const userInfo = asRecord(asRecord(indexJson.data).userInfo);
+      const authorName = str(userInfo.screen_name) || channel.displayName || '';
+      const authorAvatar = str(userInfo.avatar_hd) || str(userInfo.profile_image_url) || toHttps(channel.avatarUrl);
 
       // Find the container ID for 'weibo' tab
       let containerId = `107603${userInfo.id || uid}`;
-      const tabs = indexJson.data?.tabsInfo?.tabs;
+      const tabs = asRecord(asRecord(indexJson.data).tabsInfo).tabs;
       if (Array.isArray(tabs)) {
-        const weiboTab = tabs.find((t: any) => t.tab_type === 'weibo');
-        if (weiboTab?.containerid) {
-          containerId = weiboTab.containerid;
+        const weiboTab = asRecord(tabs.find((t) => asRecord(t).tab_type === 'weibo'));
+        if (weiboTab.containerid) {
+          containerId = String(weiboTab.containerid);
         }
       }
 
@@ -63,21 +66,23 @@ export const weiboAdapter: PlatformAdapter = {
         return await this.fetchAjaxFallback!(channel, limit, page, options);
       }
 
-      let timelineJson: any;
+      let timelineJson: Record<string, unknown>;
       try {
         timelineJson = JSON.parse(timelineRes.data);
       } catch {
         return await this.fetchAjaxFallback!(channel, limit, page, options);
       }
 
-      const cards = timelineJson.data?.cards || [];
+      const timelineData = asRecord(timelineJson.data);
+      const cards = Array.isArray(timelineData.cards) ? timelineData.cards : [];
       const posts: Post[] = [];
 
-      for (const card of cards) {
+      for (const rawCard of cards) {
         if (posts.length >= limit) break;
+        const card = asRecord(rawCard);
+        const mblog = asRecord(card.mblog);
         if (card.card_type !== 9 || !card.mblog) continue;
 
-        const mblog = card.mblog;
         const isRetweet = Boolean(mblog.retweeted_status);
 
         // If caller requested only original posts, skip retweets from consuming quota
@@ -85,24 +90,27 @@ export const weiboAdapter: PlatformAdapter = {
           continue;
         }
 
-        const id = mblog.id || mblog.mid || String(card.id);
+        const id = str(mblog.id) || str(mblog.mid) || String(card.id ?? '');
         if (!id) continue; // skip rather than collide all items on weibo_undefined
-        const rawText = cleanWeiboHtml(mblog.text || '');
+        const rawText = cleanWeiboHtml(str(mblog.text));
         let fullText = rawText;
 
         if (isRetweet) {
-          const origUser = mblog.retweeted_status.user?.screen_name || '原博主';
-          const origText = cleanWeiboHtml(mblog.retweeted_status.text || '');
+          const rt = asRecord(mblog.retweeted_status);
+          const origUser = str(asRecord(rt.user).screen_name) || '原博主';
+          const origText = cleanWeiboHtml(str(rt.text));
           fullText = `${rawText}\n\n[转发自 @${origUser}]:\n${origText}`;
         }
 
-        const mediaList: any[] = [];
+        const mediaList: Post['mediaList'] = [];
 
         // Photos / 9-Grid Images
-        const pics = mblog.pics || mblog.retweeted_status?.pics || [];
-        for (const p of pics) {
-          const origImg = toHttps(p.large?.url || p.url);
-          const previewImg = toHttps(p.url || origImg);
+        const picsSource = mblog.pics || asRecord(mblog.retweeted_status).pics;
+        const pics = Array.isArray(picsSource) ? picsSource : [];
+        for (const rawP of pics) {
+          const p = asRecord(rawP);
+          const origImg = toHttps(str(asRecord(p.large).url) || str(p.url));
+          const previewImg = toHttps(str(p.url) || origImg);
           if (origImg) {
             mediaList.push({
               type: 'image',
@@ -113,9 +121,10 @@ export const weiboAdapter: PlatformAdapter = {
         }
 
         // Video
-        if (mblog.page_info?.type === 'video' || mblog.page_info?.media_info) {
-          const videoPic = toHttps(mblog.page_info.page_pic?.url || mblog.page_info.page_pic);
-          const videoUrl = mblog.page_info.media_info?.stream_url || `https://weibo.com/${uid}/${mblog.bid || id}`;
+        const pageInfo = asRecord(mblog.page_info);
+        if (pageInfo.type === 'video' || pageInfo.media_info) {
+          const videoPic = toHttps(str(asRecord(pageInfo.page_pic).url) || str(pageInfo.page_pic));
+          const videoUrl = str(asRecord(pageInfo.media_info).stream_url) || `https://weibo.com/${uid}/${str(mblog.bid) || id}`;
           if (videoPic) {
             mediaList.push({
               type: 'video',
@@ -125,7 +134,7 @@ export const weiboAdapter: PlatformAdapter = {
           }
         }
 
-        const pubDate = parseWeiboTime(mblog.created_at);
+        const pubDate = parseWeiboTime(str(mblog.created_at));
         const firstLine = rawText.split('\n')[0].trim();
         const title = firstLine.length > 0 && firstLine.length < 50
           ? firstLine
@@ -136,7 +145,7 @@ export const weiboAdapter: PlatformAdapter = {
           title,
           content: fullText || title,
           mediaList,
-          originalUrl: `https://weibo.com/${userInfo.id || uid}/${mblog.bid || id}`,
+          originalUrl: `https://weibo.com/${userInfo.id || uid}/${str(mblog.bid) || id}`,
           publishedAt: pubDate,
           isRepost: isRetweet,
         }));
@@ -145,7 +154,7 @@ export const weiboAdapter: PlatformAdapter = {
       // Sort strictly newest first
       posts.sort((a, b) => b.publishedAt - a.publishedAt);
 
-      const hasMore = cards.length > 0 && Boolean(timelineJson.data?.cardlistInfo?.total);
+      const hasMore = cards.length > 0 && Boolean(asRecord(timelineData.cardlistInfo).total);
 
       return {
         posts,
@@ -187,33 +196,36 @@ export const weiboAdapter: PlatformAdapter = {
         return { posts: [], error: fetchError('auth', '微博访客系统拦截。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
       }
 
-      const json = JSON.parse(res.data);
-      const list = json.data?.list || [];
+      const json: Record<string, unknown> = JSON.parse(res.data);
+      const list = (Array.isArray(asRecord(json.data).list) ? asRecord(json.data).list : []) as unknown[];
       const posts: Post[] = [];
       let authorName = channel.displayName;
       let authorAvatar = channel.avatarUrl;
 
-      for (const item of list) {
+      for (const rawItem of list) {
         if (posts.length >= limit) break;
+        const item = asRecord(rawItem);
 
         const isRetweet = Boolean(item.retweeted_status);
         if (options?.onlyOriginal && isRetweet) continue;
 
-        if (item.user?.screen_name) authorName = item.user.screen_name;
-        if (item.user?.avatar_hd) authorAvatar = item.user.avatar_hd;
+        const user = asRecord(item.user);
+        if (user.screen_name) authorName = str(user.screen_name);
+        if (user.avatar_hd) authorAvatar = str(user.avatar_hd);
 
-        const text = cleanWeiboHtml(item.text_raw || item.text || '');
-        const id = item.id || item.mid;
+        const text = cleanWeiboHtml(str(item.text_raw) || str(item.text));
+        const id = str(item.id) || str(item.mid);
         if (!id) continue; // skip rather than collide all items on weibo_undefined
-        const parsedTime = item.created_at ? new Date(item.created_at).getTime() : Date.now();
+        const parsedTime = str(item.created_at) ? new Date(str(item.created_at)).getTime() : Date.now();
         const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
 
-        const mediaList: any[] = [];
+        const mediaList: Post['mediaList'] = [];
+        const picInfos = asRecord(item.pic_infos);
         if (item.pic_infos) {
-          for (const key of Object.keys(item.pic_infos)) {
-            const p = item.pic_infos[key];
-            const origImg = toHttps(p.large?.url || p.original?.url);
-            const previewImg = toHttps(p.bmiddle?.url || p.thumbnail?.url || origImg);
+          for (const key of Object.keys(picInfos)) {
+            const p = asRecord(picInfos[key]);
+            const origImg = toHttps(str(asRecord(p.large).url) || str(asRecord(p.original).url));
+            const previewImg = toHttps(str(asRecord(p.bmiddle).url) || str(asRecord(p.thumbnail).url) || origImg);
             if (origImg) {
               mediaList.push({
                 type: 'image',
@@ -229,7 +241,7 @@ export const weiboAdapter: PlatformAdapter = {
           title: text.slice(0, 40),
           content: text,
           mediaList,
-          originalUrl: `https://weibo.com/${uid}/${item.mblogid || id}`,
+          originalUrl: `https://weibo.com/${uid}/${str(item.mblogid) || id}`,
           publishedAt: pubDate,
           isRepost: isRetweet,
         }));
@@ -271,7 +283,7 @@ export const weiboAdapter: PlatformAdapter = {
 function cleanWeiboHtml(html: string): string {
   if (!html) return '';
   return html
-    .replace(/<br\s*[\/]?>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<img[^>]*alt="([^"]+)"[^>]*>/gi, '$1')
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&')

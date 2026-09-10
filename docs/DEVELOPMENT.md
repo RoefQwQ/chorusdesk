@@ -178,7 +178,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 
 ## 11. 验证规范
 
-- 构建/类型：`npm run build` 与 `npx tsc --noEmit` 必须通过；项目通过 `@types/chrome` 和 `types/env.d.ts` 提供 Chrome API、Vue SFC、CSS 模块声明。
+- 构建/类型/Lint：`npm run build`、`npm run typecheck` 与 `npm run lint` 必须通过（CI 三件套 + lint）。类型检查用原生 TS7 编译器（`@typescript/native` 别名），ESLint 工具链经 `typescript: npm:@typescript/typescript6` 官方兼容别名消费经典 API（见 `eslint.config.js` 头注释）。
 - 加载方式：`chrome://extensions/` 开发者模式加载 `.output/chrome-mv3/`，代码更新后重新构建并点“重新加载”；扩展页不更新先怀疑旧产物。
 - 消息/后台改动必须**扩展运行时验证**（Popup/Dashboard ↔ background 真实往返），纯 `tsc` 通过不算。
 - 最小手动回归清单（按改动面裁剪）：

@@ -7,7 +7,6 @@
 import type { Post } from '../../types';
 import {
   getSavedRootDirectoryHandle,
-  saveRootDirectoryHandle,
   clearRootDirectoryHandle,
   promptSelectDirectory,
   verifyDirectoryPermission,
@@ -48,7 +47,9 @@ async function fetchImageBlob(url: string): Promise<{ blob: Blob; mimeType: stri
       const blob = await res.blob();
       return { blob, mimeType: blob.type || 'image/jpeg' };
     }
-  } catch {}
+  } catch {
+    // Direct fetch failed (CORS/hotlink): fall through to the background proxy.
+  }
 
   // 3. Try background proxy if direct fetch fails (e.g. cross-origin/Referer hotlink protection)
   try {
@@ -58,7 +59,9 @@ async function fetchImageBlob(url: string): Promise<{ blob: Blob; mimeType: stri
       const blob = await res.blob();
       return { blob, mimeType: blob.type || 'image/jpeg' };
     }
-  } catch {}
+  } catch {
+    // Proxy also failed: no local copy possible for this media.
+  }
 
   return null;
 }
@@ -89,8 +92,8 @@ export const imageCacheService = {
       const handle = await promptSelectDirectory();
       if (!handle) return { success: false, error: '已取消选择目录' };
       return { success: true, dirName: handle.name };
-    } catch (err: any) {
-      return { success: false, error: err?.message || '选择本地目录失败' };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : '选择本地目录失败' };
     }
   },
 

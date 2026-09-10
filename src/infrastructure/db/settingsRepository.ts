@@ -16,7 +16,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export async function getSettings(): Promise<AppSettings> {
   const item = await db.settings.get('app_settings');
-  return item ? { ...DEFAULT_SETTINGS, ...item.value } : DEFAULT_SETTINGS;
+  if (!item) return DEFAULT_SETTINGS;
+  const stored = item.value;
+  return { ...DEFAULT_SETTINGS, ...(typeof stored === 'object' && stored !== null ? stored : {}) };
 }
 
 export async function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {

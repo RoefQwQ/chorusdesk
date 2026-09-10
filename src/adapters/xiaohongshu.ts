@@ -4,6 +4,10 @@ import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 import { toSecureMediaUrl } from '../utils/media';
+import type { JsonRecord, JsonValue } from '../utils/json';
+import { asRecord } from '../utils/json';
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 export const xiaohongshuAdapter: PlatformAdapter = {
   platform: 'xiaohongshu',
@@ -39,8 +43,11 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       }
 
       // Extract notes list (can be column array or flat list)
-      const rawNotes: any[] = [];
-      const notesContainer = state.user?.notes || state.user?.userPageData?.notes || state.note?.notes;
+      const rawNotes: JsonValue[] = [];
+      const stateUser = asRecord(state.user);
+      const stateNote = asRecord(state.note);
+      const notesContainer =
+        stateUser.notes || asRecord(stateUser.userPageData).notes || stateNote.notes;
 
       if (Array.isArray(notesContainer)) {
         for (const item of notesContainer) {
@@ -53,45 +60,60 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       }
 
       // Check noteDetailMap if it's a single note / explore page
-      if (rawNotes.length === 0 && state.note?.noteDetailMap) {
-        for (const [nid, detail] of Object.entries(state.note.noteDetailMap)) {
+      if (rawNotes.length === 0 && stateNote.noteDetailMap) {
+        const noteDetailMap = asRecord(stateNote.noteDetailMap);
+        for (const [nid, detail] of Object.entries(noteDetailMap)) {
+          const detailRecord = asRecord(detail);
           if (detail && typeof detail === 'object') {
-            rawNotes.push({ id: nid, ...((detail as any).note || detail) });
+            rawNotes.push({ id: nid, ...asRecord(detailRecord.note) } as JsonRecord);
           }
         }
       }
 
       // Extract author meta with fallback to note items
-      const basicInfo = state.user?.userPageData?.basicInfo || state.user?.userProfile?.basicInfo || {};
-      const sampleUser = rawNotes.find(n => (n.noteCard?.user || n.user)?.nickname)?.noteCard?.user ||
-                         rawNotes.find(n => (n.noteCard?.user || n.user)?.nickname)?.user;
-      const authorName = basicInfo.nickname || basicInfo.name || sampleUser?.nickname || channel.displayName || `小红书用户_${userId.slice(0, 6)}`;
-      const rawAvatar = basicInfo.imageb || basicInfo.images || sampleUser?.avatar || sampleUser?.avatarUrl || channel.avatarUrl;
+      const basicInfo =
+        asRecord(asRecord(stateUser.userPageData).basicInfo) ||
+        asRecord(asRecord(stateUser.userProfile).basicInfo);
+      const noteRecords = rawNotes.map((n) => asRecord(n));
+      const sampleUserRaw = noteRecords.find((n) => str(asRecord(asRecord(n.noteCard).user).nickname) || str(asRecord(n.user).nickname));
+      const sampleUser = asRecord(asRecord(sampleUserRaw?.noteCard).user) || asRecord(sampleUserRaw?.user);
+      const authorName = str(basicInfo.nickname) || str(basicInfo.name) || str(sampleUser.nickname) || channel.displayName || `小红书用户_${userId.slice(0, 6)}`;
+      const rawAvatar = str(basicInfo.imageb) || str(basicInfo.images) || str(sampleUser.avatar) || str(sampleUser.avatarUrl) || channel.avatarUrl;
       const authorAvatar = toSecureMediaUrl(rawAvatar);
 
       const allPosts: Post[] = [];
       const seenIds = new Set<string>();
 
-      for (const item of rawNotes) {
-        const noteId = item.id || item.noteId || item.noteCard?.noteId;
+      for (const rawItem of rawNotes) {
+        const item = asRecord(rawItem);
+        const noteCard = asRecord(item.noteCard);
+        const noteId = str(item.id) || str(item.noteId) || str(noteCard.noteId);
         if (!noteId || seenIds.has(noteId)) continue;
         seenIds.add(noteId);
 
-        const card = item.noteCard || item;
-        const displayTitle = card.displayTitle || card.title || '小红书精选笔记';
+        const card = asRecord(item.noteCard) || item;
+        const displayTitle = str(card.displayTitle) || str(card.title) || '小红书精选笔记';
         const isVideo = card.type === 'video';
 
         // Media Cover & Images
-        const mediaList: any[] = [];
-        const cover = card.cover || {};
-        const coverUrl = cover.urlDefault || cover.urlPre || cover.infoList?.[0]?.url || card.image?.url;
+        const mediaList: MediaItem[] = [];
+        const cover = asRecord(card.cover);
+        const coverInfoList = Array.isArray(cover.infoList) ? cover.infoList : [];
+        const coverUrl =
+          str(cover.urlDefault) ||
+          str(cover.urlPre) ||
+          str(asRecord(coverInfoList[0]).url) ||
+          str(asRecord(card.image).url);
         const noteUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
 
         // Support multiple images if present in card (e.g. imageList, imagesList)
-        const imageList = card.imageList || card.imagesList || item.imageList || item.imagesList;
-        if (Array.isArray(imageList) && imageList.length > 0) {
-          for (const img of imageList) {
-            const imgUrl = img?.urlDefault || img?.urlPre || img?.url || img?.infoList?.[0]?.url;
+        const imageListSource = card.imageList || card.imagesList || item.imageList || item.imagesList;
+        const imageList = Array.isArray(imageListSource) ? imageListSource : [];
+        if (imageList.length > 0) {
+          for (const rawImg of imageList) {
+            const img = asRecord(rawImg);
+            const imgInfoList = Array.isArray(img.infoList) ? img.infoList : [];
+            const imgUrl = str(img.urlDefault) || str(img.urlPre) || str(img.url) || str(asRecord(imgInfoList[0]).url);
             if (imgUrl) {
               const secureUrl = toSecureMediaUrl(imgUrl);
               mediaList.push({
@@ -112,7 +134,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
           });
         }
 
-        const likedCount = card.interactInfo?.likedCount || '';
+        const likedCount = str(asRecord(card.interactInfo).likedCount);
         const noteContent = likedCount
           ? `${displayTitle}\n\n❤️ ${likedCount} 次赞同`
           : displayTitle;
@@ -142,7 +164,9 @@ export const xiaohongshuAdapter: PlatformAdapter = {
             if (sec > 1400000000 && sec < 2500000000) {
               pubTime = sec * 1000;
             }
-          } catch {}
+          } catch {
+            // Malformed ObjectId prefix: fall through to Date.now().
+          }
         }
 
         if (!pubTime) {
@@ -224,7 +248,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
   },
 };
 
-function extractXhsInitialState(html: string): any {
+function extractXhsInitialState(html: string): JsonRecord | null {
   if (!html) return null;
 
   try {
@@ -242,11 +266,12 @@ function extractXhsInitialState(html: string): any {
               const quoteStart = raw.indexOf('"');
               const quoteEnd = raw.lastIndexOf('"');
               if (quoteStart !== -1 && quoteEnd > quoteStart) {
-                return JSON.parse(JSON.parse(raw.slice(quoteStart, quoteEnd + 1)));
+                const inner = JSON.parse(raw.slice(quoteStart, quoteEnd + 1)) as unknown;
+                return asRecord(JSON.parse(String(inner)));
               }
             } else if (raw.startsWith('{')) {
               const cleaned = raw.replace(/:\s*undefined\b/g, ': null');
-              return JSON.parse(cleaned);
+              return asRecord(JSON.parse(cleaned) as unknown);
             }
           }
         }
@@ -307,8 +332,8 @@ async function enrichImageNoteMedia(channel: Channel, posts: Post[]): Promise<vo
       if (!res.ok) continue;
 
       const state = extractXhsInitialState(res.data);
-      const note = state?.note?.noteDetailMap?.[noteId]?.note;
-      const imageList: unknown = note?.imageList || note?.imagesList;
+      const note = asRecord(asRecord(asRecord(asRecord(asRecord(state).note).noteDetailMap)[noteId]).note);
+      const imageList: unknown = note.imageList || note.imagesList;
       if (!Array.isArray(imageList) || imageList.length === 0) continue;
 
       const mediaList: MediaItem[] = [];

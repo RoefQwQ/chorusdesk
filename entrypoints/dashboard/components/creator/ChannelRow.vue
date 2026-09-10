@@ -143,7 +143,7 @@ const emit = defineEmits<{
         <History :class="compact ? 'w-3 h-3' : 'w-3.5 h-3.5'" />
       </button>
       <button
-        @click="emit('refresh', { channel, force: false })"
+        @click.exact="emit('refresh', { channel, force: false })"
         @click.shift.stop="emit('refresh', { channel, force: true })"
         :title="compact ? '同步最新 (按住 Shift 强制覆盖)' : '同步最新动态 (按住 Shift 点击可强制重新刷新覆盖已有内容与图片)'"
         class="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"

@@ -23,7 +23,9 @@ function markCurrentPosition() {
   markedScrollY.value = y;
   try {
     sessionStorage.setItem(STORAGE_KEY, String(Math.round(y)));
-  } catch {}
+  } catch {
+    // sessionStorage unavailable (privacy mode): mark lives only in memory.
+  }
 
   showToast.value = true;
   if (toastTimer) clearTimeout(toastTimer);
@@ -59,7 +61,9 @@ onMounted(() => {
         markedScrollY.value = parsed;
       }
     }
-  } catch {}
+  } catch {
+    // sessionStorage unavailable: start without a saved mark.
+  }
 });
 
 onUnmounted(() => {

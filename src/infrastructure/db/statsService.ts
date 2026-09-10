@@ -19,7 +19,9 @@ export async function getDatabaseStats() {
         usage: est.usage || 0,
         quota: est.quota || 0,
       };
-    } catch {}
+    } catch {
+      // storage.estimate() unsupported or failed: report zeros.
+    }
   }
 
   return {

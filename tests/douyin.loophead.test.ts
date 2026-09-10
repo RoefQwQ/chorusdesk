@@ -51,8 +51,8 @@ const douyinAtEnd: Channel = {
 describe('deepSyncChannel loop head vs __END__', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (db.channels as any).__reset();
-    (db.channels as any).__setState(douyinAtEnd);
+    (db.channels as unknown as { __reset: () => void }).__reset();
+    (db.channels as unknown as { __setState: (s: unknown) => void }).__setState(douyinAtEnd);
   });
 
   it('falls through to a dig for a douyin channel parked at __END__', async () => {
@@ -64,7 +64,7 @@ describe('deepSyncChannel loop head vs __END__', () => {
   });
 
   it('still short-circuits for a cursor-paginated platform at __END__', async () => {
-    (db.channels as any).__setState({ ...douyinAtEnd, id: 'bilibili:loop', platform: 'bilibili' });
+    (db.channels as unknown as { __setState: (s: unknown) => void }).__setState({ ...douyinAtEnd, id: 'bilibili:loop', platform: 'bilibili' });
     const res = await deepSyncChannel(
       { ...douyinAtEnd, id: 'bilibili:loop', platform: 'bilibili' },
       { maxPosts: 5 },

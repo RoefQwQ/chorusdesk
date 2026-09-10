@@ -320,7 +320,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     return null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

@@ -3,6 +3,10 @@ import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
+import { asRecord } from '../utils/json';
+import type { JsonValue } from '../utils/json';
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 export const withnyAdapter: PlatformAdapter = {
   platform: 'withny',
@@ -25,23 +29,26 @@ export const withnyAdapter: PlatformAdapter = {
         throw new Error(`Withny HTTP ${res.status}`);
       }
 
-      const data = JSON.parse(res.data);
-      const list = data?.posts || data?.data || [];
+      const data = asRecord(JSON.parse(res.data));
+      const rawList = data.posts || data.data;
+      const list: JsonValue[] = Array.isArray(rawList) ? rawList : [];
 
       const posts: Post[] = list
-        .filter((item: { id?: unknown }) => item.id)
-        .map((item: any) => buildPost(channel, {
-          id: `withny_${item.id}`,
-          title: item.title || 'Withny 动态',
-          content: item.body || item.text || '',
-          mediaList: item.mediaUrls ? item.mediaUrls.map((u: string) => ({
-            type: 'image',
-            previewUrl: u,
-            originalUrl: u,
-          })) : [],
-          originalUrl: `https://withny.fun/posts/${item.id}`,
-          publishedAt: Number.isFinite(new Date(item.publishedAt).getTime())
-            ? new Date(item.publishedAt).getTime()
+        .map((raw) => asRecord(raw))
+        .filter((item) => item.id)
+        .map((item) => buildPost(channel, {
+          id: `withny_${String(item.id)}`,
+          title: str(item.title) || 'Withny 动态',
+          content: str(item.body) || str(item.text),
+          mediaList: Array.isArray(item.mediaUrls)
+            ? item.mediaUrls
+                .map((u) => str(u))
+                .filter(Boolean)
+                .map((u) => ({ type: 'image' as const, previewUrl: u, originalUrl: u }))
+            : [],
+          originalUrl: `https://withny.fun/posts/${String(item.id)}`,
+          publishedAt: Number.isFinite(new Date(str(item.publishedAt)).getTime())
+            ? new Date(str(item.publishedAt)).getTime()
             : Date.now(),
         }));
 
@@ -52,15 +59,21 @@ export const withnyAdapter: PlatformAdapter = {
       let authorAvatar = channel.avatarUrl;
 
       // Extract author meta from returned user object or items
-      if (data?.user) {
-        authorName = data.user.name || data.user.nickname || data.user.displayName || authorName;
-        authorAvatar = data.user.avatarUrl || data.user.avatar || data.user.iconUrl || authorAvatar;
-      } else if (list[0]?.user) {
-        authorName = list[0].user.name || list[0].user.nickname || authorName;
-        authorAvatar = list[0].user.avatarUrl || list[0].user.avatar || authorAvatar;
+      const apiUser = asRecord(data.user);
+      if (data.user) {
+        authorName = str(apiUser.name) || str(apiUser.nickname) || str(apiUser.displayName) || authorName;
+        authorAvatar = str(apiUser.avatarUrl) || str(apiUser.avatar) || str(apiUser.iconUrl) || authorAvatar;
+      } else if (list.length > 0) {
+        const firstUser = asRecord(asRecord(list[0]).user);
+        authorName = str(firstUser.name) || str(firstUser.nickname) || authorName;
+        authorAvatar = str(firstUser.avatarUrl) || str(firstUser.avatar) || authorAvatar;
       }
 
-      const nextCursor = data?.nextCursor || data?.cursor || (list.length >= limit && list[list.length - 1]?.id ? String(list[list.length - 1].id) : undefined);
+      const lastItem = list.length > 0 ? asRecord(list[list.length - 1]) : {};
+      const nextCursor =
+        str(data.nextCursor) ||
+        str(data.cursor) ||
+        (list.length >= limit && lastItem.id ? String(lastItem.id) : undefined);
       const hasMore = Boolean(nextCursor);
 
       return {

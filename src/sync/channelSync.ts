@@ -95,7 +95,9 @@ export async function updateChannel(
         if (latestPost) {
           sinceTimestamp = latestPost.publishedAt;
         }
-      } catch {}
+      } catch {
+        // Watermark read failed: fall back to fetching without sinceTimestamp.
+      }
     }
 
     const mergedOptions: FetchOptions = { ...options, sinceTimestamp };
@@ -149,7 +151,9 @@ export async function updateChannel(
             let existingRows: (Post | undefined)[] = [];
             try {
               existingRows = await db.posts.bulkGet(duplicatePosts.map(p => p.id));
-            } catch {}
+            } catch {
+              // Read failure: proceed without the regression guard.
+            }
             await db.posts.bulkPut(duplicatePosts.map((p, i) => {
               // Never regress an enriched media list: adapter detail-fetch
               // enrichment is capped per round (risk control), so a later
@@ -173,7 +177,9 @@ export async function updateChannel(
           if (options?.maxNewPosts && options.maxNewPosts > 0) {
             newPosts = newPosts.slice(0, options.maxNewPosts);
           }
-        } catch {}
+        } catch {
+          // Upsert path failed: keep the fetch alive with the unfiltered batch.
+        }
       } else if (sinceTimestamp > 0) {
         newPosts = result.posts.filter(p => p.publishedAt > sinceTimestamp);
       }
@@ -191,14 +197,19 @@ export async function updateChannel(
             const deletedSet = new Set(deletedKeys);
             newPosts = newPosts.filter(p => !deletedSet.has(p.id));
           }
-        } catch {}
+        } catch {
+          // Tombstone read failed: keep posts rather than resurrect deletions.
+        }
       } else {
         try {
           const fetchedIds = newPosts.map(p => p.id);
           if (fetchedIds.length > 0) {
             await db.deletedPostIds.bulkDelete(fetchedIds);
           }
-        } catch {}
+        } catch {
+          // Tombstone clear failed: restore still proceeds; the stale
+          // tombstone will filter this post on the next ordinary sync.
+        }
       }
 
       enhancedPosts = newPosts.map((p) => ({

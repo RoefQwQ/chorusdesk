@@ -27,7 +27,9 @@ export function useCreatorVisibility(actions: CreatorVisibilityActions) {
     if (savedPlatforms) {
       hiddenCreatorPlatforms.value = JSON.parse(savedPlatforms);
     }
-  } catch {}
+  } catch {
+    // Corrupt or unavailable localStorage: start with nothing hidden.
+  }
 
   function toggleHideCreator(creatorId: string) {
     if (hiddenCreatorIds.value.has(creatorId)) {
@@ -38,7 +40,9 @@ export function useCreatorVisibility(actions: CreatorVisibilityActions) {
     hiddenCreatorIds.value = new Set(hiddenCreatorIds.value);
     try {
       localStorage.setItem(HIDDEN_CREATORS_KEY, JSON.stringify(Array.from(hiddenCreatorIds.value)));
-    } catch {}
+    } catch {
+      // Storage write blocked: hide state stays in memory for this session.
+    }
   }
 
   function toggleHideCreatorPlatform(creatorId: string, platformKey: string) {
@@ -55,14 +59,18 @@ export function useCreatorVisibility(actions: CreatorVisibilityActions) {
     };
     try {
       localStorage.setItem(HIDDEN_PLATFORMS_KEY, JSON.stringify(hiddenCreatorPlatforms.value));
-    } catch {}
+    } catch {
+      // Storage write blocked: hide state stays in memory for this session.
+    }
   }
 
   function unhideAllCreators() {
     hiddenCreatorIds.value = new Set();
     try {
       localStorage.removeItem(HIDDEN_CREATORS_KEY);
-    } catch {}
+    } catch {
+      // Storage remove blocked: harmless, key is re-created on next write.
+    }
   }
 
   function getCreatorPlatforms(creatorId: string): string[] {
@@ -79,7 +87,9 @@ export function useCreatorVisibility(actions: CreatorVisibilityActions) {
       hiddenCreatorPlatforms.value = updated;
       try {
         localStorage.setItem(HIDDEN_PLATFORMS_KEY, JSON.stringify(hiddenCreatorPlatforms.value));
-      } catch {}
+      } catch {
+        // Storage write blocked: hide state stays in memory for this session.
+      }
     }
   }
 

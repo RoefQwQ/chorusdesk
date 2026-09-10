@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
-import { Bookmark, ChevronRight, Clock, ExternalLink, Film, Video, ImageOff, Repeat2, Trash2 } from 'lucide-vue-next';
+import { Bookmark, ChevronRight, Clock, ExternalLink, Video, ImageOff, Repeat2, Trash2 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
 import { imageCacheService } from '../../../src/services/imageCache';
@@ -109,7 +109,9 @@ onMounted(async () => {
         localMediaUrls.value[original] = localUrl;
         delete mediaFailedMap.value[original];
       }
-    } catch {}
+    } catch {
+      // Local cache miss is expected on first view; fall through to network.
+    }
   }
 });
 
@@ -147,7 +149,9 @@ async function handleMediaError(e: Event, originalUrl?: string, mediaIndex: numb
       delete mediaFailedMap.value[originalUrl];
       return;
     }
-  } catch {}
+  } catch {
+    // Cache miss: fall through to the retry ladder below.
+  }
 
   const retryCount = Number(target.dataset.retryCount || 0);
   if (retryCount >= 1 || isImageFailed(originalUrl)) {
@@ -176,7 +180,9 @@ async function handleMediaError(e: Event, originalUrl?: string, mediaIndex: numb
 
       return;
     }
-  } catch {}
+  } catch {
+    // Proxy also failed: mark permanently failed below.
+  }
 
   markImageFailed(originalUrl);
   mediaFailedMap.value[originalUrl] = true;

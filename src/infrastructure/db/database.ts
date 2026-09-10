@@ -1,11 +1,11 @@
 import Dexie, { type Table } from 'dexie';
-import type { Creator, Channel, Post, AppSettings, DeletedPostRecord } from '../../types';
+import type { Creator, Channel, Post, DeletedPostRecord } from '../../types';
 
 export class FeedDatabase extends Dexie {
   creators!: Table<Creator, string>;
   channels!: Table<Channel, string>;
   posts!: Table<Post, string>;
-  settings!: Table<{ key: string; value: any }, string>;
+  settings!: Table<{ key: string; value: unknown }, string>;
   deletedPostIds!: Table<DeletedPostRecord, string>;
 
   constructor() {

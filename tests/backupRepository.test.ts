@@ -60,7 +60,7 @@ describe('parseBackup', () => {
   });
 
   it('rejects a missing version marker', () => {
-    const { version: _v, ...withoutVersion } = validBackup;
+    const { version: _version, ...withoutVersion } = validBackup;
     const result = parseBackup(withoutVersion);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('version');

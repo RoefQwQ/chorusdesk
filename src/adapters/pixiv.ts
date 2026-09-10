@@ -44,7 +44,9 @@ export const pixivAdapter: PlatformAdapter = {
           if (rawAvatar && typeof rawAvatar === 'string' && !rawAvatar.includes('no_profile')) {
             authorAvatar = rawAvatar;
           }
-        } catch {}
+        } catch {
+          // Author-meta fetch is supplementary; the profile parse below still runs.
+        }
       }
 
       const json = JSON.parse(res.data);

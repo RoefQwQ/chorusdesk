@@ -27,7 +27,7 @@ export function toSecureMediaUrl(url?: string | null): string {
     trimmed.includes('xiaohongshu.com')
   ) {
     if (trimmed.includes('/avatar/')) {
-      const m = trimmed.match(/\/avatar\/[a-zA-Z0-9_\-\.]+/);
+      const m = trimmed.match(/\/avatar\/[a-zA-Z0-9_.-]+/);
       if (m) {
         return `https://sns-avatar-qc.xhscdn.com${m[0]}`;
       }

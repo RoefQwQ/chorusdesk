@@ -52,16 +52,12 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
 
       const isXhs = url.includes('xhscdn.com') || url.includes('xiaohongshu.com') || url.includes('xhscdn.net');
       let referer = 'https://www.xiaohongshu.com/';
-      let origin = 'https://www.xiaohongshu.com';
       if (url.includes('sinaimg.cn') || url.includes('weibo.com')) {
         referer = 'https://weibo.com/';
-        origin = 'https://weibo.com';
       } else if (url.includes('pximg.net') || url.includes('pixiv.net')) {
         referer = 'https://www.pixiv.net/';
-        origin = 'https://www.pixiv.net';
       } else if (url.includes('bilibili.com') || url.includes('hdslb.com')) {
         referer = 'https://www.bilibili.com/';
-        origin = 'https://www.bilibili.com';
       }
 
       // Generate candidate URLs to try if first one returns 403/404
@@ -84,7 +80,9 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
             urlsToTry.push(`https://sns-img-bd.xhscdn.com/${fileId}`);
             urlsToTry.push(`https://sns-img-hw.xhscdn.com/${fileId}`);
           }
-        } catch {}
+        } catch {
+          // Malformed URL: keep the original and normalized candidates.
+        }
       }
 
       let res: Response | null = null;
@@ -109,7 +107,7 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
           }
           lastStatus = resp.status;
         } catch {
-          // Try next candidate
+          // This candidate failed: try the next URL.
         }
       }
 

@@ -46,11 +46,12 @@ export function handleTwitterTimeline(
       const pageResult = await fetchTwitterTimelineViaTabOrSession(username, limit, onlyOriginal, cursor);
       const directResult = pageResult?.success ? null : await fetchTwitterTimelineDirect(username, limit, onlyOriginal, cursor);
       sendResponse(pageResult?.success ? pageResult : (directResult || pageResult));
-    } catch (err: any) {
-      sendResponse({ success: false, error: err?.message || '获取推特动态异常' });
+    } catch (err: unknown) {
+      sendResponse({ success: false, error: err instanceof Error ? err.message : '获取推特动态异常' });
     }
   })();
   return true;
+}
 
 // Prefer direct Service Worker requests. This avoids opening a temporary x.com tab.
 async function fetchTwitterTimelineDirect(username: string, limit: number, onlyOriginal: boolean, cursor: string): Promise<{ success: boolean; error?: string; tweetData?: unknown; userData?: unknown } | null> {
@@ -313,7 +314,7 @@ async function fetchTwitterTimelineViaTabOrSession(
           const tweetOp = 'eviprbEPLvNG88V3smUngQ/UserTweets';
           // Sample wider window if onlyOriginal requested so retweets do not squeeze out originals
           const sampleCount = onlyOrig ? Math.min(Math.max(count * 3, 25), 45) : (count || 15);
-          const tweetVarsObj: Record<string, any> = {
+          const tweetVarsObj: Record<string, string | number | boolean> = {
             userId: restId,
             count: sampleCount,
             includePromotedContent: false,
@@ -376,7 +377,7 @@ async function fetchTwitterTimelineViaTabOrSession(
             withDisallowedReplyControls: false,
           });
 
-          let tweetResp = await fetch(
+          const tweetResp = await fetch(
             `/i/api/graphql/${tweetOp}?variables=${encodeURIComponent(tweetVars)}&features=${encodeURIComponent(tweetFt)}&fieldToggles=${encodeURIComponent(tweetFieldToggles)}`,
             { headers, credentials: 'include' }
           );
@@ -388,17 +389,29 @@ async function fetchTwitterTimelineViaTabOrSession(
             return { success: false, error: `获取推文动态失败 (HTTP ${tweetResp.status})` };
           }
 
-          let tweetData = await tweetResp.json();
+          let tweetData: unknown = await tweetResp.json();
 
-          // Check if instructions are empty, if so, fallback to UserTweetsAndReplies
-          const instructions =
-            tweetData?.data?.user?.result?.timeline_v2?.timeline?.instructions ||
-            tweetData?.data?.user?.result?.timeline?.timeline?.instructions ||
-            [];
+          const readInstructions = (data: unknown): unknown[] => {
+            const user = (data as Record<string, unknown> | null)?.data as Record<string, unknown> | undefined;
+            const userResult = user?.user as Record<string, unknown> | undefined;
+            const result = userResult?.result as Record<string, unknown> | undefined;
+            const v2 = result?.timeline_v2 as Record<string, unknown> | undefined;
+            const v2Timeline = v2?.timeline as Record<string, unknown> | undefined;
+            const tl = result?.timeline as Record<string, unknown> | undefined;
+            const tlTimeline = tl?.timeline as Record<string, unknown> | undefined;
+            const inst = v2Timeline?.instructions ?? tlTimeline?.instructions;
+            return Array.isArray(inst) ? inst : [];
+          };
+          const instructions = readInstructions(tweetData);
           const hasTweetEntries = instructions.some(
-            (inst: any) =>
-              (inst.type === 'TimelineAddEntries' && inst.entries?.some((e: any) => e.entryId?.startsWith('tweet-'))) ||
-              inst.type === 'TimelinePinEntry'
+            (inst) =>
+              (typeof inst === 'object' && inst !== null &&
+                ((inst as Record<string, unknown>).type === 'TimelineAddEntries' &&
+                  Array.isArray((inst as Record<string, unknown>).entries) &&
+                  ((inst as Record<string, unknown>).entries as Record<string, unknown>[]).some((e) =>
+                    typeof e.entryId === 'string' && e.entryId.startsWith('tweet-')
+                  ))) ||
+              (typeof inst === 'object' && inst !== null && (inst as Record<string, unknown>).type === 'TimelinePinEntry')
           );
 
           if (!hasTweetEntries) {
@@ -410,41 +423,49 @@ async function fetchTwitterTimelineViaTabOrSession(
               );
               if (replyResp.ok) {
                 const replyData = await replyResp.json();
-                const replyInst =
-                  replyData?.data?.user?.result?.timeline_v2?.timeline?.instructions ||
-                  replyData?.data?.user?.result?.timeline?.timeline?.instructions ||
-                  [];
-                if (replyInst.some((inst: any) => inst.type === 'TimelineAddEntries' && inst.entries?.length > 0)) {
+                const replyInst = readInstructions(replyData);
+                if (replyInst.some((inst) =>
+                  typeof inst === 'object' && inst !== null &&
+                  (inst as Record<string, unknown>).type === 'TimelineAddEntries' &&
+                  Array.isArray((inst as Record<string, unknown>).entries) &&
+                  ((inst as Record<string, unknown>).entries as unknown[]).length > 0
+                )) {
                   tweetData = replyData;
                 }
               }
-            } catch {}
+            } catch {
+              // Replies fallback failed: keep the original (empty) timeline.
+            }
           }
 
           // Extract bottom pagination cursor if present
           let bottomCursor: string | undefined;
-          const finalInstructions =
-            tweetData?.data?.user?.result?.timeline_v2?.timeline?.instructions ||
-            tweetData?.data?.user?.result?.timeline?.timeline?.instructions ||
-            [];
-          for (const inst of finalInstructions) {
+          for (const rawInst of readInstructions(tweetData)) {
+            if (typeof rawInst !== 'object' || rawInst === null) continue;
+            const inst = rawInst as Record<string, unknown>;
             if (inst.type === 'TimelineAddEntries' && Array.isArray(inst.entries)) {
-              for (const entry of inst.entries) {
-                const entryId = entry.entryId || '';
+              for (const rawEntry of inst.entries) {
+                if (typeof rawEntry !== 'object' || rawEntry === null) continue;
+                const entry = rawEntry as Record<string, unknown>;
+                const entryId = typeof entry.entryId === 'string' ? entry.entryId : '';
+                const content = (entry.content ?? undefined) as Record<string, unknown> | undefined;
+                const itemContent = (content?.itemContent ?? undefined) as Record<string, unknown> | undefined;
                 if (
                   entryId.startsWith('cursor-bottom-') ||
-                  entry.content?.cursorType === 'Bottom' ||
-                  entry.content?.entryType === 'TimelineTimelineCursor'
+                  content?.cursorType === 'Bottom' ||
+                  content?.entryType === 'TimelineTimelineCursor'
                 ) {
-                  bottomCursor = entry.content?.value || entry.content?.itemContent?.value;
+                  bottomCursor =
+                    (typeof content?.value === 'string' ? content.value : undefined) ||
+                    (typeof itemContent?.value === 'string' ? itemContent.value : undefined);
                 }
               }
             }
           }
 
           return { success: true, tweetData, userData, bottomCursor };
-        } catch (scriptErr: any) {
-          return { success: false, error: scriptErr?.message || '推特标签页执行脚本异常' };
+        } catch (scriptErr: unknown) {
+          return { success: false, error: scriptErr instanceof Error ? scriptErr.message : '推特标签页执行脚本异常' };
         }
       },
       args: [username, limit, Boolean(onlyOriginal), cursor || ''],
@@ -457,8 +478,9 @@ async function fetchTwitterTimelineViaTabOrSession(
     if (isTempTab && targetTabId) {
       try {
         await chrome.tabs.remove(targetTabId);
-      } catch {}
+      } catch {
+        // Tab already gone: nothing to clean up.
+      }
     }
-  }
 }
 }
