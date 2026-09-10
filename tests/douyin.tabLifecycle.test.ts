@@ -24,6 +24,8 @@ let createdTabs: Array<{ id: number; url: string }>;
 let snapshotResult: unknown;
 /** What the injected grid probe reports. */
 let gridResult: boolean;
+/** When set, the tab reports this URL instead of the profile it was sent to. */
+let navigatedAwayTo: string | null;
 
 let updateListeners: Array<(id: number, info: { status?: string }) => void>;
 /** Session storage behind `chrome.storage.session`, for reclaim-record assertions. */
@@ -42,6 +44,7 @@ function installChrome() {
   sessionStore = new Map();
   snapshotResult = { items: [], authorName: '作者', authorAvatar: '', statedTotal: 3 };
   gridResult = true;
+  navigatedAwayTo = null;
 
   vi.stubGlobal('chrome', {
     storage: {
@@ -60,7 +63,8 @@ function installChrome() {
       },
       get: async (id: number) => {
         const tab = existingTabs.find((t) => t.id === id) ?? createdTabs.find((t) => t.id === id);
-        return tab ? { id: tab.id, url: tab.url } : null;
+        if (!tab) return null;
+        return { id: tab.id, url: navigatedAwayTo ?? tab.url };
       },
       create: async ({ url }: { url: string }) => {
         const tab = { id: 900 + createdTabs.length, url };
@@ -155,6 +159,48 @@ describe('douyin snapshot — grid readiness', () => {
 
     expect(events).toContain('inject');
     expect(res.success).toBe(true);
+  });
+});
+
+describe('douyin snapshot — a redirect away from the profile', () => {
+  it('reports a rate limit when the tab is no longer on the creator', async () => {
+    // Douyin answers a burst of requests with a verification redirect. The tab
+    // then never renders a grid, and the in-flight injection dies with a frame
+    // error -- which the adapter classified as `network`, telling the user
+    // nothing and, worse, suppressing the rate-limit signal the sync layer needs
+    // in order to back off.
+    gridResult = false;
+    navigatedAwayTo = 'https://www.douyin.com/verify';
+
+    const res = await run();
+
+    expect(res.success).toBe(false);
+    expect(res.code).toBe('rate_limit');
+  });
+
+  it('does not mistake a slow page for a redirect', async () => {
+    // The tab is still where we sent it; the grid is just not painted yet. That
+    // must stay a scrape attempt, not a false accusation of rate limiting.
+    gridResult = false;
+    navigatedAwayTo = null;
+
+    const res = await run();
+
+    expect(res.success).toBe(true);
+    expect(events).toContain('inject');
+  });
+
+  it('still closes its temporary tab after detecting the redirect', async () => {
+    // Leaving a verification page open in the user's tab strip is the failure
+    // mode the tab lifecycle work already fixed once; a new early return must
+    // not reintroduce it.
+    gridResult = false;
+    navigatedAwayTo = 'https://www.douyin.com/verify';
+
+    await run();
+
+    expect(createdTabs).toHaveLength(0);
+    expect(events).toContain('remove:900');
   });
 });
 

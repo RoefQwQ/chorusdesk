@@ -935,7 +935,7 @@ function loadDemoData() {
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300">已绑平台账号</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-24 text-center">作品数</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-32">同步状态</th>
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-36 text-right pr-4">操作</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-36 text-right">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1004,7 +1004,15 @@ function loadDemoData() {
 
                 <!-- Attached Platform Badges -->
                 <td class="py-2.5 px-3">
-                  <div class="flex items-center justify-between gap-2">
+                  <!-- Badges and the expand toggle form ONE left-aligned group.
+                       Previously the toggle was pushed to the far edge of this
+                       cell with `justify-between`, and because this is the
+                       column that absorbs the table's spare width, the button
+                       ended up hundreds of pixels from the 已绑平台账号 heading
+                       it belongs to — reading as a separate, unlabelled column.
+                       Left-aligning puts the heading and the group on the same
+                       edge regardless of how the table distributes slack. -->
+                  <div class="flex items-center gap-2 flex-wrap">
                     <div class="flex items-center gap-1.5 flex-wrap min-w-0">
                       <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
                         <PlatformBadge :platform="platform as string" :count="chs.length" />

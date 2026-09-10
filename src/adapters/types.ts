@@ -62,6 +62,17 @@ export interface FetchResult {
 
 export interface PlatformAdapter {
   platform: string;
+  /**
+   * Minimum spacing between two requests to this platform, in ms.
+   *
+   * Platform knowledge, so it lives with the platform (AGENTS rule 8). A request
+   * to Douyin is not an API call — it opens a tab and loads a full page — so its
+   * floor is much higher than an API platform's, and the sync layer treats the
+   * value as a floor it may raise but never lower.
+   *
+   * Absent = the generic default (`DEFAULT_MIN_INTERVAL_MS`).
+   */
+  minRequestIntervalMs?: number;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
   checkAuthStatus?(): Promise<{ loggedIn: boolean; username?: string }>;
 

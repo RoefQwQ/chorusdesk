@@ -3,6 +3,14 @@ import type { FetchOptions, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { db } from '../infrastructure/db/database';
 import { updateChannel } from './channelSync';
+import {
+  clearRateLimit,
+  formatCooldown,
+  noteRateLimit,
+  platformMinInterval,
+  readCooldowns,
+  remainingCooldown,
+} from './rateLimit';
 
 /**
  * Groups channels by platform and interleaves them round-robin across platforms.
@@ -58,8 +66,20 @@ export async function batchUpdateChannelsInterleaved(
   if (total === 0) return { totalChannels: 0, successful: 0, newPostsCount: 0 };
 
   const interleaved = interleaveChannelsByPlatform(channelList);
-  const minInterval = options?.minPlatformIntervalMs ?? 800;
-  const platformLastCall: Record<string, number> = {};
+  const overrideInterval = options?.minPlatformIntervalMs;
+  // Read the cool-downs once for the whole batch: it is a tight loop and a
+  // per-channel read would query IndexedDB on every iteration.
+  const cooldowns = await readCooldowns();
+
+  /**
+   * When the previous request on this platform *finished*.
+   *
+   * Deliberately not when it started: the interval is meant to be a gap between
+   * requests, and a platform whose request takes longer than the interval
+   * consumed its own spacing, so the next one followed with no delay at all.
+   * That is what let three Douyin page loads fire back to back.
+   */
+  const platformLastFinished: Record<string, number> = {};
 
   let successful = 0;
   let newPostsCount = 0;
@@ -68,19 +88,47 @@ export async function batchUpdateChannelsInterleaved(
     if (options?.shouldStop?.()) break;
 
     const ch = interleaved[i];
-    const now = Date.now();
-    const lastTime = platformLastCall[ch.platform] || 0;
-    const elapsed = now - lastTime;
 
-    // If same platform was hit recently, wait until the safe cooldown has passed
-    if (elapsed < minInterval) {
-      await new Promise((r) => setTimeout(r, minInterval - elapsed));
+    // Cool-down first: a platform that just pushed back must not be contacted at
+    // all, however much spacing has accumulated.
+    const cooling = remainingCooldown(cooldowns, ch.platform);
+    if (cooling > 0) {
+      options?.onProgress?.(i + 1, total, ch, {
+        posts: [],
+        error: fetchError(
+          'rate_limit',
+          `${ch.platform} 已触发平台风控，冷却中（剩余约 ${formatCooldown(cooling)}）。期间不再请求该平台，冷却结束后自动恢复。`,
+          true,
+        ),
+      });
+      continue;
     }
 
-    platformLastCall[ch.platform] = Date.now();
+    // Space requests from the *end* of the previous one on this platform.
+    //
+    // `Math.max`, not `??`: callers pass the user's configured delay as an
+    // override, and using it directly would let a setting of 800ms lower Douyin's
+    // floor — defeating the per-platform value exactly where it matters most. The
+    // platform floor is a minimum, so a caller can only raise it.
+    const gap = Math.max(overrideInterval ?? 0, platformMinInterval(ch.platform));
+    const elapsed = Date.now() - (platformLastFinished[ch.platform] || 0);
+    if (elapsed < gap) {
+      await new Promise((r) => setTimeout(r, gap - elapsed));
+    }
 
     try {
       const res = await updateChannel(ch, limit, true, options);
+
+      // A clean request clears the cool-down for that platform; a rate-limit
+      // signal starts or escalates one.
+      if (res.error?.code === 'rate_limit') {
+        const entry = await noteRateLimit(ch.platform);
+        cooldowns[ch.platform] = entry;
+      } else if (!res.error) {
+        delete cooldowns[ch.platform];
+        await clearRateLimit(ch.platform);
+      }
+
       if (!res.error || (res.posts && res.posts.length > 0)) {
         successful++;
         newPostsCount += res.posts?.length || 0;
@@ -92,6 +140,10 @@ export async function batchUpdateChannelsInterleaved(
         posts: [],
         error: fetchError('network', e instanceof Error ? e.message : String(e), true),
       });
+    } finally {
+      // Recorded on every path, including failure: a failed request still hit the
+      // platform, and the spacing that follows must account for it.
+      platformLastFinished[ch.platform] = Date.now();
     }
   }
 
@@ -109,10 +161,45 @@ export async function updateCreator(
   const channels = await db.channels.where('creatorId').equals(creatorId).toArray();
   const results: FetchResult[] = [];
   const interleaved = interleaveChannelsByPlatform(channels);
+  const cooldowns = await readCooldowns();
+  const platformLastFinished: Record<string, number> = {};
+
   for (const ch of interleaved) {
-    const res = await updateChannel(ch, limit, true, options);
-    results.push(res);
-    await new Promise((r) => setTimeout(r, 600));
+    // Same two guards as the batch path: a cool-down is absolute, and the
+    // spacing floor is measured from the end of the previous request. This
+    // per-creator path hits the same platforms and was pacing them at a fixed
+    // 600ms — below the floor for every platform, Douyin most of all.
+    const cooling = remainingCooldown(cooldowns, ch.platform);
+    if (cooling > 0) {
+      results.push({
+        posts: [],
+        error: fetchError(
+          'rate_limit',
+          `${ch.platform} 已触发平台风控，冷却中（剩余约 ${formatCooldown(cooling)}）。期间不再请求该平台。`,
+          true,
+        ),
+      });
+      continue;
+    }
+
+    const gap = platformMinInterval(ch.platform);
+    const elapsed = Date.now() - (platformLastFinished[ch.platform] || 0);
+    if (elapsed < gap) {
+      await new Promise((r) => setTimeout(r, gap - elapsed));
+    }
+
+    try {
+      const res = await updateChannel(ch, limit, true, options);
+      if (res.error?.code === 'rate_limit') {
+        cooldowns[ch.platform] = await noteRateLimit(ch.platform);
+      } else if (!res.error) {
+        delete cooldowns[ch.platform];
+        await clearRateLimit(ch.platform);
+      }
+      results.push(res);
+    } finally {
+      platformLastFinished[ch.platform] = Date.now();
+    }
   }
   return results;
 }

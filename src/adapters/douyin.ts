@@ -38,6 +38,14 @@ const MAX_HISTORY_ITEMS = 200;
 export const douyinAdapter: PlatformAdapter = {
   platform: 'douyin',
 
+  /**
+   * Far above the generic floor: a Douyin request is a real page load in a tab
+   * (scripts, images, a client-rendered grid), so it is a much louder automation
+   * signal than an API call. Issuing three of them back to back is what produced
+   * a verification redirect and a mid-scrape `Frame with ID 0 was removed`.
+   */
+  minRequestIntervalMs: 15_000,
+
   async fetchLatest(channel: Channel, limit: number = 20, options?: FetchOptions): Promise<FetchResult> {
     const secUid = channel.accountId.trim();
     if (!secUid) {

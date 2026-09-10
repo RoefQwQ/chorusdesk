@@ -154,6 +154,27 @@ export function handleDouyinSnapshot(
         .catch(() => false);
       if (!gridReady) {
         devLog.warn('douyin', '作品网格在等待时间内未渲染，仍尝试采集', `tab ${targetId}`);
+
+        // Distinguish "slow to paint" from "sent somewhere else".
+        //
+        // Douyin answers a burst of requests with a verification redirect, and
+        // the in-flight injection then dies with a frame error rather than a
+        // verdict — observed as `Frame with ID 0 was removed` from a *network*
+        // classification, which told the user nothing and, worse, suppressed the
+        // rate-limit signal the sync layer needs in order to back off. The
+        // observable fact is simply that the tab is no longer on the creator's
+        // profile, whatever it was moved to (captcha, login wall, error page).
+        const landed = await chrome.tabs.get(targetId).catch(() => null);
+        if (!landed) {
+          return fail('auth', '抖音页面已被关闭，未能完成采集。请重试。');
+        }
+        const landedUrl = typeof landed.url === 'string' ? landed.url : '';
+        if (!landedUrl.includes(secUid)) {
+          return fail(
+            'rate_limit',
+            '抖音页面已跳转离开该创作者主页，通常是短时间请求过多触发了安全验证。请先在抖音标签页中完成验证，稍后再同步（该平台会自动进入冷却）。',
+          );
+        }
       }
 
       const deep = message.deep === true;
