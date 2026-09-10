@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
-import { ExternalLink, LayoutDashboard } from 'lucide-vue-next';
+import { LayoutDashboard } from 'lucide-vue-next';
 import { usePageDetection } from './composables/usePageDetection';
 import { useQuickFollow } from './composables/useQuickFollow';
 import { usePopupNavigation } from './composables/usePopupNavigation';
@@ -128,7 +128,6 @@ onMounted(async () => {
           v-if="existingChannel"
           :existing-channel="existingChannel"
           :existing-creator="existingCreator"
-          @open-dashboard="openDashboard"
         />
 
         <!-- Add Options -->
@@ -171,18 +170,10 @@ onMounted(async () => {
       />
     </div>
 
-    <!-- Bottom Statistics & Direct Dashboard Access -->
-    <div class="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-      <div class="flex items-center gap-2">
-        <span>关注: <strong class="text-slate-800 dark:text-slate-200">{{ creators.length }}</strong></span>
-      </div>
-      <button
-        @click="openDashboard"
-        class="flex items-center gap-1 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-medium"
-      >
-        <span>打开面板</span>
-        <ExternalLink class="w-3 h-3" />
-      </button>
+    <!-- Bottom statistics. Dashboard access lives in the header only: it was in
+         both corners, offering the same action twice in a 460px popup. -->
+    <div class="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center text-[11px] text-slate-500">
+      <span>关注: <strong class="text-slate-800 dark:text-slate-200">{{ creators.length }}</strong></span>
     </div>
   </div>
 </template>

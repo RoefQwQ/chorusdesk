@@ -2,18 +2,21 @@
 import { Check } from 'lucide-vue-next';
 import type { Channel, Creator } from '../../../src/types';
 
+/**
+ * The "already followed" state: purely informational.
+ *
+ * It used to carry a 「查看动态」 button that called the same `openDashboard` as the
+ * popup header — the same action twice, one of them under a label promising
+ * something it did not do (it opens the dashboard, not that creator's feed). The
+ * header button is the one entry point for the dashboard, in every state.
+ */
 defineProps<{
   existingChannel: Channel;
   existingCreator: Creator | null;
 }>();
-
-const emit = defineEmits<{
-  openDashboard: [];
-}>();
 </script>
 
 <template>
-  <!-- If Already Added -->
   <div
     class="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-emerald-800 dark:text-emerald-200"
   >
@@ -24,11 +27,5 @@ const emit = defineEmits<{
     <p class="text-[11px] text-emerald-700 dark:text-emerald-300">
       已归集到 <strong>{{ existingCreator?.name || '未知创作者' }}</strong>
     </p>
-    <button
-      @click="emit('openDashboard')"
-      class="mt-2.5 w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
-    >
-      查看动态
-    </button>
   </div>
 </template>

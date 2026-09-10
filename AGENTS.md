@@ -594,6 +594,36 @@ defect to remove led to removing the guard itself.
 
 ---
 
+## 25. Visual verification opens its OWN browser — never the user's
+
+Checking a rendered page is worth doing, and the browser tooling makes it easy to do
+destructively. `browser.open` **without an `app`** drives the user's real Chrome through the
+relay; relay mode with no `tab`/`target` **adopts the visible tab**, so passing a `url`
+navigates away from whatever they were reading. Doing this at all during a debugging session
+is a violation of the standing rule that only pages this work created may be touched.
+
+Always isolate:
+
+```js
+// Spawn a throwaway Chrome, then attach to it by CDP.
+hub({ op: 'start', name: '<name>', application: '<chrome>',
+      args: ['--user-data-dir=<temp profile>', '--remote-debugging-port=<port>', ...],
+      ready: { port } });
+browser.open({ app: { cdp_url: 'http://127.0.0.1:<port>' }, url, viewport });
+```
+
+- Never `browser.open` without `app` for a debug render. `/json/list` on the relay is
+  read-only and fine when something needs checking, but nothing should be *driven* there.
+- Use a dedicated `--user-data-dir` so the instance starts clean and never inherits the real
+  profile's session, and stop the process (`hub stop`) plus delete the profile when done.
+- This is also the honest framing: an isolated instance cannot be the user's session, so a
+  bug cannot be mis-attributed to it and a fix cannot be "verified" against their state.
+
+The user's browser is the one place in this project where a mistake is not recoverable by
+`git revert` — they lose whatever they were reading. Treat it as read-only, always.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
