@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  Bug,
   Download,
   ExternalLink,
   FolderDown,
@@ -15,6 +16,7 @@ import {
 import { PLATFORM_REGISTRY, type AppSettings, type Creator, type DeletedPostRecord, type Post } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import ImageCacheSettings from '../components/ImageCacheSettings.vue';
+import AppSelect from '../components/AppSelect.vue';
 
 export interface DashboardStatsView {
   creatorsCount: number;
@@ -32,6 +34,7 @@ export interface SettingsViewContext {
   platformLoginStatus: Record<string, boolean>;
   isCheckingLogins: boolean;
   deletedPostCount: number;
+  deletedPostsList: DeletedPostRecord[];
   filteredDeletedPostsList: DeletedPostRecord[];
   deletedPostsSearchQuery: string;
   isHealingMedia: boolean;
@@ -59,6 +62,23 @@ const props = withDefaults(
   { active: true }
 );
 
+const emit = defineEmits<{
+  'open-dev-log': [];
+}>();
+
+/** 数值设置的选项表（原为模板内联 `<option>`，迁移到 AppSelect 后需保持同值同文案）。 */
+const ITEMS_PER_FETCH_OPTIONS = [
+  { value: 5, label: '5 条' },
+  { value: 10, label: '10 条（推荐）' },
+  { value: 20, label: '20 条' },
+];
+
+const REQUEST_DELAY_OPTIONS = [
+  { value: 300, label: '300ms（快）' },
+  { value: 600, label: '600ms（推荐）' },
+  { value: 1200, label: '1200ms（保守）' },
+];
+
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
   const k = 1024;
@@ -79,9 +99,8 @@ function handleImportChange(event: Event) {
 function handleDeletedSearchInput(event: Event) {
   props.context.onSearchDeleted((event.target as HTMLInputElement).value);
 }
-function updateNumberSetting(key: 'itemsPerFetch' | 'requestDelayMs', event: Event) {
-  const value = Number((event.target as HTMLSelectElement).value);
-  void props.context.onUpdateSettings({ [key]: value });
+function updateNumberSetting(key: 'itemsPerFetch' | 'requestDelayMs', value: string | number) {
+  void props.context.onUpdateSettings({ [key]: Number(value) });
 }
 
 function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Event) {
@@ -154,9 +173,12 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
         >
           <div>
             <div class="flex items-start justify-between gap-2 mb-1.5">
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-xs text-slate-900 dark:text-white">{{ meta.name }}</span>
-                <span class="px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="font-bold text-xs text-slate-900 dark:text-white truncate">{{ meta.name }}</span>
+                <span
+                  class="px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 truncate shrink-0"
+                  :title="`鉴权方式：${meta.authTypeName}`"
+                >
                   {{ meta.authTypeName }}
                 </span>
               </div>
@@ -166,7 +188,14 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
                 :title="context.platformLoginStatus[key] ? '就绪 (可同步)' : '未检测到会话'"
               ></span>
             </div>
-            <p class="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+            <!-- The description is clamped to two lines for even card heights, so
+                 the full text has to be reachable on hover — otherwise the
+                 trailing sentence (what the platform actually supports) is
+                 unreadable with no way to recover it. -->
+            <p
+              class="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed"
+              :title="meta.description"
+            >
               {{ meta.description }}
             </p>
           </div>
@@ -268,15 +297,12 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
             <div class="font-semibold text-slate-800 dark:text-slate-200">每次获取条数</div>
             <div class="text-[11px] text-slate-400">每次同步时获取的动态条数</div>
           </div>
-          <select
-            :value="context.settings.itemsPerFetch"
-            @change="updateNumberSetting('itemsPerFetch', $event)"
-            class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs outline-none cursor-pointer"
-          >
-            <option :value="5">5 条</option>
-            <option :value="10">10 条（推荐）</option>
-            <option :value="20">20 条</option>
-          </select>
+          <AppSelect
+            :model-value="context.settings.itemsPerFetch"
+            :options="ITEMS_PER_FETCH_OPTIONS"
+            aria-label="每次获取条数"
+            @update:model-value="(v) => updateNumberSetting('itemsPerFetch', v)"
+          />
         </div>
 
         <div class="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 text-xs">
@@ -284,15 +310,12 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
             <div class="font-semibold text-slate-800 dark:text-slate-200">请求间隔</div>
             <div class="text-[11px] text-slate-400">连续同步多个账号时的请求间隔，避免触发平台限制</div>
           </div>
-          <select
-            :value="context.settings.requestDelayMs"
-            @change="updateNumberSetting('requestDelayMs', $event)"
-            class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs outline-none cursor-pointer"
-          >
-            <option :value="300">300ms（快）</option>
-            <option :value="600">600ms（推荐）</option>
-            <option :value="1200">1200ms（保守）</option>
-          </select>
+          <AppSelect
+            :model-value="context.settings.requestDelayMs"
+            :options="REQUEST_DELAY_OPTIONS"
+            aria-label="请求间隔"
+            @update:model-value="(v) => updateNumberSetting('requestDelayMs', v)"
+          />
         </div>
 
         <div class="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 text-xs">
@@ -411,6 +434,34 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
             清理 30 天前数据
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Diagnostics & Troubleshooting -->
+    <div class="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+      <div>
+        <h3 class="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+          <Bug class="w-4 h-4 text-slate-400" />
+          <span>诊断与排查</span>
+        </h3>
+        <p class="text-[11px] text-slate-400 mt-0.5">
+          同步失败、图片不显示或授权异常时，先在这里看后台到底发生了什么
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          @click="emit('open-dev-log')"
+          class="flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+          title="查看后台消息、各平台请求状态、同步错误码与 RSS 授权结果"
+        >
+          <Bug class="w-4 h-4 text-slate-500" />
+          <span>开发者日志</span>
+        </button>
+        <span class="text-[11px] text-slate-400 leading-relaxed max-w-md">
+          记录后台消息、平台返回码、同步结果与授权过程，可筛选并一键复制；
+          仅存于本次浏览器会话，不进入数据库与备份。
+        </span>
       </div>
     </div>
 

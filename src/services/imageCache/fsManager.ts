@@ -9,10 +9,29 @@ const FS_STORE_NAME = 'handles';
 const ROOT_HANDLE_KEY = 'root_cache_dir';
 
 /**
+ * Cached `indexedDB.open()` result for this session.
+ *
+ * The read path used to open the database on every call, then structured-clone
+ * the stored `FileSystemDirectoryHandle` back out of it. That happened once per
+ * media item per mounted card: a first screen of ~12 cards with ~2 images each
+ * meant ~24 database opens and ~120 file probes before the feed settled, which
+ * delayed every image that was still loading over the network. One connection
+ * for the session removes the dominant cost.
+ */
+let handleDbPromise: Promise<IDBDatabase> | null = null;
+
+/**
+ * The root directory handle, memoized for the session. `null` means "looked up
+ * and there is none" (or it was unbound) — distinct from "not looked up yet",
+ * which is what the `undefined` initial value encodes.
+ */
+let rootHandleCache: FileSystemDirectoryHandle | null | undefined;
+
+/**
  * Open or create the dedicated IndexedDB for FileSystemHandle persistence
  */
 function openHandleDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  handleDbPromise ??= new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(FS_DB_NAME, 1);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -20,9 +39,23 @@ function openHandleDB(): Promise<IDBDatabase> {
         db.createObjectStore(FS_STORE_NAME);
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      // A version change or external close invalidates the cache, otherwise
+      // every later transaction would throw on a closed connection.
+      db.onclose = () => { handleDbPromise = null; };
+      db.onversionchange = () => {
+        db.close();
+        handleDbPromise = null;
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      handleDbPromise = null;
+      reject(request.error);
+    };
   });
+  return handleDbPromise;
 }
 
 /**
@@ -30,29 +63,38 @@ function openHandleDB(): Promise<IDBDatabase> {
  */
 export async function saveRootDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
   const db = await openHandleDB();
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(FS_STORE_NAME, 'readwrite');
     const store = tx.objectStore(FS_STORE_NAME);
     const req = store.put(handle, ROOT_HANDLE_KEY);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
+  rootHandleCache = handle;
 }
 
 /**
- * Get saved directory handle from IndexedDB
+ * Get saved directory handle from IndexedDB, memoized for the session.
+ *
+ * Callers are hot: every media item on every mounted card asks. The memo turns
+ * those into plain in-memory reads; the database is consulted at most once.
  */
 export async function getSavedRootDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+  if (rootHandleCache !== undefined) return rootHandleCache;
   try {
     const db = await openHandleDB();
-    return new Promise((resolve) => {
+    const handle = await new Promise<FileSystemDirectoryHandle | null>((resolve) => {
       const tx = db.transaction(FS_STORE_NAME, 'readonly');
       const store = tx.objectStore(FS_STORE_NAME);
       const req = store.get(ROOT_HANDLE_KEY);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
     });
+    rootHandleCache = handle;
+    return handle;
   } catch {
+    // Do not memoize a failure: the next call may succeed (worker still warming
+    // up, transient quota/version error).
     return null;
   }
 }
@@ -62,13 +104,15 @@ export async function getSavedRootDirectoryHandle(): Promise<FileSystemDirectory
  */
 export async function clearRootDirectoryHandle(): Promise<void> {
   const db = await openHandleDB();
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(FS_STORE_NAME, 'readwrite');
     const store = tx.objectStore(FS_STORE_NAME);
     const req = store.delete(ROOT_HANDLE_KEY);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
+  // Memoized as "no directory bound", so the next read does not resurrect it.
+  rootHandleCache = null;
 }
 
 /**

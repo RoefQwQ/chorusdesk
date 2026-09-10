@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import { Search, LayoutGrid, Image as ImageIcon, ImageOff, Tag, Users,
+import { Search, LayoutGrid, Repeat2, Image as ImageIcon, ImageOff, Tag, Users,
   ChevronDown, Eye, EyeOff, RefreshCw, CheckCircle2,
 } from 'lucide-vue-next';
 import PostCard from '../components/PostCard.vue';
-import type { Creator, Channel, Post } from '../../../src/types';
+import type { PlatformMeta, Creator, Channel, Post } from '../../../src/types';
 
 type LightboxMedia = { url: string; originalUrl?: string; type: string; title?: string } | null;
 
@@ -12,7 +12,10 @@ export interface FeedContext {
   searchQuery: string;
   selectedPlatform: string;
   platformOrder: string[];
-  onPlatformOrderChange: (order: string[]) => void | Promise<void>;
+  /** Platform key -> post count, for the sidebar badges. */
+  platformPostCounts: Record<string, number>;
+  /** Platform metadata (name/color) for the sidebar rows. */
+  PLATFORM_REGISTRY: Record<string, PlatformMeta>;
   repostsCount: number;
   textOnlyCount: number;
   hideReposts: boolean;
@@ -47,11 +50,14 @@ export interface FeedContext {
   resetCreatorHiddenPlatforms: (creatorId: string) => void;
   getCreatorAvatar: (c?: Creator | null) => string;
   getCreatorPlatforms: (creatorId: string) => string[];
+  /** 打开全宽阅读视图（长文 / RSS 全文）。 */
+  onOpenReader: (post: Post) => void;
 }
 
 const props = defineProps<{ context: FeedContext }>();
 const emit = defineEmits<{
   'update:searchQuery': [value: string];
+  'update:selectedPlatform': [value: string];
   'reorder-platforms': [order: string[]];
   'update:lightboxMedia': [media: { url: string; originalUrl?: string; type: string; title?: string } | null];
 }>();
@@ -277,9 +283,29 @@ onUnmounted(() => {
     <!-- Content Preferences & Tag Filter -->
     <div class="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
       <!-- Content Preferences Buttons -->
+      <div class="space-y-1.5">
+        <!-- Repost Toggle Button -->
+        <button
+          @click="context.toggleHideReposts"
+          class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
+          :class="context.hideReposts ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
+          :title="context.hideReposts ? '当前仅显示原创，点击恢复显示转发内容' : '点击过滤转发/转推内容，只看创作者原创'"
+        >
+          <div class="flex items-center gap-2">
+            <Repeat2 class="w-3.5 h-3.5" :class="{ 'text-amber-600 dark:text-amber-400': context.hideReposts }" />
+            <span>{{ context.hideReposts ? '仅原创' : '含转发' }}</span>
+          </div>
+          <span
+            v-if="context.repostsCount > 0"
+            class="text-[10px] px-1.5 py-0.2 rounded-full font-mono"
+            :class="context.hideReposts ? 'bg-amber-200/80 dark:bg-amber-500/25 text-amber-800 dark:text-amber-200' : 'bg-slate-200 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400'"
+          >
+            {{ context.repostsCount }}
+          </span>
+        </button>
 
-      <!-- Text-only Post Filter Toggle Button -->
-      <button
+        <!-- Text-only Post Filter Toggle Button -->
+        <button
           @click="context.toggleHideTextOnly"
           class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
           :class="context.hideTextOnly ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
@@ -298,6 +324,8 @@ onUnmounted(() => {
             {{ context.textOnlyCount }}
           </span>
         </button>
+      </div>
+
       <!-- Tags Filter (Tri-state: Include / Exclude / Neutral) -->
       <div v-if="context.allTags.length > 0">
         <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 flex items-center justify-between">
@@ -400,6 +428,7 @@ onUnmounted(() => {
           @read="context.markPostRead"
           @media="emit('update:lightboxMedia', $event)"
           @avatar-error="context.handleAvatarError"
+          @open-reader="context.onOpenReader"
         />
       </div>
     </div>

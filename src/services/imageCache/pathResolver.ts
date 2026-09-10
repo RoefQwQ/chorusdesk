@@ -72,6 +72,14 @@ export function resolvePostDirSegments(params: {
 }
 
 /**
+ * Canonical extensions a cached media file may have been written with.
+ * `resolveFileExtension` normalizes `jpeg` to `jpg` and falls back to `jpg`, so
+ * this is exactly the set of names on disk — probing must use the same list or
+ * a cached file is reported missing.
+ */
+export const CACHED_IMAGE_EXTENSIONS = ['jpg', 'webp', 'png', 'gif', 'avif'] as const;
+
+/**
  * Guess appropriate file extension from mime type or URL
  */
 export function resolveFileExtension(url: string, mimeType?: string): string {

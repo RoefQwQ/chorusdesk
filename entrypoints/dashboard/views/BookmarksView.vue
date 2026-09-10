@@ -23,6 +23,8 @@ export interface BookmarksViewContext {
   onRead: (post: Post) => void | Promise<void>;
   onOpenMedia: (media: MediaPayload) => void;
   onAvatarError: (url?: string) => void;
+  /** 打开全宽阅读视图（长文 / RSS 全文）。 */
+  onOpenReader: (post: Post) => void;
 }
 
 const props = withDefaults(
@@ -291,6 +293,7 @@ const bookmarkColumns = computed(() => {
             @read="context.onRead"
             @media="context.onOpenMedia"
             @avatar-error="context.onAvatarError"
+            @open-reader="context.onOpenReader"
           />
         </div>
       </div>

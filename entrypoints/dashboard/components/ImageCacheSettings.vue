@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { Folder, FolderCheck, HardDrive, DownloadCloud, RefreshCw, XCircle } from 'lucide-vue-next';
 import { imageCacheService } from '../../../src/services/imageCache';
+import { devLog } from '../../../src/utils/devLog';
 import type { AppSettings, Post, Creator } from '../../../src/types';
 
 const props = defineProps<{
@@ -91,9 +92,13 @@ async function handleBatchCacheExisting() {
   props.creators.forEach(c => creatorMap.set(c.id, c.name));
 
   // Incremental: probe disk first; fully-cached posts cost zero network.
+  // The probe resolves the post directory, whose first segment is the creator
+  // name — pass the exact name the downloads below use, or every probe misses.
   const pending: typeof targetPosts = [];
   for (const post of targetPosts) {
-    const cached = await imageCacheService.isPostFullyCached(post).catch(() => false);
+    const cached = await imageCacheService
+      .isPostFullyCached(post, creatorMap.get(post.creatorId) || '默认创作者')
+      .catch(() => false);
     if (cached) {
       batchProgress.value.skipped++;
       batchProgress.value.current++;
@@ -133,6 +138,11 @@ async function handleBatchCacheExisting() {
     ];
     if (batchProgress.value.failed > 0) {
       summary.push(`${batchProgress.value.failed} 条下载失败（可稍后重试）`);
+    }
+    devLog.info('imageCache', '离线归档完成', summary.join('，'));
+    if (failures.length > 0) {
+      // Ids only: enough to identify which posts to retry.
+      devLog.warn('imageCache', `${failures.length} 条作品归档失败`, failures.slice(0, 20).join(', '));
     }
     alert(`【离线归档完成】${summary.join('，')}。归档目录: "${boundDirName.value}"`);
   } catch (err: unknown) {

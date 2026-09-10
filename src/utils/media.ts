@@ -1,3 +1,5 @@
+import { devLog } from './devLog';
+
 /**
  * Normalize a media/image URL so it is always an absolute, loadable https URL.
  * Also normalizes known CDN hotlink-sensitive domains to more permissive aliases.
@@ -78,6 +80,7 @@ export async function proxyImage(url: string): Promise<string | null> {
   }
 
   const fetchPromise = (async () => {
+    const startedAt = performance.now();
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         // First attempt with secureUrl
@@ -104,11 +107,22 @@ export async function proxyImage(url: string): Promise<string | null> {
           });
         }
 
+        // A proxy round trip is the slowest step in showing a hotlink-protected
+        // image: it is a background fetch plus a base64 transfer back over the
+        // message channel. Log it so "images take a second or two" can be
+        // attributed to this stage instead of guessed at.
+        const elapsed = Math.round(performance.now() - startedAt);
+        const host = (() => {
+          try { return new URL(secureUrl).hostname; } catch { return '未知主机'; }
+        })();
+
         if (resp?.ok && resp.dataUrl) {
           imageProxyCache.set(secureUrl, resp.dataUrl);
           imageProxyCache.set(url, resp.dataUrl);
+          devLog.debug('media', `图片代理 ${host} 成功 ${elapsed}ms`, `体积 ${Math.round(resp.dataUrl.length / 1024)}KB`);
           return resp.dataUrl;
         }
+        devLog.warn('media', `图片代理 ${host} 失败 ${elapsed}ms`, resp?.error || '无响应');
       }
       markImageFailed(url);
       markImageFailed(secureUrl);

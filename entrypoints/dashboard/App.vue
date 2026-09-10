@@ -4,6 +4,7 @@ import {
   PLATFORM_REGISTRY,
   type Creator,
   type Channel,
+  type Post,
   type AppSettings,
 } from '../../src/types';
 import {
@@ -22,6 +23,8 @@ import {
 import MediaLightbox from './components/MediaLightbox.vue';
 import AvatarPickerModal from './components/AvatarPickerModal.vue';
 import DeletedPostsModal from './components/DeletedPostsModal.vue';
+import DevLogModal from './components/DevLogModal.vue';
+import PostReaderModal from './components/PostReaderModal.vue';
 import AddCreatorModal from './components/AddCreatorModal.vue';
 import DeepSyncModal from './components/DeepSyncModal.vue';
 import TagEditorModal from './components/TagEditorModal.vue';
@@ -222,6 +225,12 @@ const { isDarkMode, initDarkMode, toggleDarkMode } = isDarkModeState;
 // Lightbox
 const lightboxMedia = ref<{ url: string; originalUrl?: string; type: string; title?: string } | null>(null);
 
+// Developer log panel (diagnostics; opened from Settings)
+const showDevLog = ref(false);
+
+// Full-width reader for long-form text (RSS articles, long captions)
+const readerPost = ref<Post | null>(null);
+
 // Right sidebar creator inline accordion state
 const expandedCreatorIds = ref<Set<string>>(new Set());
 
@@ -370,6 +379,7 @@ const feedContext = computed(() => ({
   resetCreatorHiddenPlatforms,
   getCreatorAvatar,
   getCreatorPlatforms,
+  onOpenReader: (post: Post) => { readerPost.value = post; },
 }));
 
 const creatorsContext = computed(() => ({
@@ -393,6 +403,7 @@ const bookmarksContext = computed(() => ({
   onRead: markPostRead,
   onOpenMedia: (media: { url: string; originalUrl?: string; type: string; title?: string }) => { lightboxMedia.value = media; },
   onAvatarError: handleAvatarError,
+  onOpenReader: (post: Post) => { readerPost.value = post; },
 }));
 
 const settingsContext = computed(() => ({
@@ -640,6 +651,7 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
         v-show="activeTab === 'settings'"
         :active="activeTab === 'settings'"
         :context="settingsContext"
+        @open-dev-log="showDevLog = true"
       />
     </main>
 
@@ -708,5 +720,18 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
     @restore-one="handleRestoreSingleDeleted"
     @permanent-delete="handlePermanentlyDelete"
     @restore-all-and-sync="handleRestoreAllAndSync"
+  />
+
+  <DevLogModal v-if="showDevLog" @close="showDevLog = false" />
+
+  <PostReaderModal
+    v-if="readerPost"
+    :post="readerPost"
+    :creators="creators"
+    :channels="channels"
+    :bookmarked="Boolean(readerPost.isBookmarked)"
+    @close="readerPost = null"
+    @bookmark="toggleBookmarkPost"
+    @media="(m) => { lightboxMedia = m; }"
   />
 </template>

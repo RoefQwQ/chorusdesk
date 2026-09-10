@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
-import { Bookmark, ChevronRight, Clock, ExternalLink, Video, ImageOff, Repeat2, Trash2 } from 'lucide-vue-next';
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { Bookmark, ChevronRight, Clock, ExternalLink, Video, ImageOff, Image as ImageIcon, Repeat2, Trash2 } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
 import { imageCacheService } from '../../../src/services/imageCache';
+import { devLog } from '../../../src/utils/devLog';
+import { shouldShowTitle, showsFullBody } from '../../../src/utils/postText';
 
 const props = withDefaults(defineProps<{
   post: Post;
@@ -20,6 +22,7 @@ const emit = defineEmits<{
   read: [post: Post];
   media: [media: { url: string; originalUrl?: string; type: string; title?: string }];
   avatarError: [url: string];
+  openReader: [post: Post];
 }>();
 
 const isBookmarked = ref(Boolean(props.post.isBookmarked || props.bookmarked));
@@ -36,8 +39,91 @@ const label = computed(() => props.post.channelLabel || channel.value?.label);
 const isRepost = computed(() => props.post.isRepost || props.post.content?.startsWith('RT @') || props.post.content?.includes('//转发自'));
 const secure = toSecureMediaUrl;
 
+/**
+ * Heading presentation.
+ *
+ * `title` is body-derived on Twitter / Douyin / Xiaohongshu, so both fields
+ * carried the same sentence and the card printed it twice.
+ */
+const showTitle = computed(() => shouldShowTitle(props.post));
+
+/**
+ * RSS shows a taller preview: its body is the content, not a caption.
+ */
+const fullBody = computed(() => showsFullBody(props.post.platform));
+
+/**
+ * The card shows a preview; long text opens in the reader.
+ *
+ * `bodyOverflows` is measured rather than guessed from a character count: the
+ * clamp is applied in CSS, so only the rendered box knows whether anything was
+ * actually cut. The「展开全文」affordance appears only when it is needed, which is
+ * what keeps it meaningful instead of a permanent fixture on every card.
+ */
+const bodyEl = ref<HTMLElement | null>(null);
+const bodyOverflows = ref(false);
+
+/**
+ * Measure whether the clamped body actually hides text.
+ *
+ * Reading `scrollHeight` while the element is clamped does not work: Tailwind's
+ * `line-clamp-*` renders through `display: -webkit-box`, a layout mode where the
+ * box's scroll height collapses to its clamped height — so every card measured
+ * as "fits" and the「展开全文」affordance never appeared. The clamp is therefore
+ * lifted inline for the duration of the measurement and restored immediately
+ * (synchronously, so no paint observes the unclamped state).
+ */
+function measureBodyOverflow() {
+  const el = bodyEl.value;
+  if (!el) return;
+
+  const clampedHeight = el.clientHeight;
+  const prevDisplay = el.style.display;
+  const prevClamp = el.style.getPropertyValue('line-clamp');
+  const prevWebkitClamp = el.style.getPropertyValue('-webkit-line-clamp');
+  const prevOverflow = el.style.overflow;
+
+  el.style.display = 'block';
+  el.style.setProperty('line-clamp', 'unset');
+  el.style.setProperty('-webkit-line-clamp', 'unset');
+  el.style.overflow = 'visible';
+  const fullHeight = el.scrollHeight;
+
+  el.style.display = prevDisplay;
+  el.style.setProperty('line-clamp', prevClamp);
+  el.style.setProperty('-webkit-line-clamp', prevWebkitClamp);
+  el.style.overflow = prevOverflow;
+
+  // `+2` absorbs sub-pixel rounding, which would otherwise report overflow for
+  // text that fits exactly.
+  bodyOverflows.value = fullHeight > clampedHeight + 2;
+}
+
+onMounted(() => {
+  void nextTick(() => measureBodyOverflow());
+});
+
+watch(
+  () => [props.post.content, props.post.id],
+  () => {
+    bodyOverflows.value = false;
+    void nextTick(() => measureBodyOverflow());
+  },
+);
+
 // Map of resolved image URLs (local disk blob URL takes priority over remote URL)
 const localMediaUrls = ref<Record<string, string>>({});
+
+/**
+ * Media keys whose disk lookup has finished (hit or miss).
+ *
+ * The `<img>` is not rendered until this is set, so a card never starts a
+ * network request for a file that is already on disk and then has it thrown
+ * away when the probe answers — the browser aborts an in-flight image load the
+ * moment `src` changes, so the old behaviour wasted a request per cached image
+ * and left the placeholder up until the probe resolved.
+ */
+const mediaProbed = ref<Record<string, boolean>>({});
 
 // Pre-initialize mediaFailedMap with already known failed URLs
 const mediaFailedMap = ref<Record<string, boolean>>({});
@@ -86,15 +172,29 @@ onBeforeUnmount(() => {
   readObserver = null;
 });
 
-// Check local disk on mount and optionally auto-cache in background
-onMounted(async () => {
+// Check local disk before the image loads, but only once the card is near the
+// viewport.
+//
+// Probing on mount meant every card of a 100+ item feed walked the filesystem at
+// once, even the ones thousands of pixels below the fold whose images could not
+// be seen yet. Each probe was fast (measured 0-390ms) but the queue was not: the
+// last cards waited ~3.7s, and because the `<img>` is gated on this probe their
+// images appeared that late. The browser's own `loading="lazy"` already defers
+// the network request; the probe has to follow the same rule or it becomes the
+// bottleneck it was meant to avoid.
+let mediaProbeObserver: IntersectionObserver | null = null;
+
+async function probeMedia(): Promise<void> {
   if (!props.post.mediaList || props.post.mediaList.length === 0) return;
 
-  for (let i = 0; i < props.post.mediaList.length; i++) {
-    const item = props.post.mediaList[i];
-    const original = item.previewUrl || item.originalUrl;
-    if (!original) continue;
+  const startedAt = performance.now();
+  let hits = 0;
 
+  // Probe every item, then release the `<img>`s together: a per-item release
+  // would re-trigger layout for each answer.
+  await Promise.all(props.post.mediaList.map(async (item, i) => {
+    const original = item.previewUrl || item.originalUrl;
+    if (!original) return;
     try {
       const localUrl = await imageCacheService.getLocalCachedMediaUrl({
         creatorName: authorName.value,
@@ -104,15 +204,62 @@ onMounted(async () => {
         mediaIndex: i,
         mediaUrl: original,
       });
-
       if (localUrl) {
         localMediaUrls.value[original] = localUrl;
         delete mediaFailedMap.value[original];
+        hits++;
       }
     } catch {
       // Local cache miss is expected on first view; fall through to network.
     }
+  }));
+
+  for (const item of props.post.mediaList) {
+    const key = item.previewUrl || item.originalUrl;
+    if (key) mediaProbed.value[key] = true;
   }
+
+  // A probe that takes this long means the session caches in `fsManager` are not
+  // doing their job; surface it rather than letting it show up as "images are slow".
+  const elapsed = Math.round(performance.now() - startedAt);
+  if (elapsed > 1500) {
+    devLog.warn(
+      'media',
+      `本地磁盘探测耗时 ${elapsed}ms（${props.post.mediaList.length} 项，命中 ${hits}）`,
+      `平台 ${props.post.platform}`,
+    );
+  } else {
+    devLog.debug('media', `磁盘探测 ${elapsed}ms（命中 ${hits}/${props.post.mediaList.length}）`);
+  }
+}
+
+onMounted(() => {
+  if (!props.post.mediaList || props.post.mediaList.length === 0) return;
+
+  // No observer support (or no element yet): a card that cannot be observed must
+  // still get its probe, so fall back to doing it immediately.
+  if (typeof IntersectionObserver === 'undefined' || !cardRoot.value) {
+    void probeMedia();
+    return;
+  }
+
+  mediaProbeObserver = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      mediaProbeObserver?.disconnect();
+      mediaProbeObserver = null;
+      void probeMedia();
+    },
+    // Generous margin: start the probe well before the card is on screen, so a
+    // cached image is ready by the time it scrolls in.
+    { rootMargin: '800px 0px' },
+  );
+  mediaProbeObserver.observe(cardRoot.value);
+});
+
+onBeforeUnmount(() => {
+  mediaProbeObserver?.disconnect();
+  mediaProbeObserver = null;
 });
 
 const avatarFailed = ref(false);
@@ -263,8 +410,26 @@ function toggleBookmark() {
     </div>
 
     <div class="p-4 flex-1 space-y-3">
-      <h5 v-if="post.title" class="font-bold text-sm text-slate-900 dark:text-white leading-snug line-clamp-2 tracking-tight">{{ post.title }}</h5>
-      <p v-if="post.content" class="text-xs text-slate-600 dark:text-slate-300 line-clamp-4 whitespace-pre-wrap leading-relaxed">{{ post.content }}</p>
+      <h5 v-if="showTitle" class="font-bold text-sm text-slate-900 dark:text-white leading-snug line-clamp-2 tracking-tight">{{ post.title }}</h5>
+      <div v-if="post.content">
+        <!-- The card is a preview by design: a 4000-character article at ~410px
+             of column width is unreadable and skews the masonry columns. The
+             full text lives in the reader, one explicit click away. RSS gets a
+             taller preview because its body is the content, not a caption. -->
+        <p
+          ref="bodyEl"
+          class="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed"
+          :class="fullBody ? 'line-clamp-8' : 'line-clamp-4'"
+        >{{ post.content }}</p>
+        <button
+          v-if="bodyOverflows"
+          type="button"
+          class="mt-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 cursor-pointer"
+          @click.stop="emit('openReader', post)"
+        >
+          展开全文
+        </button>
+      </div>
       <div v-if="post.mediaList?.length" class="pt-1">
         <!-- Single Video -->
         <div
@@ -274,7 +439,7 @@ function toggleBookmark() {
           title="在新标签页中打开并观看原视频"
         >
           <img
-            v-if="!isMediaFailed(post.mediaList[0].previewUrl)"
+            v-if="!isMediaFailed(post.mediaList[0].previewUrl) && mediaProbed[post.mediaList[0].previewUrl]"
             :src="secure(post.mediaList[0].previewUrl)"
             referrerpolicy="no-referrer"
             loading="lazy"
@@ -330,6 +495,7 @@ function toggleBookmark() {
             class="relative min-h-[160px] max-h-[460px] rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 cursor-zoom-in group/img flex items-center justify-center"
           >
             <img
+              v-if="mediaProbed[post.mediaList[0].previewUrl]"
               :src="getMediaDisplayUrl(post.mediaList[0].previewUrl)"
               referrerpolicy="no-referrer"
               loading="lazy"
@@ -337,6 +503,11 @@ function toggleBookmark() {
               @load="handleMediaLoad(post.mediaList[0].previewUrl, 0)"
               @error="handleMediaError($event, post.mediaList[0].previewUrl, 0)"
             />
+            <!-- Disk lookup in flight: same box, so the card does not jump when
+                 the image arrives. -->
+            <span v-else class="text-slate-300 dark:text-slate-600" aria-hidden="true">
+              <ImageIcon class="w-6 h-6 animate-pulse" />
+            </span>
           </div>
         </div>
 
@@ -361,6 +532,7 @@ function toggleBookmark() {
             <!-- Normal Thumbnail -->
             <template v-else>
               <img
+                v-if="mediaProbed[media.previewUrl]"
                 :src="getMediaDisplayUrl(media.previewUrl)"
                 referrerpolicy="no-referrer"
                 loading="lazy"
@@ -368,6 +540,7 @@ function toggleBookmark() {
                 @load="handleMediaLoad(media.previewUrl, index)"
                 @error="handleMediaError($event, media.previewUrl, index)"
               />
+              <ImageIcon v-else class="w-4 h-4 text-slate-300 dark:text-slate-600 animate-pulse" aria-hidden="true" />
               <span
                 v-if="index === 5 && post.mediaList.length > 6"
                 class="absolute inset-0 bg-black/60 backdrop-blur-2xs flex items-center justify-center text-white font-bold text-xs"

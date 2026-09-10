@@ -16,6 +16,7 @@ import {
   readFileAsBlob,
 } from './fsManager';
 import {
+  CACHED_IMAGE_EXTENSIONS,
   resolvePostDirSegments,
   resolveFileExtension,
 } from './pathResolver';
@@ -26,6 +27,28 @@ const objectUrlMemoryCache = new Map<string, string>();
 
 // Track pending downloads to avoid duplicate concurrent disk writes
 const inFlightCacheJobs = new Set<string>();
+
+/**
+ * Media keys already probed on disk and found absent, for this session.
+ *
+ * Without it every card mount re-walks the directory tree and retries the whole
+ * extension ladder for media that is simply not cached — and on a first screen
+ * that is dozens of redundant filesystem round trips competing with the images
+ * that are actually loading. Cleared whenever the directory binding changes,
+ * and never consulted for a key known to be present (those live in
+ * `objectUrlMemoryCache`).
+ */
+const knownMissingMedia = new Set<string>();
+
+/**
+ * Resolved post directories, keyed by the resolved segment path.
+ *
+ * A 9-image post asked for the same directory nine times, and each walk is up to
+ * three `getDirectoryHandle` round trips to the browser process. The value is
+ * `null` for "walked and absent", recorded so a miss is not paid again.
+ * Invalidated whenever the root binding changes.
+ */
+const postDirCache = new Map<string, FileSystemDirectoryHandle | null>();
 
 /**
  * Convert a data URL or fetch a web URL to a Blob
@@ -67,6 +90,26 @@ async function fetchImageBlob(url: string): Promise<{ blob: Blob; mimeType: stri
 }
 
 /**
+ * Resolve a post's directory, walking the tree at most once per session.
+ *
+ * Every media item of a post resolves the same three segments, so without this
+ * a 9-image post paid 27 `getDirectoryHandle` round trips instead of 3. A miss
+ * is cached as `null` so the walk is not repeated for media that was never
+ * archived; `cacheMediaItem` replaces the entry when it creates the directory.
+ */
+async function resolvePostDir(
+  root: FileSystemDirectoryHandle,
+  dirSegments: string[],
+): Promise<FileSystemDirectoryHandle | null> {
+  const key = dirSegments.join('\u0000');
+  const cached = postDirCache.get(key);
+  if (cached !== undefined) return cached;
+  const dir = await getExistingNestedDirectory(root, dirSegments);
+  postDirCache.set(key, dir);
+  return dir;
+}
+
+/**
  * Image Cache Service API
  */
 export const imageCacheService = {
@@ -91,6 +134,11 @@ export const imageCacheService = {
     try {
       const handle = await promptSelectDirectory();
       if (!handle) return { success: false, error: '已取消选择目录' };
+      // A different directory invalidates every negative probe: media absent
+      // under the old root may well be present under the new one.
+      knownMissingMedia.clear();
+      postDirCache.clear();
+      objectUrlMemoryCache.clear();
       return { success: true, dirName: handle.name };
     } catch (err: unknown) {
       return { success: false, error: err instanceof Error ? err.message : '选择本地目录失败' };
@@ -103,6 +151,8 @@ export const imageCacheService = {
   async unbindDirectory(): Promise<void> {
     await clearRootDirectoryHandle();
     objectUrlMemoryCache.clear();
+    knownMissingMedia.clear();
+    postDirCache.clear();
   },
 
   /**
@@ -120,6 +170,7 @@ export const imageCacheService = {
     if (objectUrlMemoryCache.has(cacheKey)) {
       return objectUrlMemoryCache.get(cacheKey)!;
     }
+    if (knownMissingMedia.has(cacheKey)) return null;
 
     const root = await getSavedRootDirectoryHandle();
     if (!root) return null;
@@ -132,12 +183,19 @@ export const imageCacheService = {
         publishedAt: params.publishedAt,
       });
 
-      const postDir = await getExistingNestedDirectory(root, dirSegments);
-      if (!postDir) return null;
+      const postDir = await resolvePostDir(root, dirSegments);
+      if (!postDir) {
+        knownMissingMedia.add(cacheKey);
+        return null;
+      }
 
-      // Try common extensions
+      // Try the URL-derived extension first, then every other extension the
+      // writer can produce (same list as the batch probe).
+      const canonical: readonly string[] = CACHED_IMAGE_EXTENSIONS;
       const ext = resolveFileExtension(params.mediaUrl);
-      const possibleExtensions = [ext, 'jpg', 'webp', 'png', 'gif', 'avif'];
+      const possibleExtensions = canonical.includes(ext)
+        ? [ext, ...canonical.filter((e) => e !== ext)]
+        : [ext, ...canonical];
 
       for (const curExt of possibleExtensions) {
         const fileName = `${params.mediaIndex}.${curExt}`;
@@ -148,8 +206,10 @@ export const imageCacheService = {
           return objUrl;
         }
       }
+      knownMissingMedia.add(cacheKey);
     } catch {
-      // Disk read error or permission revoked
+      // Disk read error or permission revoked. Not memoized: a transient failure
+      // must not permanently hide a file that is really there.
     }
 
     return null;
@@ -158,28 +218,36 @@ export const imageCacheService = {
   /**
    * Check whether every media item of a post is already on disk.
    * Batch-archive uses this to skip fully-cached posts without any download.
+   *
+   * `creatorName` must be the same value the writer used: the post directory's
+   * first segment is the creator name, so probing without it resolves
+   * `默认创作者/…` and can never hit a file that was written under the real
+   * name — the probe then reports "not cached" for every post and the batch
+   * re-downloads everything.
    */
-  async isPostFullyCached(post: Post): Promise<boolean> {
+  async isPostFullyCached(post: Post, creatorName?: string): Promise<boolean> {
     if (!post.mediaList || post.mediaList.length === 0) return false;
     const root = await getSavedRootDirectoryHandle();
     if (!root) return false;
 
     const dirSegments = resolvePostDirSegments({
+      creatorName,
       platform: post.platform,
       postId: post.id,
       publishedAt: post.publishedAt,
     });
-    const postDir = await getExistingNestedDirectory(root, dirSegments);
+    const postDir = await resolvePostDir(root, dirSegments);
     if (!postDir) return false;
 
     for (let i = 0; i < post.mediaList.length; i++) {
       const media = post.mediaList[i];
       if (media.type !== 'image' && !media.previewUrl) continue;
-      // Probe by every known extension: the file was written with the
-      // extension resolved from the download's mime type at save time.
+      // Probe by every extension the writer can produce: the file name is
+      // `${index}.${ext}` with the extension resolved from the download's mime
+      // type at save time.
       let found = false;
-      for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif']) {
-        const blob = await readFileAsBlob(postDir, `${i}.${ext}`).catch(() => null);
+      for (const ext of CACHED_IMAGE_EXTENSIONS) {
+        const blob = await readFileAsBlob(postDir, `${i}.${ext}`);
         if (blob && blob.size > 0) {
           found = true;
           break;
@@ -224,7 +292,11 @@ export const imageCacheService = {
         publishedAt: params.publishedAt,
       });
 
-      const postDir = await getOrCreateNestedDirectory(root, dirSegments);
+      // The walk above recorded this post as absent; the writes below create it,
+      // so the memo must be corrected or the next read would still miss.
+      const dirKey = dirSegments.join('\u0000');
+      const postDir = postDirCache.get(dirKey) ?? await getOrCreateNestedDirectory(root, dirSegments);
+      postDirCache.set(dirKey, postDir);
       const ext = resolveFileExtension(params.mediaUrl, fetched.mimeType);
       const fileName = `${params.mediaIndex}.${ext}`;
 

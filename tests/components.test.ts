@@ -5,7 +5,10 @@ import PlatformBadge from '../entrypoints/dashboard/components/creator/PlatformB
 import ChannelRow from '../entrypoints/dashboard/components/creator/ChannelRow.vue';
 import CreatorCardHeader from '../entrypoints/dashboard/components/creator/CreatorCardHeader.vue';
 import BaseModal from '../entrypoints/dashboard/components/BaseModal.vue';
-import type { Channel, Creator } from '../src/types';
+import AppSelect from '../entrypoints/dashboard/components/AppSelect.vue';
+import DevLogModal from '../entrypoints/dashboard/components/DevLogModal.vue';
+import PostReaderModal from '../entrypoints/dashboard/components/PostReaderModal.vue';
+import type { Channel, Creator, Post } from '../src/types';
 
 const creator: Creator = {
   id: 'creator_1',
@@ -72,6 +75,27 @@ describe('creator view components render', () => {
     expect(html).toContain('tester');
   });
 
+  it('ChannelRow names the source platform', async () => {
+    // Regression: the row showed only the role badge ("主账号") and the account
+    // name. A creator who binds the same display name on two platforms then has
+    // two visually identical rows — you cannot tell which is Bilibili and which
+    // is Weibo, which is what made the account list read as role-only.
+    const bilibili = await render(ChannelRow, { channel, creatorId: 'creator_1' });
+    expect(bilibili).toContain('哔哩哔哩');
+    expect(bilibili).toContain('来源平台：哔哩哔哩');
+
+    const weibo: Channel = { ...channel, id: 'weibo:42', platform: 'weibo' };
+    const weiboHtml = await render(ChannelRow, { channel: weibo, creatorId: 'creator_1' });
+    expect(weiboHtml).toContain('微博');
+    // The two rows must be distinguishable from their markup alone.
+    expect(weiboHtml).not.toBe(bilibili);
+  });
+
+  it('ChannelRow shows the platform in compact mode too', async () => {
+    const html = await render(ChannelRow, { channel, creatorId: 'creator_1', compact: true });
+    expect(html).toContain('哔哩哔哩');
+  });
+
   it('CreatorCardHeader grid variant shows post count and actions', async () => {
     const html = await render(CreatorCardHeader, {
       creator,
@@ -110,5 +134,88 @@ describe('BaseModal renders dialog semantics', () => {
     expect(html).toContain('role="dialog"');
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain('内容');
+  });
+});
+
+describe('AppSelect renders', () => {
+  it('shows the selected label, not the raw value, and exposes the accessible name', async () => {
+    const html = await render(AppSelect, {
+      modelValue: 10,
+      options: [
+        { value: 5, label: '5 条' },
+        { value: 10, label: '10 条（推荐）' },
+      ],
+      ariaLabel: '每次获取条数',
+    });
+    expect(html).toContain('10 条（推荐）');
+    expect(html).toContain('aria-label="每次获取条数"');
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it('falls back to the raw value when the option list has no match', async () => {
+    // A settings value outside the current option set must still render.
+    const html = await render(AppSelect, { modelValue: 999, options: [], ariaLabel: 'x' });
+    expect(html).toContain('999');
+  });
+});
+
+describe('PostReaderModal renders', () => {
+  const longPost: Post = {
+    id: 'rss_1',
+    creatorId: 'creator_1',
+    channelId: 'rss:daily',
+    platform: 'rss',
+    title: '2026-09-08',
+    content: '正文段落一\n正文段落二\n' + '长文内容。'.repeat(400),
+    mediaList: [],
+    originalUrl: 'https://daily.juya.uk/2026/09/08',
+    publishedAt: Date.UTC(2026, 8, 8),
+    fetchedAt: Date.now(),
+    isRead: 0,
+  };
+
+  it('renders the whole body inside a dialog, unclamped', async () => {
+    const html = await render(PostReaderModal, {
+      post: longPost,
+      creators: [creator],
+      channels: [],
+    });
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    // The point of this view: no line clamp on the article body.
+    expect(html).not.toContain('line-clamp');
+    // The tail of a 2000+ character article is rendered, not cut.
+    expect(html).toContain('长文内容。长文内容。');
+    expect(html).toContain('2026-09-08');
+  });
+
+  it('keeps the platform and author identifiable', async () => {
+    const html = await render(PostReaderModal, {
+      post: longPost,
+      creators: [creator],
+      channels: [],
+    });
+    expect(html).toContain('测试创作者');
+    expect(html).toContain('通用 RSS');
+  });
+
+  it('hides a heading that just repeats the body', async () => {
+    const echo: Post = { ...longPost, title: '露露卡', content: '露露卡' };
+    const html = await render(PostReaderModal, { post: echo, creators: [creator], channels: [] });
+    // The body still renders; the duplicated heading does not.
+    expect(html).toContain('露露卡');
+    expect(html).not.toContain('<h2');
+  });
+});
+
+describe('DevLogModal renders', () => {
+  it('renders inside a dialog with its filters and empty state', async () => {
+    const html = await render(DevLogModal, {});
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('开发者日志');
+    expect(html).toContain('全部级别');
+    expect(html).toContain('详细模式');
+    expect(html).toContain('本次会话暂无日志');
   });
 });
