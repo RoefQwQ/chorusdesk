@@ -279,12 +279,52 @@ stored rows are handled too.
   in the response.
 - Repairs MUST be gated by a rule that can only match a shape the bug itself produced, so
   replacement can never discard correct content. `shouldRepairStoredContent` is the worked
-  example: RSS by the old cap's exact fingerprint (length 353 ending `...`, new body longer),
-  Twitter by a body consisting solely of a media link.
+  example: RSS by "the freshly parsed body is strictly longer", Twitter by a body consisting
+  solely of a media link.
+- **Derive the predicate from observed data, not from an assumption about your own old
+  code.** The first RSS rule keyed off "length 353, ends with `...`" — the fingerprint the
+  removed 350-character cap would have produced. It never matched a single row, because what
+  was actually on disk was the *feed's* summary (measured: 359 characters ending in a single
+  `…`). A repair rule that has never been observed to fire is not a working rule; the log
+  line「已修正 N 条」absent from a sync that should trigger it is the tell.
 - Keep repairs bounded (the ids the adapter just returned — never a table scan), silent
   (a repaired row is not a new post), and preserve user state (`isRead` / `isBookmarked`).
 - The log line is the evidence: `新增 0 条` with a non-zero platform count means nothing was
   written, so a fix that only touched the adapter cannot have taken effect.
+
+---
+
+## 17. A feed's summary is not its article — read `<content:encoded>` (and never race a client-rendered page)
+
+Two acquisition defects, both from trusting a cheaper signal than the one that answers the
+question.
+
+**RSS: the feed's own truncation.** `rss.ts` read `item.querySelector('description, summary,
+content')`. Feeds routinely put a truncated summary in `<description>` and the article in
+`<content:encoded>` (RSS) or `<content>` (Atom) — `querySelector('content')` does not match
+`<content:encoded>`, so the code got the summary. Measured on a real newsletter feed:
+`<description>` 359 characters ending in the feed's own `…`; `<content:encoded>` 31144
+characters of markup, 3.7k–14.9k of plain text. The user saw an article stop mid-sentence and
+reasonably read it as our bug.
+
+- Read the full element first, then fall back: `getElementsByTagName('content:encoded')`, then
+  `content`, then `description`/`summary`. The namespaced name needs the qualified lookup — a
+  CSS selector would need the colon escaped.
+- Size a body cap from measured articles, not from taste. The previous 4000 ceiling truncated
+  9 of 10 real articles.
+
+**Douyin: loading is not rendering.** `waitForTabLoad` resolved on the tab's `status ===
+'complete'` plus a fixed 2.5 s sleep. A client-rendered grid is not on screen then; on a cold
+background tab the scrape found an empty grid, and the collector could only report "no works"
+for a creator that has them. Measured: two of three channels failed while a third, which
+happened to load more slowly, succeeded — the fixed sleep raced the page and won only by luck.
+
+- Wait for the *thing you need*, in the page, bounded: inject a self-contained probe that
+  polls for the grid to hold a card (see `awaitDouyinGrid`), then scrape.
+- A readiness timeout MUST NOT abort the scrape. The page may show a captcha or an auth wall,
+  and the collector diagnoses those better than a timeout could.
+- A fixed sleep after `load` is a guess about someone else's renderer. It is acceptable only
+  as a short settle before a real readiness check.
 
 ---
 
@@ -305,4 +345,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 259 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 266 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse test, which needs a real `DOMParser`.
