@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleDouyinSnapshot } from '../src/infrastructure/chrome/messages/douyinSnapshot';
+import { awaitDouyinGrid } from '../src/adapters/douyin/collector';
 
 /**
  * Tab lifecycle for the page-driven Douyin path.
@@ -21,6 +22,8 @@ const events: string[] = [];
 let existingTabs: Array<{ id: number; url: string }> = [];
 let createdTabs: Array<{ id: number; url: string }>;
 let snapshotResult: unknown;
+/** What the injected grid probe reports. */
+let gridResult: boolean;
 
 let updateListeners: Array<(id: number, info: { status?: string }) => void>;
 /** Session storage behind `chrome.storage.session`, for reclaim-record assertions. */
@@ -38,6 +41,7 @@ function installChrome() {
   updateListeners = [];
   sessionStore = new Map();
   snapshotResult = { items: [], authorName: '作者', authorAvatar: '', statedTotal: 3 };
+  gridResult = true;
 
   vi.stubGlobal('chrome', {
     storage: {
@@ -87,7 +91,14 @@ function installChrome() {
       },
     },
     scripting: {
-      executeScript: async () => {
+      executeScript: async (opts: { func: unknown; args?: unknown[] }) => {
+        // Two injections happen per scrape: the grid probe, then the collector.
+        // Telling them apart is what lets the ordering of wait-then-scrape be
+        // asserted at all.
+        if (opts.func === awaitDouyinGrid) {
+          events.push('await-grid');
+          return [{ result: gridResult }];
+        }
         events.push('inject');
         return [{ result: snapshotResult }];
       },
@@ -120,6 +131,31 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   vi.useFakeTimers();
   installChrome();
+});
+
+describe('douyin snapshot — grid readiness', () => {
+  it('waits for the grid in the page before scraping', async () => {
+    // The tab's load event is not the grid being on screen. A cold page yields an
+    // empty grid, and the collector can then only report "no works" for a creator
+    // that has them — which is how two of three channels failed while a third,
+    // loading more slowly, succeeded.
+    await run();
+
+    expect(events).toContain('await-grid');
+    // The wait must happen before the scrape, or it cannot help.
+    expect(events.indexOf('await-grid')).toBeLessThan(events.indexOf('inject'));
+  });
+
+  it('still scrapes when the grid never appears, so captcha/auth are detected', async () => {
+    // A captcha or an auth wall means the grid will never render; a timeout must
+    // not hide the more useful diagnosis the collector produces.
+    gridResult = false;
+
+    const res = await run();
+
+    expect(events).toContain('inject');
+    expect(res.success).toBe(true);
+  });
 });
 
 describe('douyin snapshot — temporary tab lifecycle', () => {

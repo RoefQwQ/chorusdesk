@@ -15,7 +15,7 @@
  * handler additionally verifies that the tab it scrapes is genuinely on
  * douyin.com (hostname match, never a substring — AGENTS rule 1).
  */
-import { collectDouyinSnapshot, deepCollectDouyinSnapshot } from '../../../adapters/douyin/collector';
+import { awaitDouyinGrid, collectDouyinSnapshot, deepCollectDouyinSnapshot } from '../../../adapters/douyin/collector';
 import { MAX_ITEMS_PER_SNAPSHOT } from '../../../adapters/douyin/contract';
 import { hostMatches } from './hosts';
 import { devLog } from '../../../utils/devLog';
@@ -139,6 +139,21 @@ export function handleDouyinSnapshot(
       const confirmed = await chrome.tabs.get(targetId).catch(() => null);
       if (!confirmed || !isDouyinTabUrl(confirmed.url)) {
         return fail('auth', '抖音页面加载失败，请在浏览器中打开任意抖音页面后再试。');
+      }
+
+      // The tab's load event is not the grid being on screen. Wait for the works
+      // to actually render before scraping, or a cold page yields an empty grid
+      // and the collector can only report "no works" for a creator that has them.
+      const gridReady = await chrome.scripting
+        .executeScript({
+          target: { tabId: targetId },
+          func: awaitDouyinGrid,
+          args: [10_000],
+        })
+        .then((r) => r?.[0]?.result === true)
+        .catch(() => false);
+      if (!gridReady) {
+        devLog.warn('douyin', '作品网格在等待时间内未渲染，仍尝试采集', `tab ${targetId}`);
       }
 
       const deep = message.deep === true;
@@ -320,8 +335,9 @@ function waitForTabLoad(tabId: number): Promise<void> {
       settled = true;
       chrome.tabs.onUpdated.removeListener(onUpdated);
       clearTimeout(timer);
-      // Douyin's grid is client-rendered after load; give it a moment to paint.
-      setTimeout(resolve, 2500);
+      // A short settle for the initial paint; `awaitDouyinGrid` is what actually
+      // gates readiness, so this no longer has to be generous.
+      setTimeout(resolve, 800);
     };
     const timer = setTimeout(finish, 12_000);
     function onUpdated(id: number, info: { status?: string }) {

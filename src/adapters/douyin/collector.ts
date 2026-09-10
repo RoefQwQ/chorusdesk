@@ -42,6 +42,37 @@ export interface CollectedSnapshot {
 }
 
 /**
+ * Wait for the creator's work grid to actually render, in the page.
+ *
+ * Also stringified and injected, so it is self-contained for the same reasons as
+ * the collector. Necessary because the grid is client-rendered: the service
+ * worker can only see the tab's load event, and loading is not rendering. A fixed
+ * post-load sleep raced the page and lost on cold loads — measured as two of
+ * three channels reporting an empty grid while a third, which happened to load
+ * more slowly, succeeded.
+ *
+ * Resolves `true` once the grid holds at least one work, or `false` at the
+ * deadline. Returning rather than throwing means the caller still scrapes (the
+ * page may carry a captcha or an auth wall, which the collector detects and
+ * reports more usefully than a timeout would).
+ */
+export async function awaitDouyinGrid(maxWaitMs: number): Promise<boolean> {
+  const ready = (): boolean => {
+    const grid = document.querySelector('[data-e2e="user-post-list"]');
+    if (!grid) return false;
+    return grid.querySelectorAll('a[href*="/video/"], a[href*="/note/"]').length > 0;
+  };
+
+  const deadline = Date.now() + maxWaitMs;
+  if (ready()) return true;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (ready()) return true;
+  }
+  return false;
+}
+
+/**
  * Scrape the creator page. Runs in the page; returns a plain serializable object.
  *
  * `maxItems` bounds the payload that crosses back into the extension.
