@@ -16,6 +16,7 @@
  * douyin.com (hostname match, never a substring — AGENTS rule 1).
  */
 import { awaitDouyinGrid, collectDouyinSnapshot, deepCollectDouyinSnapshot } from '../../../adapters/douyin/collector';
+import type { CollectedSnapshot } from '../../../adapters/douyin/collector';
 import { MAX_ITEMS_PER_SNAPSHOT } from '../../../adapters/douyin/contract';
 import { hostMatches } from './hosts';
 import { devLog } from '../../../utils/devLog';
@@ -144,27 +145,11 @@ export function handleDouyinSnapshot(
       // The tab's load event is not the grid being on screen. Wait for the works
       // to actually render before scraping, or a cold page yields an empty grid
       // and the collector can only report "no works" for a creator that has them.
-      //
-      // A rejected injection is NOT the same as an unready grid, and conflating
-      // them cost us the wait entirely: a single `.catch(() => false)` made a
-      // destroyed frame look like a 10-second timeout expiring, when in fact the
-      // probe came back after 1.4s. Douyin is a single-page app that can replace
-      // the frame after `load`, which kills an injection already running in it —
-      // a transient condition that a retry routinely fixes.
-      let probe = await probeDouyinGrid(targetId);
-      for (let attempt = 1; attempt <= GRID_PROBE_ATTEMPTS && !probe.injected; attempt++) {
-        devLog.debug(
-          'douyin',
-          `网格探针注入失败，重试 ${attempt}/${GRID_PROBE_ATTEMPTS}`,
-          `tab ${targetId}：${probe.error ?? '未知原因'}`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 700));
-        probe = await probeDouyinGrid(targetId);
-      }
+      const probe = await probeDouyinGrid(targetId);
 
-      if (!probe.injected) {
-        devLog.warn('douyin', '网格探针始终无法注入，仍尝试采集', `tab ${targetId}：${probe.error ?? '未知原因'}`);
-      } else if (!probe.ready) {
+      if (!probe.ran) {
+        devLog.warn('douyin', '网格探针始终未能完成，仍尝试采集', `tab ${targetId}：${probe.error ?? '未知原因'}`);
+      } else if (probe.value !== true) {
         // The probe ran and reported the grid genuinely did not appear in time.
         devLog.warn('douyin', '作品网格在等待时间内未渲染，仍尝试采集', `tab ${targetId}`);
       }
@@ -179,7 +164,7 @@ export function handleDouyinSnapshot(
       // the sync layer needs in order to back off. The observable fact is simply
       // that the tab is no longer on the creator's profile, whatever it was moved
       // to (captcha, login wall, error page).
-      if (!probe.injected || !probe.ready) {
+      if (!probe.ran || probe.value !== true) {
         const landed = await chrome.tabs.get(targetId).catch(() => null);
         if (!landed) {
           return fail('auth', '抖音页面已被关闭，未能完成采集。请重试。');
@@ -194,26 +179,30 @@ export function handleDouyinSnapshot(
       }
 
       const deep = message.deep === true;
-      const injected = deep
-        ? await chrome.scripting.executeScript({
-            target: { tabId: targetId },
-            func: deepCollectDouyinSnapshot,
+      const collected = deep
+        ? await collectDouyinSnapshotReliably(targetId, deepCollectDouyinSnapshot, [
+            limit,
             // Scroll rounds are bounded so a dig cannot spin forever against a
             // grid that is gated rather than finished.
-            args: [limit, 40],
-          })
-        : await chrome.scripting.executeScript({
-            target: { tabId: targetId },
-            func: collectDouyinSnapshot,
-            args: [limit],
-          });
+            40,
+          ])
+        : await collectDouyinSnapshotReliably(targetId, collectDouyinSnapshot, [limit]);
 
-      const snapshot = injected?.[0]?.result;
-      if (!snapshot || typeof snapshot !== 'object') {
-        return fail('parse', '抖音页面未返回可解析的作品数据。');
+      if (!collected.ran) {
+        // Not "the page has no works" — the script never finished running.
+        return fail(
+          'network',
+          `抖音页面在采集过程中发生跳转或重新渲染，未能取得作品数据：${collected.error ?? '未知原因'}。请稍后重试。`,
+        );
       }
 
-      const shot = snapshot as ReturnType<typeof collectDouyinSnapshot>;
+      // The page payload is untrusted; the adapter normalizes it. This only
+      // checks that something object-shaped came back.
+      const raw = collected.value;
+      if (!raw || typeof raw !== 'object') {
+        return fail('parse', '抖音页面未返回可解析的作品数据。');
+      }
+      const shot = raw as CollectedSnapshot;
       if (shot.requiresVerify) {
         return fail('rate_limit', '抖音页面出现安全验证。请在抖音标签页中完成验证后再同步。');
       }
@@ -366,37 +355,111 @@ export async function sweepOrphanDouyinTempTab(): Promise<void> {
 /** How long the in-page probe waits for the grid before reporting "not ready". */
 const GRID_WAIT_MS = 10_000;
 
-/** How many times a failed grid-probe injection is retried before giving up. */
-const GRID_PROBE_ATTEMPTS = 3;
+/** Bounded attempts for an injection the page's own navigation destroyed. */
+const INJECT_ATTEMPTS = 3;
 
-interface GridProbe {
-  /** The probe ran and the grid was on screen. */
-  ready: boolean;
-  /** The probe ran at all — `false` means the injection itself failed. */
-  injected: boolean;
+/** Pause between attempts, long enough for a frame swap to settle. */
+const INJECT_RETRY_DELAY_MS = 700;
+
+/**
+ * The outcome of one injection.
+ *
+ * `ran: false` means the script did not complete — the frame it was running in
+ * went away. That is different in kind from a script that ran and reported an
+ * answer, and the difference is what a retry keys on.
+ */
+interface InjectionOutcome {
+  ran: boolean;
+  /** Whatever the injected function returned; validated by its consumer. */
+  value?: unknown;
   error?: string;
 }
 
 /**
- * Inject the in-page grid probe, reporting *why* it produced no answer.
+ * Inject `func` and report whether it actually completed.
  *
- * The distinction is the whole point: `ready: false, injected: true` means the
- * page loaded but the grid is not there (a captcha, an auth wall, a genuinely
- * slow render), while `injected: false` means the frame our script was running in
- * no longer exists — which a retry can fix and which we must not read as a verdict
- * about the page.
+ * A destroyed frame does not reliably surface as a rejection. Measured on a real
+ * sync: the grid probe reported "not rendered" **3.5 s** into a 10 s deadline,
+ * which the probe itself cannot do — it only returns `false` at the deadline. The
+ * call had resolved with a non-boolean result, i.e. the script never finished,
+ * and treating "resolved" as "ran" made the page's own navigation look like a
+ * verdict about the page.
+ *
+ * So: an injection has run only if it produced a value of the expected kind. The
+ * functions injected here always return a boolean or an object, so anything else
+ * means the frame changed under them.
  */
-async function probeDouyinGrid(tabId: number): Promise<GridProbe> {
+async function injectAndAwait<T>(
+  tabId: number,
+  func: (...args: never[]) => T,
+  args: unknown[],
+): Promise<InjectionOutcome> {
   try {
     const result = await chrome.scripting.executeScript({
       target: { tabId },
-      func: awaitDouyinGrid,
-      args: [GRID_WAIT_MS],
+      func: func as (...args: unknown[]) => T,
+      args,
     });
-    return { ready: result?.[0]?.result === true, injected: true };
+    const first = result?.[0];
+    if (!first || first.result === undefined || first.result === null) {
+      return { ran: false, error: '注入未返回结果（页面可能发生了跳转或重新渲染）' };
+    }
+    // `executeScript` awaits a promise the injected function returns, so what
+    // arrives is the awaited value (this is how the grid probe reports at all).
+    return { ran: true, value: first.result };
   } catch (err: unknown) {
-    return { ready: false, injected: false, error: err instanceof Error ? err.message : String(err) };
+    return { ran: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Wait for the grid to render, retrying an injection the page destroyed.
+ *
+ * `ready: false, ran: true` is a real answer — the page loaded and the grid is not
+ * there (a captcha, an auth wall, a genuinely slow render). `ran: false` is a
+ * transient condition a retry routinely fixes, and must never be read as a
+ * verdict about the page.
+ */
+async function probeDouyinGrid(tabId: number): Promise<InjectionOutcome> {
+  let outcome = await injectAndAwait(tabId, awaitDouyinGrid, [GRID_WAIT_MS]);
+  for (let attempt = 1; attempt < INJECT_ATTEMPTS && !outcome.ran; attempt++) {
+    devLog.debug(
+      'douyin',
+      `网格探针未完成，重试 ${attempt}/${INJECT_ATTEMPTS - 1}`,
+      `tab ${tabId}：${outcome.error ?? '未知原因'}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, INJECT_RETRY_DELAY_MS));
+    outcome = await injectAndAwait(tabId, awaitDouyinGrid, [GRID_WAIT_MS]);
+  }
+  return outcome;
+}
+
+/**
+ * Scrape the page, retrying an injection the page destroyed.
+ *
+ * The collector always returns an object — an empty one for an empty grid — so a
+ * missing result is never data. It is the same transient frame swap, and it is
+ * what made a channel whose probe had already failed report "no parseable works"
+ * with nothing to distinguish it from a genuinely empty profile.
+ */
+async function collectDouyinSnapshotReliably(
+  tabId: number,
+  // Both collectors are accepted; their return types differ only in that the deep
+  // one is async, and `executeScript` awaits it either way.
+  func: (...args: never[]) => CollectedSnapshot | Promise<CollectedSnapshot>,
+  args: unknown[],
+): Promise<InjectionOutcome> {
+  let outcome = await injectAndAwait(tabId, func, args);
+  for (let attempt = 1; attempt < INJECT_ATTEMPTS && !outcome.ran; attempt++) {
+    devLog.debug(
+      'douyin',
+      `采集注入未完成，重试 ${attempt}/${INJECT_ATTEMPTS - 1}`,
+      `tab ${tabId}：${outcome.error ?? '未知原因'}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, INJECT_RETRY_DELAY_MS));
+    outcome = await injectAndAwait(tabId, func, args);
+  }
+  return outcome;
 }
 
 /** Wait (bounded) for a tab to finish loading the creator page. */

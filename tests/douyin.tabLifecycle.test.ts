@@ -26,8 +26,12 @@ let snapshotResult: unknown;
 let gridResult: boolean;
 /** When set, the tab reports this URL instead of the profile it was sent to. */
 let navigatedAwayTo: string | null;
-/** How many grid-probe injections reject before one runs. */
-let probeRejections: number;
+/** How many grid-probe injections fail (rejected or valueless) before one runs. */
+let probeFailures: number;
+/** How many collector injections fail before one runs. */
+let collectFailures: number;
+/** When true, a failed injection resolves without a value instead of rejecting. */
+let failSilently: boolean;
 
 let updateListeners: Array<(id: number, info: { status?: string }) => void>;
 /** Session storage behind `chrome.storage.session`, for reclaim-record assertions. */
@@ -47,7 +51,9 @@ function installChrome() {
   snapshotResult = { items: [], authorName: '作者', authorAvatar: '', statedTotal: 3 };
   gridResult = true;
   navigatedAwayTo = null;
-  probeRejections = 0;
+  probeFailures = 0;
+  collectFailures = 0;
+  failSilently = false;
 
   vi.stubGlobal('chrome', {
     storage: {
@@ -104,15 +110,23 @@ function installChrome() {
         // asserted at all.
         if (opts.func === awaitDouyinGrid) {
           events.push('await-grid');
-          // A destroyed frame surfaces as a rejected injection, not as a false
-          // result -- see `probeDouyinGrid`.
-          if (probeRejections > 0) {
-            probeRejections--;
+          if (probeFailures > 0) {
+            probeFailures--;
+            // A destroyed frame surfaces either as a rejection OR as a
+            // resolution with no value -- and the real log showed the second
+            // kind, which is what made it look like the deadline had expired.
+            if (failSilently) return [{}];
             throw new Error('Frame with ID 0 was removed.');
           }
           return [{ result: gridResult }];
         }
         events.push('inject');
+        if (collectFailures > 0) {
+          collectFailures--;
+          events.push('inject-failed');
+          if (failSilently) return [{}];
+          throw new Error('Frame with ID 0 was removed.');
+        }
         return [{ result: snapshotResult }];
       },
     },
@@ -171,37 +185,76 @@ describe('douyin snapshot — grid readiness', () => {
   });
 });
 
-describe('douyin snapshot — a destroyed frame during the grid probe', () => {
-  it('retries a failed probe instead of abandoning the wait', async () => {
-    // Douyin is a single-page app and can replace the frame after `load`, which
-    // kills an injection already running in it. Conflating that with "the grid
-    // did not appear" cost us the entire wait: a single `.catch(() => false)`
-    // made a destroyed frame look like the 10s deadline expiring, when the probe
-    // had actually answered in 1.4s.
-    probeRejections = 1;
+describe('douyin snapshot — an injection the page destroyed', () => {
+  it('retries an injection that resolves without a value', async () => {
+    // The real log's shape. The grid warning appeared 3.5s into a 10s deadline,
+    // which the probe cannot do -- it only reports "not ready" AT the deadline.
+    // The call had resolved with no value, and treating "resolved" as "ran" made
+    // the page's own navigation look like a verdict about the page.
+    probeFailures = 1;
+    failSilently = true;
 
     const res = await run();
 
     expect(res.success).toBe(true);
-    // Two probe attempts: the rejected one, then the retry that ran.
+    // The valueless attempt, then the retry that ran.
     expect(events.filter((e) => e === 'await-grid')).toHaveLength(2);
     expect(events).toContain('inject');
   });
 
-  it('gives up after bounded attempts and still scrapes', async () => {
-    // A frame that keeps dying must not spin forever, and must not be reported as
-    // a rate limit while the tab is still sitting on the creator's profile.
-    probeRejections = 99;
+  it('retries an injection that rejects', async () => {
+    probeFailures = 1;
+    failSilently = false;
 
     const res = await run();
 
     expect(res.success).toBe(true);
-    expect(events.filter((e) => e === 'await-grid')).toHaveLength(4);
+    expect(events.filter((e) => e === 'await-grid')).toHaveLength(2);
+  });
+
+  it('retries the collector too, and does not call it "no works"', async () => {
+    // A collector that never ran is not an empty profile. Reporting it as a parse
+    // error was indistinguishable from "this creator has no works".
+    collectFailures = 1;
+    failSilently = true;
+
+    const res = await run();
+
+    expect(res.success).toBe(true);
+    expect(events).toContain('inject-failed');
+    expect(events.filter((e) => e === 'inject')).toHaveLength(2);
+  });
+
+  it('reports a network error when the collector never completes', async () => {
+    collectFailures = 99;
+    failSilently = true;
+
+    const res = await run();
+
+    expect(res.success).toBe(false);
+    expect(res.code).toBe('network');
+    // The message must not read as "this creator has no works".
+    expect(String(res.error)).toContain('跳转');
+  });
+
+  it('gives up after a bounded number of attempts and still scrapes', async () => {
+    // A frame that keeps dying must not spin forever, and must not be reported as
+    // a rate limit while the tab is still sitting on the creator's profile.
+    probeFailures = 99;
+    failSilently = true;
+
+    const res = await run();
+
+    expect(res.success).toBe(true);
+    // Three attempts: the initial one plus two retries.
+    expect(events.filter((e) => e === 'await-grid')).toHaveLength(3);
     expect(events).toContain('inject');
   });
 
-  it('never leaves its temporary tab open when the probe keeps failing', async () => {
-    probeRejections = 99;
+  it('never leaves its temporary tab open when injections keep failing', async () => {
+    probeFailures = 99;
+    collectFailures = 99;
+    failSilently = true;
 
     await run();
 
@@ -276,12 +329,24 @@ describe('douyin snapshot — temporary tab lifecycle', () => {
     expect(events.indexOf('remove:900')).toBeLessThan(events.indexOf('respond'));
   });
 
-  it('closes the temporary tab when the page returns nothing parseable', async () => {
-    snapshotResult = undefined;
+  it('closes the temporary tab when the page payload is not an object', async () => {
+    snapshotResult = 'not a snapshot';
 
     const res = await run();
 
     expect(res.code).toBe('parse');
+    expect(events.indexOf('remove:900')).toBeLessThan(events.indexOf('respond'));
+  });
+
+  it('treats a missing collector result as a failed injection, not as no data', async () => {
+    // `undefined` was reported as a parse error, which is indistinguishable from
+    // "this creator has no works". A collector always returns an object, so no
+    // result means it never finished running.
+    snapshotResult = undefined;
+
+    const res = await run();
+
+    expect(res.code).toBe('network');
     expect(events.indexOf('remove:900')).toBeLessThan(events.indexOf('respond'));
   });
 
