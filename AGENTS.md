@@ -4,7 +4,7 @@ Binding constraints for anyone (human or agent) editing this repo. Reusable rule
 One-off review output lives in `docs/REVIEW_2026-09.md` — do not copy it here.
 
 Stack: WXT 0.21 + Vue 3 + Dexie 4 + Tailwind 4, TypeScript strict, Chrome MV3.
-Commands: `npm run dev` / `build` / `zip`. No test runner or linter exists yet (see fix queue #12).
+Commands: `npm run dev` / `build` / `zip` / `test` / `typecheck` / `lint`. CI runs typecheck + lint + vitest + build on every push/PR (fix queue #12).
 
 ---
 
@@ -67,9 +67,10 @@ Sender policy is enforced **centrally in the router** (`entrypoints/background.t
 
 - `isExtensionPageSender` — dashboard/popup only. Required for anything that fetches with cookies,
   reads stored tokens, or returns a response body (`BG_FETCH`, `PROXY_IMAGE`,
-  `FETCH_TWITTER_TIMELINE`, `SYNC_RPLAY_TOKEN`).
-- `isContentScriptSenderOn(sender, 'rplay.live')` — the token relay, which legitimately originates
-  from a content script.
+  `FETCH_TWITTER_TIMELINE`, `FETCH_DOUYIN_SNAPSHOT`).
+- `isContentScriptSenderOn(sender, host)` — parameterized pattern for page-driven credential
+  relays (hostname-exact). Kept as a utility with tests; no live content scripts exist today
+  (the rplay.live relay was removed with the platform, 2026-09).
 
 New message type ⇒ add it to the router's policy table. No exceptions, no per-handler ad-hoc checks.
 
@@ -187,4 +188,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + vitest + build), 37 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR), `typescript` pinned to 7.0.2.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 129 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint).

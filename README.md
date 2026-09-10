@@ -77,8 +77,11 @@ git clone https://github.com/RoefQwQ/chorusdesk.git
 cd chorusdesk
 
 npm install
-npm run dev   # 开发热重载模式
-npm run build # 构建生产包，产物在 .output/chrome-mv3/
+npm run dev        # 开发热重载模式
+npm run typecheck  # TypeScript 类型检查（原生 TS7 编译器）
+npm run lint       # ESLint 静态检查
+npm test           # Vitest 回归测试
+npm run build      # 构建生产包，产物在 .output/chrome-mv3/
 ```
 
 ## 文档目录

@@ -12,9 +12,11 @@
 
 尚未达到的状态是：完成真实 Chrome 端到端验证、最小化权限、完整数据 schema、统一平台描述协议、成熟外部 API 策略和完整工程静态检查的发布级产品。
 
-> **追加记录（2026-09-10）**：本文初次写于修复队列完成后。随后项目完成了抖音页面驱动采集阶段
-> （8 个提交：1 个功能、1 个测试系列、2 个文档、4 个修复），平台数增至 10 + 通用 RSS，
-> 测试从 37 项增至 106 项（9 个文件）。相关内容已并入下文（见一.11、二.13），原文其余部分保持不变。
+> **追加记录（2026-09-10，第二批）**：Rplay 平台整体移除（`389b007`，-840 行），
+> P5 ESLint（`acf3b8a`）与 P2 Dexie migration 永久测试（`620129e`）完成。
+> P3（收窄 Rplay token 姿态）随平台移除整体作废；测试增至 129 项（15 个文件）。
+> 相关内容见一.12/二.8 注记与四.P2/P3/P5 状态更新，原文其余部分保持不变。
+
 
 ---
 
@@ -215,7 +217,34 @@ TypeScript 固定为 `7.0.2`。关键缺陷不再只依赖维护者记忆。
 - **sender 校验**：`FETCH_DOUYIN_SNAPSHOT` 进入 background 路由的 sender policy 表，仅扩展自身页面可调用。
 - **自动同步语义**：需要真实页面参与，后台定时任务返回明确的 unsupported 状态，不会伪装成「同步成功 0 条」。
 
-这一阶段还沉淀了 AGENTS.md 第 9/10 条的通用工程规则（页面驱动平台的隔离层约定、先探测真实滚动容器再下「无分页」结论）。
+### 12. Rplay 平台移除与质量加固收官（追加于 2026-09-10，第二批）
+
+**Rplay（rplay.live）整体卸载**（`389b007`，30 文件 -840 行）：
+
+- 删除 adapter、rplaySync handler、content script、popup 同步横幅与 composable 五个整文件；
+  Platform union、注册表、`PLATFORM_HOSTS`、host_permissions、proxyImage 正则、urlParser 分支、
+  channelSync 占位名前缀与 platformAuth 凭证分支全部清空。
+- 凭证卫生：`onInstalled` 时幂等清除孤儿 `rplay_auth_token`。
+- 数据兼容：IndexedDB 中已有 rplay 频道/动态不删（用户数据不未经询问销毁）；
+  `getAdapter` 对残留 `rplay` 频道返回 undefined → channelSync 归类为 unsupported 错误，
+  UI 各消费点经 `?.name || platform` 兜底优雅降级。
+- `isContentScriptSenderOn` 作为 AGENTS.md 规则 4 的参数化通用模式保留，测试向量换中性 host。
+
+**P5 ESLint**（`acf3b8a`）：最小 flat config（js/ts recommended 非 type-aware + vue essential，
+模板布局规则显式关闭避免全仓格式重写）。TypeScript 7.0.2 无编译器 API，按官方公告采用
+`typescript: npm:@typescript/typescript6`（经典 API 供 lint 工具链）+ `@typescript/native`（TS7 tsc）
+双别名共存。首轮 77 错误全修零抑制，其中捕获一个真回归（Rplay 清理误删 dashboard
+settingsContext 六个字段，SettingsView 静默渲染 undefined）与一个真 bug
+（ChannelRow 刷新按钮 `@click` 与 `@click.shift.stop` 并存导致普通点击双触发）；
+38 处裸 `any` JSON 遍历收敛为共享 `JsonRecord`/`asRecord` 工具（`src/utils/json.ts`）。
+lint 步骤已接入 CI。
+
+**P2 Dexie migration 永久测试**（`620129e`）：`tests/dexie.migration.test.ts`（3 用例，
+fake-indexeddb 驱动真实升级链）——v3 布尔数据（含墓碑快照）升级后全为 `0|1`、
+索引查询真实命中迁移后行、全新数据库安装路径可用。v4 schema 内联声明独立钉死迁移契约。
+
+
+抖音阶段沉淀的 AGENTS.md 第 9/10 条通用工程规则（页面驱动平台隔离层约定、先探测真实滚动容器再下「无分页」结论）继续适用。
 
 ---
 
@@ -312,11 +341,11 @@ TypeScript 固定为 `7.0.2`。关键缺陷不再只依赖维护者记忆。
 
 这些属于外部平台依赖风险，无法仅靠本地重构消除。
 
-### 8. Rplay Token 运行时姿态仍可加强
+### 8. Rplay Token 运行时姿态 — 已随平台移除关闭（2026-09-10）
 
-仓库没有保存真实 Rplay token，但运行时仍把完整 token 保存在 `chrome.storage.local` 并短暂进入 UI reactive state。
-
-后续可考虑：
+原记录：运行时把完整 token 保存在 `chrome.storage.local` 并短暂进入 UI reactive state。
+Rplay 平台整体移除后该路径不复存在：token 在 `onInstalled` 时被幂等清除，
+「收窄 token 姿态」（原 P3）无对象，作废。以下原文留存备查：
 
 - UI 长期只维护 `hasToken`。
 - 需要编辑时即时读取。
@@ -347,9 +376,12 @@ TypeScript 固定为 `7.0.2`。关键缺陷不再只依赖维护者记忆。
 - 是否采用 `declarativeNetRequestWithHostAccess`。
 - 如何降低 Chrome Web Store 安装提示与审核风险。
 
-### 11. 尚未配置 ESLint
+### 11. ESLint — 已引入（2026-09-10，见一.12 与四.P5）
 
-CI 可以发现类型错误、测试回归、构建失败和 Vue SFC 编译错误，但不能系统约束：
+原记录：CI 无法系统约束 floating Promise、新增 `any`、层次违规、死代码和高复杂度条件。
+现状：最小 flat config 已上线并接入 CI（`npm run lint`），首轮 77 处错误全修零抑制。
+type-aware 规则与格式化规则有意未启用（见 `eslint.config.js` 头注释），后续可作为增量项。
+以下原文留存备查：
 
 - floating Promise。
 - 新增 `any`。
@@ -357,13 +389,11 @@ CI 可以发现类型错误、测试回归、构建失败和 Vue SFC 编译错�
 - 死代码。
 - 高复杂度条件。
 
-ESLint 应单独引入，避免与业务修复混成大规模格式噪音。
+### 12. Dexie migration — 已进入永久 CI（2026-09-10，见一.12 与四.P2）
 
-### 12. Dexie migration 尚未进入永久 CI
-
-v3→v4 曾用真实 Dexie 升级链验证，但一次性脚本已清理。
-
-值得保留为永久测试：
+原记录：v3→v4 曾用真实 Dexie 升级链验证，但一次性脚本已清理。现状：
+`tests/dexie.migration.test.ts` 已将其固化为永久回归测试（fake-indexeddb 真实升级链）。
+以下原文留存备查：
 
 - 建立 v3 数据库。
 - 写入 boolean posts 和 tombstone snapshots。
@@ -415,21 +445,24 @@ v3→v4 曾用真实 Dexie 升级链验证，但一次性脚本已清理。
 9. 检查 alarm scheduled time。
 10. 抖音：打开创作者主页标签页后触发同步，验证注入采集、昵称/头像恢复（含 popup 快速关注）、封面经图片代理加载、历史回溯的滚动容器驱动与「X / Y 篇」截断提示。
 
-### P2：永久 Dexie migration 测试
+### P2：永久 Dexie migration 测试 — 已完成（2026-09-10）
 
-把 v3→当前版本升级链加入 CI。
+`tests/dexie.migration.test.ts`（3 用例，fake-indexeddb 真实升级链）已随 CI 运行，
+v3→v4 布尔转 `0|1` 契约（含墓碑快照与索引命中）被永久钉死。详见一.12。
 
-### P3：收窄运行时敏感状态
+### P3：收窄运行时敏感状态 — 已作废（2026-09-10）
 
-减少完整 Rplay token 进入长期 UI reactive state。
+Rplay 平台整体移除（`389b007`）后，`rplay_auth_token` 路径不复存在，
+token 在 `onInstalled` 时被幂等清除，本项无对象。
 
 ### P4：继续拆分 CreatorsView
 
 按 toolbar、grid、list 和 detailed 布局继续拆分。
 
-### P5：单独引入 ESLint
+### P5：单独引入 ESLint — 已完成（2026-09-10）
 
-采用最小 flat config，避免无意义的全仓格式重写。
+最小 flat config 上线并接入 CI（`npm run lint`），TS7 经官方双别名与 lint 工具链共存，
+首轮 77 错误全修零抑制（含 1 个真回归与 1 个真 bug）。详见一.12。
 
 ### P6（待定）：整体 UI 风格重设计
 
@@ -464,4 +497,9 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
 
 追加的抖音阶段在此基础上证明：即使面对无法后台化的平台，项目也能以隔离层 + 不可信输入校验的方式安全接入，而不削弱既有安全边界。
 
-项目质量的提升是结构性的，而不是表面增加功能。2026-09-10 的真实 Chrome 使用验证补上最后一块证据缺口后，项目已进入可用状态；剩余工作（migration 永久测试、token 姿态、CreatorsView 拆分、ESLint）均为质量加固，不阻塞日常使用。
+第二批（同日）完成 Rplay 平台卸载、ESLint 与 migration 永久测试三项收官：安全面减少一个
+凭据暴露面与一个 content script 注入面，工程面补齐 lint 门禁并把历史 migration 契约钉进 CI。
+ESLint 首轮扫描还捕获并修复了一个 UI 真回归（settingsContext 字段缺失）和一个交互真 bug
+（刷新按钮双触发）——证明静态检查在缺乏 E2E 的项目里是有效的第三道防线。
+
+项目质量的提升是结构性的，而不是表面增加功能。2026-09-10 的真实 Chrome 使用验证补上最后一块证据缺口后，项目已进入可用状态；~~剩余工作（migration 永久测试、token 姿态、CreatorsView 拆分、ESLint）~~ 中前三项已关闭，剩余工作仅 P4（CreatorsView 拆分）与待定的 P6（UI 重设计），均为非阻塞的打磨项。
