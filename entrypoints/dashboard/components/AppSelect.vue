@@ -27,8 +27,13 @@ const props = withDefaults(
     /** 左侧图标（lucide 组件）。 */
     icon?: unknown;
     ariaLabel?: string;
+    /**
+     * 浮层展开方向。默认向上（`top`），因为大多数触发器位于卡片底部区域；
+     * 位于面板顶部（如开发者日志的筛选行）时应改为 `bottom`，否则浮层会盖住标题。
+     */
+    menuPlacement?: 'top' | 'bottom';
   }>(),
-  { buttonClass: 'px-3 py-1.5 text-xs' },
+  { buttonClass: 'px-3 py-1.5 text-xs', menuPlacement: 'top' },
 );
 
 const emit = defineEmits<{
@@ -120,7 +125,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick));
     >
       <div
         v-if="open"
-        class="absolute bottom-full left-0 mb-1.5 z-50 min-w-full w-max max-w-64 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-lg py-1"
+        class="absolute z-50 min-w-full w-max max-w-64 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-lg py-1"
+        :class="menuPlacement === 'bottom' ? 'top-full mt-1.5 left-0' : 'bottom-full mb-1.5 left-0'"
       >
         <button
           v-for="(option, i) in options"

@@ -1,4 +1,5 @@
 import { hostMatches, isPlatformHost, parseFetchableUrl } from './hosts';
+import { devLog } from '../../../utils/devLog';
 
 // Minimal local types for the BG_FETCH runtime-message contract. They only
 // describe what this handler reads / replies with — the protocol shape itself
@@ -90,6 +91,12 @@ export async function performBgFetch(
       headers,
       credentials: isPlatformHost(hostname) ? 'include' : 'omit',
     });
+    // Host + status only: the URL can carry query tokens and the body is never
+    // logged. This is the line that explains "why is this platform empty".
+    const credentials = isPlatformHost(hostname) ? 'include' : 'omit';
+    const outcome = `${hostname} → HTTP ${res.status}`;
+    if (res.ok) devLog.debug('bgFetch', outcome, `凭据：${credentials}`);
+    else devLog.warn('bgFetch', outcome, `凭据：${credentials}`);
     return {
       ok: res.ok,
       status: res.status,
@@ -98,6 +105,7 @@ export async function performBgFetch(
     };
   } catch (err) {
     console.error('[Background] Fetch error:', err);
+    devLog.error('bgFetch', `${hostname} 请求失败`, errorMessage(err));
     return { ok: false, status: 0, data: '', error: errorMessage(err) };
   }
 }

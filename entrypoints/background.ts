@@ -2,10 +2,11 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { handleProxyImage } from '../src/infrastructure/chrome/messages/proxyImage';
 import { handleBgFetch } from '../src/infrastructure/chrome/messages/bgFetch';
 import { handleTwitterTimeline } from '../src/infrastructure/chrome/messages/twitterTimeline';
-import { handleDouyinSnapshot } from '../src/infrastructure/chrome/messages/douyinSnapshot';
+import { handleDouyinSnapshot, sweepOrphanDouyinTempTab } from '../src/infrastructure/chrome/messages/douyinSnapshot';
 import { isExtensionPageSender } from '../src/infrastructure/chrome/messages/senderGuard';
 import { setupDeclarativeNetRules } from '../src/infrastructure/chrome/declarativeNetRequest';
 import { handleAutoSyncAlarm, setupAutoSync, updateUnreadBadge } from '../src/infrastructure/chrome/autoSync';
+import { devLog } from '../src/utils/devLog';
 
 /**
  * Who may invoke each message type.
@@ -31,6 +32,9 @@ const SENDER_POLICY: Record<string, 'page'> = {
 
 export default defineBackground(() => {
   console.log('[Chorus] Background Service Worker ready');
+  // The SW is torn down between events, so this doubles as a wake counter: a
+  // burst of these in the log means something is spinning the worker up.
+  devLog.info('sw', 'Service Worker 已启动');
   // DNR dynamic rules persist across browser restarts, so they are applied
   // only on install/update (onInstalled). Re-running remove+add on every SW
   // wake is wasted work and briefly unscopes the hotlink rules mid-window.
@@ -38,6 +42,11 @@ export default defineBackground(() => {
   // cheap, and it must repair a missing alarm after a browser restart wiped
   // it (e.g. alarm cleared while the extension was disabled).
   void setupAutoSync().catch((e) => console.warn('[Chorus] Auto-sync setup failed:', e));
+  // Reclaim a Douyin throwaway tab left behind by a run whose worker died
+  // mid-scrape (`tabs.remove` could never run without a live worker). Runs at
+  // every startup so it is cleaned on the next wake even if the user never syncs
+  // Douyin again.
+  void sweepOrphanDouyinTempTab();
 
   chrome.runtime.onInstalled.addListener(() => {
     void setupDeclarativeNetRules().catch((e) =>
@@ -50,6 +59,7 @@ export default defineBackground(() => {
   });
 
   chrome.alarms?.onAlarm.addListener((alarm) => {
+    devLog.info('alarm', `触发 ${alarm.name}`, `计划时间 ${new Date(alarm.scheduledTime).toLocaleString('zh-CN')}`);
     handleAutoSyncAlarm(alarm);
   });
 
@@ -60,9 +70,11 @@ export default defineBackground(() => {
 
     if (!allowed) {
       console.warn(`[Chorus] Refused '${type || '(untyped)'}' from`, sender?.url ?? sender?.id);
+      devLog.warn('router', `拒绝消息 ${type || '(无类型)'}`, `来源：${sender?.url ?? sender?.id ?? '未知'}`);
       sendResponse({ success: false, ok: false, error: '请求来源不受信任' });
       return false;
     }
+    devLog.debug('router', `消息 ${type}`);
 
     if (type === 'UPDATE_AUTO_SYNC') {
       void setupAutoSync().catch((e) => console.warn('[Chorus] Auto-sync update failed:', e));

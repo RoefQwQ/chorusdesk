@@ -22,3 +22,15 @@ export interface JsonRecord {
 export function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
+
+/**
+ * The first candidate that actually carries keys, else `{}`.
+ *
+ * `asRecord()` returns `{}` for a miss and **`{}` is truthy**, so the natural
+ * `asRecord(a) || asRecord(b)` idiom silently drops `b` — the fallback is dead
+ * code that reads as if it works. Use this whenever "try one path, then
+ * another" is meant, so the intent is expressible and testable.
+ */
+export function firstFilled(...candidates: JsonRecord[]): JsonRecord {
+  return candidates.find((candidate) => Object.keys(candidate).length > 0) ?? {};
+}
