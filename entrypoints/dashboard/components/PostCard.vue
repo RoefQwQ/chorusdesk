@@ -5,7 +5,7 @@ import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
 import { imageCacheService } from '../../../src/services/imageCache';
 import { devLog } from '../../../src/utils/devLog';
-import { shouldShowTitle, showsFullBody } from '../../../src/utils/postText';
+import { shouldShowTitle, showsFullBody, standaloneMedia } from '../../../src/utils/postText';
 
 const props = withDefaults(defineProps<{
   post: Post;
@@ -51,6 +51,17 @@ const showTitle = computed(() => shouldShowTitle(props.post));
  * RSS shows a taller preview: its body is the content, not a caption.
  */
 const fullBody = computed(() => showsFullBody(props.post.platform));
+
+/**
+ * Media shown in the card's own media block.
+ *
+ * A structured article already renders its images inline in the reader, so the
+ * card must not list them again — on a real feed that meant a 23-image article
+ * became a "+17" gallery of broken placeholders under the text (the images could
+ * not load at all at the time). Photo posts, which have no article body, keep
+ * their gallery because there the images are the post.
+ */
+const cardMedia = computed(() => standaloneMedia(props.post));
 
 /**
  * The card shows a preview; long text opens in the reader.
@@ -198,14 +209,17 @@ onBeforeUnmount(() => {
 let mediaProbeObserver: IntersectionObserver | null = null;
 
 async function probeMedia(): Promise<void> {
-  if (!props.post.mediaList || props.post.mediaList.length === 0) return;
+  // `cardMedia`, not `post.mediaList`: a structured article's images render
+  // inline in the reader, so probing them here would walk the filesystem for
+  // media this card never shows.
+  if (cardMedia.value.length === 0) return;
 
   const startedAt = performance.now();
   let hits = 0;
 
   // Probe every item, then release the `<img>`s together: a per-item release
   // would re-trigger layout for each answer.
-  await Promise.all(props.post.mediaList.map(async (item, i) => {
+  await Promise.all(cardMedia.value.map(async (item, i) => {
     const original = item.previewUrl || item.originalUrl;
     if (!original) return;
     try {
@@ -227,7 +241,7 @@ async function probeMedia(): Promise<void> {
     }
   }));
 
-  for (const item of props.post.mediaList) {
+  for (const item of cardMedia.value) {
     const key = item.previewUrl || item.originalUrl;
     if (key) mediaProbed.value[key] = true;
   }
@@ -238,16 +252,16 @@ async function probeMedia(): Promise<void> {
   if (elapsed > 1500) {
     devLog.warn(
       'media',
-      `本地磁盘探测耗时 ${elapsed}ms（${props.post.mediaList.length} 项，命中 ${hits}）`,
+      `本地磁盘探测耗时 ${elapsed}ms（${cardMedia.value.length} 项，命中 ${hits}）`,
       `平台 ${props.post.platform}`,
     );
   } else {
-    devLog.debug('media', `磁盘探测 ${elapsed}ms（命中 ${hits}/${props.post.mediaList.length}）`);
+    devLog.debug('media', `磁盘探测 ${elapsed}ms（命中 ${hits}/${cardMedia.value.length}）`);
   }
 }
 
 onMounted(() => {
-  if (!props.post.mediaList || props.post.mediaList.length === 0) return;
+  if (cardMedia.value.length === 0) return;
 
   // No observer support (or no element yet): a card that cannot be observed must
   // still get its probe, so fall back to doing it immediately.
@@ -445,7 +459,7 @@ function toggleBookmark() {
           <span>展开全文</span>
         </button>
       </div>
-      <div v-if="post.mediaList?.length" class="pt-1">
+      <div v-if="cardMedia.length" class="pt-1">
         <!-- Single Video -->
         <div
           v-if="post.mediaList.length === 1 && post.mediaList[0].type === 'video'"

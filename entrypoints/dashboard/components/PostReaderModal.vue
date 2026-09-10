@@ -4,7 +4,7 @@ import { X, ExternalLink, Clock, Bookmark } from 'lucide-vue-next';
 import BaseModal from './BaseModal.vue';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
-import { shouldShowTitle } from '../../../src/utils/postText';
+import { shouldShowTitle, standaloneMedia } from '../../../src/utils/postText';
 
 /**
  * 全宽阅读视图：给长文 / RSS 这类「正文即文章」的动态一个能真正读完的地方。
@@ -43,6 +43,7 @@ const avatar = computed(
 );
 const isBookmarked = computed(() => Boolean(props.post.isBookmarked || props.bookmarked));
 const showTitle = computed(() => shouldShowTitle(props.post));
+const readerMedia = computed(() => standaloneMedia(props.post));
 
 const formatDate = (timestamp: number) => {
   if (!timestamp) return '未知时间';
@@ -114,14 +115,31 @@ const formatDate = (timestamp: number) => {
           class="font-bold text-lg sm:text-xl text-slate-900 dark:text-white leading-snug mb-4"
         >{{ post.title }}</h2>
 
-        <!-- `whitespace-pre-wrap` preserves the feed's own line breaks, and
-             `break-words` keeps long URLs from overflowing the column. -->
-        <div class="text-sm sm:text-[15px] text-slate-700 dark:text-slate-200 leading-[1.8] whitespace-pre-wrap break-words">{{ post.content }}</div>
+        <!-- Structured article: headings, paragraphs and images where the author
+             put them. Sanitized at parse time (`sanitizeHtml.ts`), so `v-html` is
+             safe here, and `.article-body` supplies the reading typography —
+             which is the whole point of a dedicated view for long text. -->
+        <div
+          v-if="post.contentHtml"
+          class="article-body text-sm sm:text-[15px] text-slate-700 dark:text-slate-200"
+          v-html="post.contentHtml"
+        ></div>
 
-        <!-- Media -->
-        <div v-if="post.mediaList?.length" class="mt-6 space-y-3">
+        <!-- Plain-text body: `whitespace-pre-wrap` preserves the feed's own line
+             breaks, and `break-words` keeps long URLs from overflowing. -->
+        <div
+          v-else
+          class="text-sm sm:text-[15px] text-slate-700 dark:text-slate-200 leading-[1.8] whitespace-pre-wrap break-words"
+        >{{ post.content }}</div>
+
+        <!-- Standalone media: only what the article body does not already show.
+             When the structured article renders, its images are already in place
+             — listing them again below is exactly the duplication this view
+             exists to remove. Enclosures (audio/video) are never inline, so they
+             still belong here. -->
+        <div v-if="readerMedia.length" class="mt-6 space-y-3">
           <div
-            v-for="(media, index) in post.mediaList"
+            v-for="(media, index) in readerMedia"
             :key="index"
             class="rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center"
           >

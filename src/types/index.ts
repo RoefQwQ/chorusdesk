@@ -221,6 +221,15 @@ export interface Post {
   channelLabel?: string; // 冗余缓存账号角色标签，便于卡片即时展示
   title?: string;
   content: string;
+  /**
+   * Sanitized article HTML, when the platform has structure worth keeping.
+   *
+   * Only RSS sets this today: its body is an article whose headings, paragraphs
+   * and inline images are the content, and flattening it to `content` is what
+   * pushed every image into a gallery below the text. Already sanitized at parse
+   * time (`sanitizeHtml.ts`), so a renderer may hand it to `v-html` directly.
+   */
+  contentHtml?: string;
   mediaList: MediaItem[];
   originalUrl: string;
   publishedAt: number; // 秒级或毫秒级时间戳

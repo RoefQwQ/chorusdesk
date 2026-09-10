@@ -9,7 +9,7 @@
       <guid isPermaLink="false">https://daily.juya.uk/2026/09/10</guid>
       <pubDate>Thu, 10 Sep 2026 01:36:41 GMT</pubDate>
       <description>AI 早报 2026 09 10 视频版 ：哔哩哔哩 ｜ YouTube 概览 要闻 DeepSeek 计划9月10日前后正式发布 V4.1 Flash ↗ 1 Tibo 称或暂停新的 ChatGPT Pro 订阅 ↗ 2 OpenAI 修复 Codex 用量额度意外重置异常 ↗ 3 OpenAI 更新 ChatGPT Voice 功能并调整用量规则 ↗ 4 OpenAI 为 ChatGPT 推出 Library 分享功能 ↗ 5 模型发布 Suno 发布新一代音乐模型 v6，v6 mini 向所有用户开放 ↗ 6 腾讯混元开源语音生成与编辑基础模型 AuK ↗ 7 欧洲端侧AI实验室Desert Ant Labs成立，18个小模型同步发布 ↗ 8 开发生态 GLM 5.3 Flash 在 OpenCode…</description>
-      <content:encoded>&lt;div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Hiragino Sans GB,sans-serif;font-size:16px;line-height:1.75;color:#18181b;max-width:760px;"&gt;&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/20260910/202609100909171130398ca1_cover_650d.png" alt=""&gt;&lt;/p&gt;
+      <content:encoded>&lt;div&gt;&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/20260910/202609100909171130398ca1_cover_650d.png" alt=""&gt;&lt;/p&gt;
 &lt;h1&gt;AI 早报 2026-09-10&lt;/h1&gt;
 &lt;p&gt;&lt;strong&gt;视频版&lt;/strong&gt;：&lt;a href="https://www.bilibili.com/video/BV12iYK6mEmo" rel="noopener noreferrer"&gt;哔哩哔哩&lt;/a&gt; ｜ &lt;a href="https://www.youtube.com/watch?v=-a8ht3K7qQ0" rel="noopener noreferrer"&gt;YouTube&lt;/a&gt;&lt;/p&gt;
 &lt;h2&gt;概览&lt;/h2&gt;
@@ -39,16 +39,7 @@
 &lt;h3&gt;&lt;a href="https://x.com/thsottiaux/status/2097559315150426222" rel="noopener noreferrer"&gt;Tibo 称或暂停新的 ChatGPT Pro 订阅&lt;/a&gt; &lt;code&gt;#2&lt;/code&gt;&lt;/h3&gt;
 &lt;blockquote&gt;Codex负责人Tibo表示，Astra需求前所未有，团队正全力支撑，优先保障现有用户体验。若需求持续，可能暂停新的 ChatGPT Pro 档位订阅。但目前该暂停尚未发生，也有用户称 Tibo 是在推销 ChatGPT 订阅。&lt;/blockquote&gt;
 &lt;p&gt;Codex 负责人 Tibo 在 X 上发帖称，Astra 的需求&amp;quot;前所未有&amp;quot;，团队正动用一切可能的手段来支撑该需求，但他此前经历过的陡峭增长中也没见过这种情况。他表示，优先级始终是为现有用户保持优质服务，但如果需求持续，可能不得不暂时暂停新的 Pro 订阅一段时间。Tibo 的表述是条件式的&amp;quot;可能&amp;quot;，该暂停目前尚未发生。回帖则集中讨论用量消耗过快、Astra 在低档位表现变差，以及 resets 是否受影响。&lt;/p&gt;
-&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/afd1a105-b8a2-46c0-a8c8-a1130b79c45f/m001_eb36e6f7.png" alt=""&gt;&lt;/p&gt;
-&lt;p&gt;相关链接：&lt;/p&gt;
-&lt;ul&gt;&lt;li&gt;&lt;a href="https://x.com/thsottiaux/status/2097559315150426222" rel="noopener noreferrer"&gt;https://x.com/thsottiaux/status/2097559315150426222&lt;/a&gt;&lt;/li&gt;&lt;/ul&gt;
-&lt;hr&gt;
-&lt;h3&gt;&lt;a href="https://x.com/thsottiaux/status/2097752790177370535" rel="noopener noreferrer"&gt;OpenAI 修复 Codex 用量额度意外重置异常&lt;/a&gt; &lt;code&gt;#3&lt;/code&gt;&lt;/h3&gt;
-&lt;blockquote&gt;OpenAI 状态页显示，部分 Codex 用户遭遇意外的用量额度重置，受影响服务目前已全部恢复。Tibo 表示，受影响时间窗口内使用过额度重置的用户将获得补发和致歉邮件。&lt;/blockquote&gt;
-&lt;p&gt;OpenAI 在状态页记录并处理了一起用量额度事故：部分 Codex 用户遭遇意外的用量额度重置，OpenAI 随后定位问题并应用缓解措施，最终确认所有受影响服务已完全恢复。Tibo 随后说明，当天早些时候部分已累积的额度重置在 ChatGPT Work 和 Codex 中使用时未能完全生效，在受影响时间窗口内使用过额度重置的每位用户都将获得一次补发，并收到致歉邮件。&lt;/p&gt;
-&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/1dacadbd-e07b-4c75-adfd-9d750cb4a8d5/m001_5204eef3.png" alt=""&gt;&lt;/p&gt;
-&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/1dacadbd-e07b-4c75-adfd-9d750cb4a8d5/m002_2744a997.png" alt=""&gt;&lt;/p&gt;
-&lt;p&gt;&lt;p&gt;SENTINEL_ARTICLE_TAIL：这一句只存在于全文，摘要里没有。&lt;/p&gt;</content:encoded>
+&lt;p&gt;&lt;img src="https://assets.juya.uk/imagehub/aidaily/650d8301-0a63-4ec2-af6e-2a0c18a87196/afd1a105-b8a2-46c0-a8c8-a1130b79c45f/m001_eb36e6f7.png" alt=""&gt;&lt;/p&gt;&lt;script&gt;alert("xss-probe")&lt;/script&gt;&lt;p onclick="alert(1)"&gt;点击 &lt;a href="javascript:alert(2)"&gt;这里&lt;/a&gt;&lt;/p&gt;&lt;img src="x" onerror="alert(3)"&gt;&lt;img src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="&gt;&lt;p&gt;SENTINEL_ARTICLE_TAIL：这一句只存在于全文，摘要里没有。&lt;/p&gt;</content:encoded>
     </item>
   </channel>
 </rss>

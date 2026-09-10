@@ -208,6 +208,64 @@ describe('PostReaderModal renders', () => {
     expect(html).toContain('露露卡');
     expect(html).not.toContain('<h2');
   });
+
+  it('renders a structured article as markup, not as escaped text', async () => {
+    // The user's complaint: the article arrived as one undifferentiated block of
+    // text with no typography, because the body was flattened before storage.
+    const structured: Post = {
+      ...longPost,
+      content: '要闻 正文内容',
+      contentHtml: '<h2>要闻</h2><p>正文内容</p><ul><li>第一项</li></ul>',
+    };
+    const html = await render(PostReaderModal, {
+      post: structured,
+      creators: [creator],
+      channels: [],
+    });
+
+    expect(html).toContain('article-body');
+    expect(html).toContain('<h2>要闻</h2>');
+    expect(html).toContain('<li>第一项</li>');
+    // Escaped markup would mean the article was rendered as literal text.
+    expect(html).not.toContain('&lt;h2&gt;');
+  });
+
+  it('does not repeat an inline image in a gallery below the article', async () => {
+    const image = {
+      type: 'image' as const,
+      previewUrl: 'https://assets.example/cover.png',
+      originalUrl: 'https://assets.example/cover.png',
+    };
+    const structured: Post = {
+      ...longPost,
+      contentHtml: '<p><img src="https://assets.example/cover.png"></p>',
+      mediaList: [image],
+    };
+    const html = await render(PostReaderModal, {
+      post: structured,
+      creators: [creator],
+      channels: [],
+    });
+
+    // Rendered once, inline; not a second time as a standalone figure.
+    expect(html.match(/assets\.example\/cover\.png/g) ?? []).toHaveLength(1);
+  });
+
+  it('still lists an enclosure that has no inline form', async () => {
+    const audio = {
+      type: 'audio' as const,
+      previewUrl: 'https://assets.example/ep.mp3',
+      originalUrl: 'https://assets.example/ep.mp3',
+    };
+    const structured: Post = { ...longPost, contentHtml: '<p>shownotes</p>', mediaList: [audio] };
+    const html = await render(PostReaderModal, {
+      post: structured,
+      creators: [creator],
+      channels: [],
+    });
+
+    expect(html).toContain('assets.example/ep.mp3');
+  });
 });
 
 describe('PostCard reader entry', () => {

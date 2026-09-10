@@ -53,7 +53,12 @@ function friendlyError(err: FetchError): string {
  * The assumption, not the data, was wrong.
  */
 export function isRssBodySuperseded(stored: Post, fresh: Post): boolean {
-  return fresh.content.length > stored.content.length;
+  if (fresh.content.length > stored.content.length) return true;
+  // The article HTML arrived after the plain-text fix, so rows repaired by that
+  // rule hold the complete text but no structure — the reader would keep
+  // flattening them. Rewriting whenever the fresh row has HTML and the stored one
+  // does not also converges: after one repair both sides have it.
+  return Boolean(fresh.contentHtml) && !stored.contentHtml;
 }
 
 /**

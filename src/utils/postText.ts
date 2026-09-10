@@ -1,3 +1,5 @@
+import type { MediaItem } from '../types';
+
 /**
  * Card text presentation.
  *
@@ -45,4 +47,25 @@ export function shouldShowTitle(post: { title?: string; content?: string }): boo
  */
 export function showsFullBody(platform: string): boolean {
   return platform === 'rss';
+}
+
+/**
+ * Media that needs a standalone block, given the post's body representation.
+ *
+ * When the body is a structured article (`contentHtml`), its images are rendered
+ * inline where the author put them, so listing them again below is duplication —
+ * measured on a real newsletter feed, one article carried 23 images and the card
+ * showed them as a "+17" gallery under the text. Non-image enclosures (podcast
+ * audio, video) have no inline representation and are always kept.
+ *
+ * Without structure this returns the list unchanged, which is what a photo post
+ * (Xiaohongshu, Pixiv, Weibo nine-grid) needs: there the images *are* the post.
+ */
+export function standaloneMedia(post: {
+  contentHtml?: string;
+  mediaList?: MediaItem[];
+}): MediaItem[] {
+  const list = post.mediaList || [];
+  if (!post.contentHtml) return list;
+  return list.filter((item) => item.type !== 'image');
 }

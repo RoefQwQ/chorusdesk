@@ -60,15 +60,24 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
         sendResponse({ ok: false, error: parseable ? 'Image host is not allowed' : 'Invalid URL' });
         return;
       }
-      if (!isPlatformHost(target.hostname)) {
-        sendResponse({ ok: false, error: 'Image host is not allowed' });
-        return;
-      }
-
-      const isXhs = XHS_MEDIA_HOSTS.some((domain) => hostMatches(target.hostname, domain));
+      // Any http(s) host may be fetched, but only a platform host may carry the
+      // user's session. The rule is the one in AGENTS.md rule 3, unchanged by
+      // this: membership in the allowlist buys *credentials*, never reachability.
+      //
+      // This handler used to refuse every non-platform host outright, which made
+      // every RSS article image unreadable — a feed may host its images anywhere
+      // (measured: `assets.juya.uk`, 23 images in one article), and the proxy is
+      // the only path that can load a hotlink-protected or CORS-less CDN. The
+      // request is still bounded by `parseFetchableUrl` (http(s) only, no
+      // embedded credentials) and by the sender guard on the message itself.
+      const onPlatform = isPlatformHost(target.hostname);
+      const isXhs =
+        onPlatform && XHS_MEDIA_HOSTS.some((domain) => hostMatches(target.hostname, domain));
       // Referer per platform, matched on the parsed hostname — the previous
       // `url.includes('weibo.com')` test would have matched a query parameter.
-      const referer = resolveMediaReferer(target.hostname);
+      // A host we know nothing about gets none: sending another platform's
+      // Referer is worse than sending nothing.
+      const referer = onPlatform ? resolveMediaReferer(target.hostname) : undefined;
 
       // Generate candidate URLs to try if first one returns 403/404
       const normalized = toSecureMediaUrl(url);

@@ -19,6 +19,137 @@
   color: #f8fafc;
 }
 
+/**
+ * Reading typography for a structured article body (RSS).
+ *
+ * A feed's markup arrives with its own inline styles stripped, so the tags carry
+ * no presentation at all: without these rules a `<h2>` and a `<p>` render at the
+ * same size and the article reads as one undifferentiated block — which was the
+ * user's complaint about the RSS reader. Styling the tags (rather than requiring
+ * the sanitizer to emit classes) means the sanitizer can stay strictly an
+ * allowlist: it never has to decide that one feed-supplied class is safe.
+ */
+.article-body {
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.article-body > *:first-child { margin-top: 0; }
+.article-body > *:last-child { margin-bottom: 0; }
+
+.article-body p { margin: 0.85em 0; }
+
+.article-body h1,
+.article-body h2,
+.article-body h3,
+.article-body h4,
+.article-body h5,
+.article-body h6 {
+  margin: 1.5em 0 0.6em;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--color-slate-900);
+}
+
+.dark .article-body h1,
+.dark .article-body h2,
+.dark .article-body h3,
+.dark .article-body h4,
+.dark .article-body h5,
+.dark .article-body h6 {
+  color: var(--color-white);
+}
+
+.article-body h1 { font-size: 1.35em; }
+.article-body h2 { font-size: 1.2em; }
+.article-body h3 { font-size: 1.08em; }
+.article-body h4,
+.article-body h5,
+.article-body h6 { font-size: 1em; }
+
+.article-body ul,
+.article-body ol {
+  margin: 0.85em 0;
+  padding-left: 1.5em;
+}
+.article-body ul { list-style: disc; }
+.article-body ol { list-style: decimal; }
+.article-body li { margin: 0.3em 0; }
+
+.article-body a {
+  color: var(--color-indigo-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dark .article-body a { color: var(--color-indigo-400); }
+
+.article-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.1em auto;
+  border-radius: 0.75rem;
+}
+
+.article-body blockquote {
+  margin: 1em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--color-slate-300);
+  color: var(--color-slate-600);
+}
+.dark .article-body blockquote {
+  border-left-color: var(--color-slate-600);
+  color: var(--color-slate-300);
+}
+
+.article-body hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--color-slate-200);
+}
+.dark .article-body hr { border-top-color: var(--color-slate-700); }
+
+.article-body code {
+  padding: 0.15em 0.35em;
+  border-radius: 0.35rem;
+  font-size: 0.9em;
+  background-color: var(--color-slate-100);
+}
+.dark .article-body code { background-color: var(--color-slate-800); }
+
+.article-body pre {
+  margin: 1em 0;
+  padding: 0.85em 1em;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  background-color: var(--color-slate-100);
+}
+.dark .article-body pre { background-color: var(--color-slate-800); }
+.article-body pre code { padding: 0; background-color: transparent; }
+
+.article-body table {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.article-body th,
+.article-body td {
+  padding: 0.45em 0.6em;
+  border: 1px solid var(--color-slate-200);
+  text-align: left;
+}
+.dark .article-body th,
+.dark .article-body td { border-color: var(--color-slate-700); }
+
+.article-body figure { margin: 1.1em 0; }
+.article-body figcaption {
+  margin-top: 0.5em;
+  font-size: 0.85em;
+  text-align: center;
+  color: var(--color-slate-500);
+}
+
 /* Custom scrollbars for clean UI */
 ::-webkit-scrollbar {
   width: 6px;

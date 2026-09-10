@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldShowTitle, showsFullBody, titleRepeatsContent } from '../src/utils/postText';
+import { shouldShowTitle, showsFullBody, standaloneMedia, titleRepeatsContent } from '../src/utils/postText';
 
 /**
  * Card text presentation.
@@ -73,5 +73,28 @@ describe('showsFullBody', () => {
     for (const platform of ['twitter', 'bilibili', 'douyin', 'weibo', 'xiaohongshu', 'youtube', 'pixiv']) {
       expect(showsFullBody(platform)).toBe(false);
     }
+  });
+});
+
+describe('standaloneMedia', () => {
+  const image = { type: 'image' as const, previewUrl: 'https://cdn.example/a.png', originalUrl: 'https://cdn.example/a.png' };
+  const audio = { type: 'audio' as const, previewUrl: 'https://cdn.example/a.mp3', originalUrl: 'https://cdn.example/a.mp3' };
+
+  it('keeps a photo post\'s gallery, where the images are the post', () => {
+    expect(standaloneMedia({ mediaList: [image, image] })).toHaveLength(2);
+  });
+
+  it('drops images already rendered inline by a structured article', () => {
+    // Measured: a newsletter article carried 23 images, and the card showed them
+    // again as a "+17" gallery under text that already displayed them.
+    expect(standaloneMedia({ contentHtml: '<p><img src="x"></p>', mediaList: [image, image] })).toEqual([]);
+  });
+
+  it('keeps a non-image enclosure, which has no inline form', () => {
+    expect(standaloneMedia({ contentHtml: '<p>text</p>', mediaList: [image, audio] })).toEqual([audio]);
+  });
+
+  it('handles a post with no media at all', () => {
+    expect(standaloneMedia({})).toEqual([]);
   });
 });

@@ -12,6 +12,11 @@ export function buildPost(
     id: string;
     title: string;
     content: string;
+    /**
+     * Sanitized article HTML. Optional: most platforms have a caption, not an
+     * article, and only RSS currently supplies structure.
+     */
+    contentHtml?: string;
     mediaList: MediaItem[];
     originalUrl: string;
     publishedAt: number;
@@ -28,6 +33,7 @@ export function buildPost(
     ...(fields.channelLabel !== undefined ? { channelLabel: fields.channelLabel } : {}),
     title: fields.title,
     content: fields.content,
+    ...(fields.contentHtml ? { contentHtml: fields.contentHtml } : {}),
     mediaList: fields.mediaList,
     originalUrl: fields.originalUrl,
     publishedAt: fields.publishedAt,

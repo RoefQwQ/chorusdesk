@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -27,10 +27,6 @@ const SUMMARY_TAIL = 'GLM 5.3 Flash 在 OpenCode…';
 /** The feed's own `<description>` length, measured on the real payload. */
 const SUMMARY_LEN = 359;
 
-vi.mock('../src/utils/http', () => ({
-  bgFetch: async () => ({ ok: true, status: 200, data: FEED }),
-}));
-
 const channel = {
   id: 'rss:juya',
   platform: 'rss' as const,
@@ -42,7 +38,19 @@ const channel = {
   url: 'https://daily.juya.uk/rss.xml',
 };
 
-async function fetchFirst() {
+/**
+ * Parse the first item of `feed`, freshly.
+ *
+ * Each call installs its own mock and resets the module registry first: sharing
+ * one module-level mock across tests made the order significant — a test that
+ * mocked a different feed left every later test reading that feed, which is how
+ * the structure assertions silently saw a summary-only payload.
+ */
+async function fetchFirst(feed: string = FEED) {
+  vi.resetModules();
+  vi.doMock('../src/utils/http', () => ({
+    bgFetch: async () => ({ ok: true, status: 200, data: feed }),
+  }));
   const { rssAdapter } = await import('../src/adapters/rss');
   const res = await rssAdapter.fetchLatest(channel as never, 10);
   if (res.error) throw new Error(`fetch failed: ${JSON.stringify(res.error)}`);
@@ -86,14 +94,70 @@ describe('rssAdapter body extraction', () => {
     // Most third-party feeds have no <content:encoded>. The fallback must survive
     // the change, or fixing this one feed breaks every other subscription.
     const summaryOnly = FEED.replace(/<content:encoded>[\s\S]*?<\/content:encoded>/, '');
-    vi.doMock('../src/utils/http', () => ({
-      bgFetch: async () => ({ ok: true, status: 200, data: summaryOnly }),
-    }));
-
-    vi.resetModules();
-    const post = await fetchFirst();
+    const post = await fetchFirst(summaryOnly);
 
     expect(post.content).toContain('AI 早报');
     expect(post.content.length).toBeGreaterThan(50);
   });
+});
+
+describe('rssAdapter article structure', () => {
+  it('keeps the article markup so the reader can lay it out', async () => {
+    // Flattening the body to text is what put every image in a gallery under the
+    // article and left the whole thing as one undifferentiated block.
+    const post = await fetchFirst();
+    const html = post.contentHtml || '';
+
+    expect(html).not.toBe('');
+    // Real structure from the real payload: headings, paragraphs, lists.
+    expect(html).toMatch(/<h[1-6][\s>]/i);
+    expect(html).toMatch(/<p[\s>]/i);
+    expect(html).toMatch(/<li[\s>]/i);
+  });
+
+  it('leaves the article images inline rather than only in the gallery', async () => {
+    const post = await fetchFirst();
+    const html = post.contentHtml || '';
+
+    expect((html.match(/<img[\s>]/gi) || []).length).toBeGreaterThan(1);
+  });
+
+  it('stores only sanitized markup', async () => {
+    // The reader hands this to `v-html`, so nothing executable may survive.
+    // The fixture deliberately carries a <script>, an onerror handler, a
+    // javascript: link and a data:text/html image: without them this test passed
+    // even with the sanitizer call removed from the adapter, because the raw
+    // article happened to be clean.
+    const post = await fetchFirst();
+    const html = post.contentHtml || '';
+
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('xss-probe');
+    expect(html).not.toContain('onerror');
+    expect(html).not.toContain('onclick');
+    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('data:text/html');
+
+    // …while the legitimate content around it survives.
+    expect(html).toContain('SENTINEL_ARTICLE_TAIL');
+    expect((html.match(/<img[\s>]/gi) || []).length).toBeGreaterThan(1);
+  });
+
+  it('leaves contentHtml unset for a plain-text body', async () => {
+    // No structure to preserve, and rendering it as HTML would collapse the
+    // feed's own line breaks.
+    const plain = FEED.replace(
+      /<content:encoded>[\s\S]*?<\/content:encoded>/,
+      '<content:encoded>第一行&#10;第二行</content:encoded>',
+    );
+    const post = await fetchFirst(plain);
+
+    expect(post.contentHtml).toBeUndefined();
+    expect(post.content).toContain('第一行');
+  });
+});
+
+afterEach(() => {
+  vi.doUnmock('../src/utils/http');
+  vi.resetModules();
 });

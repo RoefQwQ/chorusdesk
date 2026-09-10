@@ -3,6 +3,7 @@ import type { PlatformAdapter, FetchResult } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
+import { hasArticleMarkup, sanitizeArticleHtml } from '../utils/sanitizeHtml';
 
 /**
  * Storage ceiling for one RSS body.
@@ -13,6 +14,16 @@ import { bgFetch } from '../utils/http';
  * A cap that truncates would defeat the point of storing the article at all.
  */
 export const RSS_MAX_CONTENT_CHARS = 20000;
+
+/**
+ * Storage ceiling for one article's *HTML*.
+ *
+ * Sized from the same measurement as the plain-text ceiling: the markup of a
+ * full newsletter article ran 31144 characters for 12798 characters of text
+ * (≈2.4×), so the largest measured article needs ≈36k. This leaves room for
+ * heavier markup while still bounding a hostile feed.
+ */
+export const RSS_MAX_HTML_CHARS = 60000;
 
 /**
  * Normalize a feed item's body for storage.
@@ -129,6 +140,20 @@ export const rssAdapter: PlatformAdapter = {
         tempDiv.innerHTML = rawBody;
         const cleanText = (tempDiv.textContent || tempDiv.innerText || '').trim();
 
+        // The same parse also carries the article's *structure*, which is what
+        // makes an RSS post readable in place: headings, paragraphs and the
+        // images sitting where the author put them. Storing only the flattened
+        // text is why every image ended up in a gallery under the article.
+        //
+        // `tempDiv` is left untouched — the media scan below reads its `<img>`
+        // tags — and only sanitized output is stored, so nothing downstream has
+        // to remember that a feed's markup is untrusted.
+        const sanitizedHtml = sanitizeArticleHtml(tempDiv, link, RSS_MAX_HTML_CHARS);
+        // Kept only when it really carries structure: a plain-text body has no
+        // tags to preserve, and HTML-rendering it would lose the feed's own line
+        // breaks (the reader's `whitespace-pre-wrap` path keeps them).
+        const contentHtml = hasArticleMarkup(sanitizedHtml) ? sanitizedHtml : '';
+
         // Media enclosures
         const mediaList: MediaItem[] = [];
         const enclosure = item.querySelector('enclosure');
@@ -173,6 +198,7 @@ export const rssAdapter: PlatformAdapter = {
           // for the cap): the old 350-character teaser cut articles off
           // mid-sentence, and the click-to-read view is gone.
           content: normalizeRssContent(cleanText),
+          contentHtml: contentHtml || undefined,
           mediaList,
           originalUrl: link,
           publishedAt,
