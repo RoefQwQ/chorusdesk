@@ -555,6 +555,45 @@ probe has answered its question, stop shipping it as an alarm.
 
 ---
 
+## 24. Removing a guard needs a test on the guard, not on what it produced
+
+I deleted Douyin's readiness probe and shipped it. The user caught it; the suite did not.
+
+The reasoning looked sound at the time. The logs showed：
+
+```
+[DEBUG] 网格探针未完成，重试 1/2 | 注入未返回结果
+[INFO]  douyin/uimi 同步完成 | 平台原始 10 条
+```
+
+— a probe that failed every attempt on a channel that then succeeded, so the probe looked
+redundant, and "an async injection awaits, and the await is the window a navigation kills the
+frame" made it look actively harmful. Two things were wrong with that:
+
+- **The deep collector is async too, and works.** The general claim was refuted by a sibling
+  function I could have checked in ten seconds. A theory that predicts a function's failure has
+  to be tested against that function's successes.
+- **The probe's value was its budget, and I replaced the budget, not the probe.** The wait was
+  ~10s (a 10s probe deadline after an 800ms settle); the replacement was three attempts 700ms
+  apart, ~1.4s. That is an 87% cut to the one thing the probe existed to provide — and it
+  restores the original defect (a cold page whose grid has not rendered), which is what the
+  probe was added to fix months earlier.
+
+**412 tests stayed green.** They covered retry counts, error classification, tab lifecycle and
+the ordering of wait-then-scrape — everything except the number that matters. A test that
+"the probe is called before the scrape" passes just as happily when the probe waits 700ms.
+
+Hence the rule: **when a guard's purpose is a magnitude (a timeout, a budget, a retry window),
+assert the magnitude.** Presence and ordering are not the property; the quantity is. And when
+the evidence for removing a guard is "it logged failures but the thing worked anyway", the
+guard is doing its job loudly — check what it is *buying* before deleting it.
+
+Corollary, learned the same hour: **a DEBUG line about a recoverable condition is not a bug
+report.** The probe retrying and then succeeding is the system working. Treating that as a
+defect to remove led to removing the guard itself.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -572,4 +611,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 412 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 415 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
