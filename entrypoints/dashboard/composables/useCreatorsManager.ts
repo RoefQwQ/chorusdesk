@@ -289,7 +289,12 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
     await channelService.upsert(demoChannel3);
 
     await reloadData();
-    alert('演示博主与渠道已导入！已呈现【同平台多账号归集】与【跨平台聚合】。');
+  }
+
+  /** Persist a manual creator order (drag & drop in "手动排序" mode). */
+  async function reorderCreators(orderedIds: string[]) {
+    await creatorService.updateSortOrder(orderedIds);
+    await reloadData();
   }
 
   return {
@@ -311,6 +316,7 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
     deleteCreatorsBatch,
     deleteChannel,
     cycleChannelRole,
+    reorderCreators,
     loadDemoData,
   };
 }

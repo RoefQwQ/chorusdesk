@@ -156,6 +156,41 @@ export const imageCacheService = {
   },
 
   /**
+   * Check whether every media item of a post is already on disk.
+   * Batch-archive uses this to skip fully-cached posts without any download.
+   */
+  async isPostFullyCached(post: Post): Promise<boolean> {
+    if (!post.mediaList || post.mediaList.length === 0) return false;
+    const root = await getSavedRootDirectoryHandle();
+    if (!root) return false;
+
+    const dirSegments = resolvePostDirSegments({
+      platform: post.platform,
+      postId: post.id,
+      publishedAt: post.publishedAt,
+    });
+    const postDir = await getExistingNestedDirectory(root, dirSegments);
+    if (!postDir) return false;
+
+    for (let i = 0; i < post.mediaList.length; i++) {
+      const media = post.mediaList[i];
+      if (media.type !== 'image' && !media.previewUrl) continue;
+      // Probe by every known extension: the file was written with the
+      // extension resolved from the download's mime type at save time.
+      let found = false;
+      for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif']) {
+        const blob = await readFileAsBlob(postDir, `${i}.${ext}`).catch(() => null);
+        if (blob && blob.size > 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) return false;
+    }
+    return true;
+  },
+
+  /**
    * Cache a single media item for a post to the local disk.
    */
   async cacheMediaItem(params: {

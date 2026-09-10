@@ -180,6 +180,7 @@ const {
   deleteCreatorsBatch,
   deleteChannel,
   cycleChannelRole,
+  reorderCreators,
   loadDemoData,
 } = creatorsManager;
 
@@ -234,7 +235,7 @@ function toggleExpandCreator(creatorId: string) {
 }
 
 // Platform login detector status
-const { platformLoginStatus, checkPlatformLogins } = usePlatformLogins();
+const { platformLoginStatus, isCheckingLogins, checkPlatformLogins } = usePlatformLogins();
 
 async function reloadData() {
   await reloadFeedData();
@@ -296,6 +297,13 @@ async function updateDashboardSettings(patch: Partial<AppSettings>) {
   settings.value = await persistSettings(patch);
 }
 
+// Sidebar platform list custom order (persisted via AppSettings.platformOrder).
+const platformOrder = computed<string[]>(() => settings.value.platformOrder || []);
+
+async function handlePlatformOrderChange(order: string[]) {
+  settings.value = await persistSettings({ platformOrder: order });
+}
+
 // ==================== CREATORS DIRECTORY DERIVED DATA (view context) ====================
 // Post count map per creator
 const creatorPostCountMap = computed(() => {
@@ -326,6 +334,7 @@ const feedContext = computed(() => ({
   searchQuery: searchQuery.value,
   selectedPlatform: selectedPlatform.value,
   PLATFORM_REGISTRY,
+  platformOrder: platformOrder.value,
   platformPostCounts: platformPostCounts.value,
   repostsCount: repostsCount.value,
   textOnlyCount: textOnlyCount.value,
@@ -368,6 +377,7 @@ const creatorsContext = computed(() => ({
   channels: channels.value,
   creatorPostCountMap: creatorPostCountMap.value,
   creatorCountByPlatform: creatorCountByPlatform.value,
+  platformOrder: platformOrder.value,
   syncingCreatorIds: syncActions.syncingCreatorIds.value,
   syncingChannelIds: syncActions.syncingChannelIds.value,
 }));
@@ -391,6 +401,7 @@ const settingsContext = computed(() => ({
   creators: creators.value,
   dbStats: dbStats.value,
   platformLoginStatus: platformLoginStatus.value,
+  isCheckingLogins: isCheckingLogins.value,
   deletedPostCount: deletedPostCount.value,
   deletedPostsList: deletedPostsList.value,
   filteredDeletedPostsList: filteredDeletedPostsList.value,
@@ -597,6 +608,7 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
         :context="feedContext"
         @update:searchQuery="searchQuery = $event"
         @update:selectedPlatform="selectedPlatform = $event"
+        @reorder-platforms="handlePlatformOrderChange"
         @update:lightboxMedia="lightboxMedia = $event"
       />
 
@@ -612,6 +624,7 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
         @delete-creator="deleteCreator"
         @delete-channel="deleteChannel"
         @cycle-channel-role="cycleChannelRole"
+        @reorder-creators="reorderCreators"
         @batch-refresh="onCreatorsBatchRefresh"
         @batch-delete="onCreatorsBatchDelete"
         @demo-data="loadDemoData"

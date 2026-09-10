@@ -8,14 +8,23 @@ import { checkPlatformCookieLogins } from '../../../src/infrastructure/chrome/pl
  */
 export function usePlatformLogins() {
   const platformLoginStatus = ref<Record<string, boolean>>({});
+  /** 探测进行中标志：驱动检测按钮的 loading/禁用态。 */
+  const isCheckingLogins = ref(false);
 
-  /** 刷新所有平台登录状态。 */
+  /** 刷新所有平台登录状态。并发/重复点击由 isCheckingLogins 挡住。 */
   async function checkPlatformLogins() {
-    platformLoginStatus.value = await checkPlatformCookieLogins();
+    if (isCheckingLogins.value) return;
+    isCheckingLogins.value = true;
+    try {
+      platformLoginStatus.value = await checkPlatformCookieLogins();
+    } finally {
+      isCheckingLogins.value = false;
+    }
   }
 
   return {
     platformLoginStatus,
+    isCheckingLogins,
     checkPlatformLogins,
   };
 }

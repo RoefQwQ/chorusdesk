@@ -59,3 +59,17 @@ export async function removeGlobalTag(tagToRemove: string): Promise<number> {
   }
   return updated;
 }
+
+/**
+ * Persist a manual creator order: writes `sortOrder` (array index) to each
+ * creator in one transaction. Unlisted creators keep their existing value.
+ */
+export async function updateCreatorsSortOrder(orderedIds: string[]): Promise<void> {
+  await db.transaction('rw', db.creators, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      // sortOrder is display-only: bumping updatedAt would reshuffle the
+      // "recently active" sort as a side effect of reordering.
+      await db.creators.update(orderedIds[i], { sortOrder: i });
+    }
+  });
+}

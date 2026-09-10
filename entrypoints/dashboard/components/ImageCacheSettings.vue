@@ -18,7 +18,10 @@ const isReady = ref(false);
 const boundDirName = ref<string>('');
 const isBinding = ref(false);
 const isBatchCaching = ref(false);
-const batchProgress = ref({ current: 0, total: 0, success: 0 });
+const batchProgress = ref({ current: 0, total: 0, success: 0, skipped: 0, failed: 0 });
+/** 归档并发数：File System Access 写盘很快，瓶颈在网络；3 路并发是
+ * 保守值，避免触发平台防盗链/风控（与同步层 minPlatformIntervalMs 同思路）。 */
+const BATCH_CONCURRENCY = 3;
 
 async function checkStatus() {
   const status = await imageCacheService.isReady();
@@ -82,26 +85,63 @@ async function handleBatchCacheExisting() {
   }
 
   isBatchCaching.value = true;
-  batchProgress.value = { current: 0, total: targetPosts.length, success: 0 };
+  batchProgress.value = { current: 0, total: targetPosts.length, success: 0, skipped: 0, failed: 0 };
 
   const creatorMap = new Map<string, string>();
   props.creators.forEach(c => creatorMap.set(c.id, c.name));
 
-  try {
-    for (let i = 0; i < targetPosts.length; i++) {
-      const post = targetPosts[i];
-      batchProgress.value.current = i + 1;
-      const creatorName = creatorMap.get(post.creatorId) || '默认创作者';
-      const count = await imageCacheService.cachePost(post, creatorName);
-      batchProgress.value.success += count;
+  // Incremental: probe disk first; fully-cached posts cost zero network.
+  const pending: typeof targetPosts = [];
+  for (const post of targetPosts) {
+    const cached = await imageCacheService.isPostFullyCached(post).catch(() => false);
+    if (cached) {
+      batchProgress.value.skipped++;
+      batchProgress.value.current++;
+    } else {
+      pending.push(post);
     }
-    alert(`【离线归档完成】共扫描 ${targetPosts.length} 条图文动态，成功下载并归档 ${batchProgress.value.success} 张图片到 "${boundDirName.value}" 文件夹！`);
+  }
+
+  let cursor = 0;
+  const failures: string[] = [];
+  const runOne = async (post: (typeof targetPosts)[number]) => {
+    const creatorName = creatorMap.get(post.creatorId) || '默认创作者';
+    const count = await imageCacheService.cachePost(post, creatorName).catch(() => 0);
+    if (count > 0) {
+      batchProgress.value.success += count;
+    } else {
+      batchProgress.value.failed++;
+      failures.push(post.id);
+    }
+    batchProgress.value.current++;
+  };
+
+  try {
+    // Small worker pool: keeps the loop resilient (one failure never aborts
+    // the archive) while bounding concurrent network requests.
+    const workers = Array.from({ length: Math.min(BATCH_CONCURRENCY, pending.length) }, async () => {
+      while (cursor < pending.length) {
+        await runOne(pending[cursor++]);
+      }
+    });
+    await Promise.all(workers);
+
+    const summary = [
+      `共扫描 ${targetPosts.length} 条图文动态`,
+      `新归档 ${batchProgress.value.success} 张`,
+      `已缓存跳过 ${batchProgress.value.skipped} 条`,
+    ];
+    if (batchProgress.value.failed > 0) {
+      summary.push(`${batchProgress.value.failed} 条下载失败（可稍后重试）`);
+    }
+    alert(`【离线归档完成】${summary.join('，')}。归档目录: "${boundDirName.value}"`);
   } catch (err: unknown) {
     alert('批量缓存异常: ' + (err instanceof Error ? err.message : String(err)));
   } finally {
     isBatchCaching.value = false;
   }
 }
+
 </script>
 
 <template>
@@ -180,7 +220,10 @@ async function handleBatchCacheExisting() {
           class="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isBatchCaching }" />
-          <span>{{ isBatchCaching ? `正在归档 ${batchProgress.current}/${batchProgress.total}...` : '一键离线当前全部图片' }}</span>
+          <span v-if="isBatchCaching" class="text-[10px] text-slate-400 font-mono">
+            （新 {{ batchProgress.success }} · 跳过 {{ batchProgress.skipped }}<template v-if="batchProgress.failed"> · 失败 {{ batchProgress.failed }}</template>）
+          </span>
+          <span>{{ isBatchCaching ? `正在归档 ${batchProgress.current}/${batchProgress.total}...` : '一键离线当前全部图片（增量）' }}</span>
         </button>
       </div>
     </div>

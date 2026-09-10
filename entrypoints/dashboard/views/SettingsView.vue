@@ -30,8 +30,8 @@ export interface SettingsViewContext {
   creators: Creator[];
   dbStats: DashboardStatsView;
   platformLoginStatus: Record<string, boolean>;
+  isCheckingLogins: boolean;
   deletedPostCount: number;
-  deletedPostsList: DeletedPostRecord[];
   filteredDeletedPostsList: DeletedPostRecord[];
   deletedPostsSearchQuery: string;
   isHealingMedia: boolean;
@@ -125,10 +125,11 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
           </button>
           <button
             @click="context.onCheckPlatformLogins"
-            class="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 cursor-pointer flex items-center gap-1.5 transition-colors"
+            :disabled="context.isCheckingLogins"
+            class="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5 transition-colors"
           >
-            <RefreshCw class="w-3.5 h-3.5" />
-            <span>检测登录状态</span>
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': context.isCheckingLogins }" />
+            <span>{{ context.isCheckingLogins ? '检测中...' : '检测登录状态' }}</span>
           </button>
         </div>
       </div>
@@ -175,10 +176,11 @@ function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Even
             <button
               v-if="key === 'twitter'"
               @click="context.onCheckPlatformLogins"
-              class="w-full py-1.5 px-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              :disabled="context.isCheckingLogins"
+              class="w-full py-1.5 px-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
             >
-              <RefreshCw class="w-3.5 h-3.5" />
-              <span>检测 X/Twitter 登录</span>
+              <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': context.isCheckingLogins }" />
+              <span>{{ context.isCheckingLogins ? '检测中...' : '检测 X/Twitter 登录' }}</span>
             </button>
 
             <!-- RSS specific action -->

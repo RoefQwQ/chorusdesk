@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import {
-  Search, LayoutGrid, Repeat2, Image as ImageIcon, ImageOff, Tag, Users,
+import { Search, LayoutGrid, Image as ImageIcon, ImageOff, Tag, Users,
   ChevronDown, Eye, EyeOff, RefreshCw, CheckCircle2,
 } from 'lucide-vue-next';
 import PostCard from '../components/PostCard.vue';
-import { type PlatformMeta, type Creator, type Channel, type Post } from '../../../src/types';
+import type { Creator, Channel, Post } from '../../../src/types';
 
 type LightboxMedia = { url: string; originalUrl?: string; type: string; title?: string } | null;
 
 export interface FeedContext {
   searchQuery: string;
   selectedPlatform: string;
-  PLATFORM_REGISTRY: Record<string, PlatformMeta>;
-  platformPostCounts: Record<string, number>;
+  platformOrder: string[];
+  onPlatformOrderChange: (order: string[]) => void | Promise<void>;
   repostsCount: number;
   textOnlyCount: number;
   hideReposts: boolean;
@@ -53,9 +52,49 @@ export interface FeedContext {
 const props = defineProps<{ context: FeedContext }>();
 const emit = defineEmits<{
   'update:searchQuery': [value: string];
-  'update:selectedPlatform': [value: string];
+  'reorder-platforms': [order: string[]];
   'update:lightboxMedia': [media: { url: string; originalUrl?: string; type: string; title?: string } | null];
 }>();
+
+// ===== Sidebar platform list: custom order + drag & drop =====
+/** Ordered platform keys: user order first, unlisted platforms after (registry order). */
+const orderedPlatformKeys = computed<string[]>(() => {
+  const registryKeys = Object.keys(props.context.PLATFORM_REGISTRY);
+  const userOrder = props.context.platformOrder.filter(k => registryKeys.includes(k));
+  const rest = registryKeys.filter(k => !userOrder.includes(k));
+  return [...userOrder, ...rest];
+});
+
+const dragPlatformKey = ref<string | null>(null);
+const dragOverPlatformKey = ref<string | null>(null);
+
+function onPlatformDragStart(key: string) {
+  dragPlatformKey.value = key;
+}
+
+function onPlatformDragOver(e: DragEvent, key: string) {
+  if (dragPlatformKey.value === null || dragPlatformKey.value === key) return;
+  e.preventDefault();
+  dragOverPlatformKey.value = key;
+}
+
+function onPlatformDrop(key: string) {
+  const from = dragPlatformKey.value;
+  if (from === null || from === key) {
+    dragPlatformKey.value = null;
+    dragOverPlatformKey.value = null;
+    return;
+  }
+  const next = [...orderedPlatformKeys.value];
+  const fromIdx = next.indexOf(from);
+  const toIdx = next.indexOf(key);
+  if (fromIdx !== -1 && toIdx !== -1) {
+    next.splice(toIdx, 0, next.splice(fromIdx, 1)[0]);
+    emit('reorder-platforms', next);
+  }
+  dragPlatformKey.value = null;
+  dragOverPlatformKey.value = null;
+}
 
 function handleSearchInput(event: Event) {
   emit('update:searchQuery', (event.target as HTMLInputElement).value);
@@ -204,17 +243,27 @@ onUnmounted(() => {
         </span>
       </button>
 
-      <!-- Each Platform Button -->
+      <!-- Each Platform Button (draggable: drag to customize sidebar order) -->
       <button
-        v-for="(meta, key) in context.PLATFORM_REGISTRY"
+        v-for="key in orderedPlatformKeys"
         :key="key"
+        draggable="true"
         @click="emit('update:selectedPlatform', key)"
-        :class="context.selectedPlatform === key ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 font-bold border-indigo-200 dark:border-indigo-500/40 shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 dark:hover:text-white border-transparent'"
-        class="w-full flex items-center justify-between px-3 py-2 text-xs rounded-xl border transition-all cursor-pointer"
+        @dragstart="onPlatformDragStart(key)"
+        @dragover="(e: DragEvent) => onPlatformDragOver(e, key)"
+        @dragleave="dragOverPlatformKey = null"
+        @drop="onPlatformDrop(key)"
+        @dragend="dragPlatformKey = null; dragOverPlatformKey = null"
+        :class="[
+          context.selectedPlatform === key ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 font-bold border-indigo-200 dark:border-indigo-500/40 shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 dark:hover:text-white border-transparent',
+          dragOverPlatformKey === key ? 'ring-2 ring-indigo-400 border-dashed' : '',
+        ]"
+        class="w-full flex items-center justify-between px-3 py-2 text-xs rounded-xl border transition-all cursor-grab active:cursor-grabbing"
+        :title="'点击筛选该平台 · 拖拽调整侧栏顺序'"
       >
         <div class="flex items-center gap-2 truncate">
-          <span class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ backgroundColor: meta.color }"></span>
-          <span class="truncate">{{ meta.name }}</span>
+          <span class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ backgroundColor: context.PLATFORM_REGISTRY[key].color }"></span>
+          <span class="truncate">{{ context.PLATFORM_REGISTRY[key].name }}</span>
         </div>
         <span
           v-if="context.platformPostCounts[key]"
@@ -228,31 +277,9 @@ onUnmounted(() => {
     <!-- Content Preferences & Tag Filter -->
     <div class="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
       <!-- Content Preferences Buttons -->
-      <div class="space-y-1.5">
-        <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-0.5">
-          筛选
-        </div>
-        <!-- Repost Toggle Button -->
-        <button
-          @click="context.toggleHideReposts"
-          class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
-          :class="context.hideReposts ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
-        >
-          <div class="flex items-center gap-2">
-            <Repeat2 class="w-3.5 h-3.5" :class="{ 'text-amber-600 dark:text-amber-400': context.hideReposts }" />
-            <span>{{ context.hideReposts ? '仅原创' : '含转发' }}</span>
-          </div>
-          <span
-            v-if="context.repostsCount > 0"
-            class="text-[10px] px-1.5 py-0.2 rounded-full font-mono"
-            :class="context.hideReposts ? 'bg-amber-200/80 dark:bg-amber-500/25 text-amber-800 dark:text-amber-200' : 'bg-slate-200 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400'"
-          >
-            {{ context.repostsCount }}
-          </span>
-        </button>
 
-        <!-- Text-only Post Filter Toggle Button -->
-        <button
+      <!-- Text-only Post Filter Toggle Button -->
+      <button
           @click="context.toggleHideTextOnly"
           class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
           :class="context.hideTextOnly ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
@@ -271,8 +298,6 @@ onUnmounted(() => {
             {{ context.textOnlyCount }}
           </span>
         </button>
-      </div>
-
       <!-- Tags Filter (Tri-state: Include / Exclude / Neutral) -->
       <div v-if="context.allTags.length > 0">
         <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 flex items-center justify-between">

@@ -12,8 +12,8 @@ export interface CreatorsViewContext {
   channels: Channel[];
   /** creatorId -> 作品数（卡片统计与「作品数」排序） */
   creatorPostCountMap: Record<string, number>;
-  /** platform key -> 绑定了该平台的创作者数量（平台筛选胶囊角标） */
-  creatorCountByPlatform: Record<string, number>;
+  /** 侧栏平台自定义顺序（platform 排序模式与手动排序展示用）。 */
+  platformOrder: string[];
   /** 正在执行单人同步中的创作者 ID 集合 */
   syncingCreatorIds?: Set<string>;
   /** 正在执行单账号同步中的账号 ID 集合 */
@@ -44,7 +44,7 @@ import {
   History,
   AlertCircle,
 } from 'lucide-vue-next';
-import PlatformBadge from '../components/creator/PlatformBadge.vue';
+import AppSelect from '../components/AppSelect.vue';
 import ChannelRow from '../components/creator/ChannelRow.vue';
 import CreatorCardHeader from '../components/creator/CreatorCardHeader.vue';
 
@@ -68,8 +68,41 @@ const emit = defineEmits<{
   (e: 'cycle-channel-role', channel: Channel): void;
   (e: 'batch-refresh', creatorIds: string[]): void;
   (e: 'batch-delete', creatorIds: string[]): void;
-  (e: 'demo-data'): void;
+  (e: 'reorder-creators', orderedIds: string[]): void;
 }>();
+
+// ==================== MANUAL DRAG SORT (manual sort mode only) ====================
+const dragCreatorId = ref<string | null>(null);
+const dragOverCreatorId = ref<string | null>(null);
+
+function onCreatorDragStart(id: string) {
+  if (creatorSortBy.value !== 'manual') return;
+  dragCreatorId.value = id;
+}
+
+function onCreatorDragOver(e: DragEvent, id: string) {
+  if (creatorSortBy.value !== 'manual' || dragCreatorId.value === null || dragCreatorId.value === id) return;
+  e.preventDefault();
+  dragOverCreatorId.value = id;
+}
+
+function onCreatorDrop(id: string) {
+  const from = dragCreatorId.value;
+  if (creatorSortBy.value !== 'manual' || from === null || from === id) {
+    dragCreatorId.value = null;
+    dragOverCreatorId.value = null;
+    return;
+  }
+  const next = [...filteredCreatorsList.value.map(c => c.id)];
+  const fromIdx = next.indexOf(from);
+  const toIdx = next.indexOf(id);
+  if (fromIdx !== -1 && toIdx !== -1) {
+    next.splice(toIdx, 0, next.splice(fromIdx, 1)[0]);
+    emit('reorder-creators', next);
+  }
+  dragCreatorId.value = null;
+  dragOverCreatorId.value = null;
+}
 
 // ==================== CREATORS DIRECTORY FILTER & SORT & BATCH STATE ====================
 const VIEW_MODE_STORAGE_KEY = 'creator_feed_creators_view_mode';
@@ -103,8 +136,15 @@ function toggleExpandCreator(id: string) {
 const creatorSearch = ref('');
 const creatorPlatformFilter = ref('all');
 const creatorTagFilter = ref('all');
-const creatorSortBy = ref<'updated' | 'channels' | 'posts' | 'name'>('updated');
-const isBatchMode = ref(false);
+const creatorSortOptions = [
+  { value: 'updated', label: '最近活跃' },
+  { value: 'posts', label: '作品数量' },
+  { value: 'channels', label: '账号数量' },
+  { value: 'name', label: '字母名称' },
+  { value: 'platform', label: '按平台分组' },
+  { value: 'manual', label: '手动排序' },
+] as const;
+const creatorSortBy = ref<'updated' | 'channels' | 'posts' | 'name' | 'platform' | 'manual'>('updated');
 const selectedCreatorIds = ref<Set<string>>(new Set());
 const includeTags = ref<Set<string>>(new Set());
 const excludeTags = ref<Set<string>>(new Set());
@@ -221,6 +261,27 @@ const filteredCreatorsList = computed(() => {
 
   // 4. Sorting
   list.sort((a, b) => {
+    if (creatorSortBy.value === 'platform') {
+      // Group by the creator's first platform (in user's sidebar order),
+      // newest-active within the group.
+      const rank = (c: Creator) => {
+        const platforms = (creatorChannelMap.value[c.id] || []).map(ch => ch.platform);
+        const order = context.value.platformOrder.length > 0 ? context.value.platformOrder : Object.keys(PLATFORM_REGISTRY);
+        let best = order.length;
+        for (const p of platforms) {
+          const i = order.indexOf(p);
+          if (i !== -1 && i < best) best = i;
+        }
+        return best;
+      };
+      const byRank = rank(a) - rank(b);
+      if (byRank !== 0) return byRank;
+    }
+    if (creatorSortBy.value === 'manual') {
+      const bySort = (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity);
+      if (bySort !== 0) return bySort;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    }
     if (creatorSortBy.value === 'channels') {
       const countA = (creatorChannelMap.value[a.id] || []).length;
       const countB = (creatorChannelMap.value[b.id] || []).length;
@@ -234,7 +295,7 @@ const filteredCreatorsList = computed(() => {
     if (creatorSortBy.value === 'name') {
       return (a.name || '').localeCompare(b.name || '');
     }
-    // 'updated': latest channel lastCheckAt or creator updatedAt
+    // 'updated' / 'platform' (within-group): latest channel lastCheckAt or creator updatedAt
     const timeA = Math.max(a.updatedAt || 0, ...(creatorChannelMap.value[a.id] || []).map(ch => ch.lastCheckAt || 0));
     const timeB = Math.max(b.updatedAt || 0, ...(creatorChannelMap.value[b.id] || []).map(ch => ch.lastCheckAt || 0));
     return timeB - timeA;
@@ -502,18 +563,17 @@ function loadDemoData() {
 
         <!-- Sort By Select -->
         <div class="flex items-center gap-2 shrink-0">
-          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300">
-            <ArrowUpDown class="w-3.5 h-3.5 text-slate-400" />
-            <span class="text-[11px] text-slate-400 font-medium">排序</span>
-            <select
+          <div class="flex items-center gap-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+            <span class="pl-2.5 text-[11px] text-slate-400 font-medium flex items-center gap-1">
+              <ArrowUpDown class="w-3.5 h-3.5" />
+              排序
+            </span>
+            <AppSelect
               v-model="creatorSortBy"
-              class="bg-transparent border-none text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
-            >
-              <option value="updated">最近活跃</option>
-              <option value="posts">作品数量</option>
-              <option value="channels">账号数量</option>
-              <option value="name">字母名称</option>
-            </select>
+              :options="creatorSortOptions"
+              aria-label="创作者排序方式"
+              button-class="py-1.5 pr-2 pl-0.5 text-xs bg-transparent dark:bg-transparent border-none hover:border-transparent dark:hover:border-transparent"
+            />
           </div>
 
           <!-- Tags Drawer Trigger Button if tags exist -->
@@ -677,8 +737,17 @@ function loadDemoData() {
         <div
           v-for="c in colCreators"
           :key="c.id"
+          :draggable="creatorSortBy === 'manual'"
+          @dragstart="onCreatorDragStart(c.id)"
+          @dragover="(e: DragEvent) => onCreatorDragOver(e, c.id)"
+          @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
+          @drop="onCreatorDrop(c.id)"
+          @dragend="dragCreatorId = null; dragOverCreatorId = null"
           class="p-3 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-2xs space-y-2.5 relative flex flex-col"
-          :class="selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-xs'"
+          :class="[
+            selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-xs',
+            dragOverCreatorId === c.id ? 'ring-2 ring-indigo-400 border-dashed' : '',
+          ]"
         >
         <div>
           <!-- Header Row: Checkbox / Avatar / Name / Actions -->
@@ -740,10 +809,11 @@ function loadDemoData() {
               <button
                 type="button"
                 @click="toggleExpandCreator(c.id)"
-                class="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-0.5 text-[10px]"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer"
                 :title="expandedCreatorIds.has(c.id) ? '收起账号详情' : '展开管理各平台账号'"
               >
-                <span class="font-mono text-[10px]">{{ context.channels.filter(ch => ch.creatorId === c.id).length }}</span>
+                <span class="font-mono">{{ context.channels.filter(ch => ch.creatorId === c.id).length }}</span>
+                <span class="text-slate-400 dark:text-slate-500">账号</span>
                 <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
               </button>
             </div>
@@ -806,8 +876,17 @@ function loadDemoData() {
           <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
             <template v-for="c in filteredCreatorsList" :key="'row-' + c.id">
               <tr
+                :draggable="creatorSortBy === 'manual'"
+                @dragstart="onCreatorDragStart(c.id)"
+                @dragover="(e: DragEvent) => onCreatorDragOver(e, c.id)"
+                @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
+                @drop="onCreatorDrop(c.id)"
+                @dragend="dragCreatorId = null; dragOverCreatorId = null"
                 class="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group"
-                :class="{ 'bg-indigo-50/20 dark:bg-indigo-950/20': selectedCreatorIds.has(c.id) }"
+                :class="[
+                  { 'bg-indigo-50/20 dark:bg-indigo-950/20': selectedCreatorIds.has(c.id) },
+                  dragOverCreatorId === c.id ? 'ring-2 ring-inset ring-indigo-400' : '',
+                ]"
               >
                 <!-- Batch Checkbox -->
                 <td v-if="isBatchMode" class="py-2.5 px-3 text-center">
@@ -996,8 +1075,17 @@ function loadDemoData() {
         <div
           v-for="c in colCreators"
           :key="c.id"
+          :draggable="creatorSortBy === 'manual'"
+          @dragstart="onCreatorDragStart(c.id)"
+          @dragover="(e: DragEvent) => onCreatorDragOver(e, c.id)"
+          @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
+          @drop="onCreatorDrop(c.id)"
+          @dragend="dragCreatorId = null; dragOverCreatorId = null"
           class="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-sm space-y-3 relative overflow-hidden"
-          :class="selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md'"
+          :class="[
+            selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md',
+            dragOverCreatorId === c.id ? 'ring-2 ring-indigo-400 border-dashed' : '',
+          ]"
         >
         <!-- Top Row: Avatar, Name, Stats & Actions -->
         <CreatorCardHeader

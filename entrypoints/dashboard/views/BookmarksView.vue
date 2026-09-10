@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { Bookmark, Filter, Search, X } from 'lucide-vue-next';
+import { Bookmark, Filter, Search, X, UserRound } from 'lucide-vue-next';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import PostCard from '../components/PostCard.vue';
 
@@ -33,7 +33,20 @@ const props = withDefaults(
 // Local UI controls (view-owned)
 const bookmarkSearchQuery = ref('');
 const bookmarkSelectedPlatform = ref<string>('all');
+/** 账号角色过滤：'all' | 'main' | 'sub' | 'alt' | 'custom'。 */
+const bookmarkSelectedRole = ref<string>('all');
 
+/** Roles actually present among bookmarked posts' source channels. */
+const bookmarkRoles = computed(() => {
+  const ROLE_LABELS: Record<string, string> = { main: '主账号', sub: '日常小号', alt: '里号/差分', custom: '自定义频道' };
+  const present = new Set<string>();
+  for (const p of props.context.posts) {
+    if (!p.isBookmarked) continue;
+    const ch = props.context.channels.find(c => c.id === p.channelId);
+    if (ch) present.add(ch.accountRole || 'main');
+  }
+  return [...present].map(key => ({ key, label: ROLE_LABELS[key] || key }));
+});
 function isTextOnlyPost(p: Post): boolean {
   return !p.mediaList || p.mediaList.length === 0;
 }
@@ -46,17 +59,24 @@ const filteredBookmarkedPosts = computed(() => {
     if (bookmarkSelectedPlatform.value !== 'all' && p.platform !== bookmarkSelectedPlatform.value) {
       return false;
     }
+    // Account role filter: keep posts whose source channel carries the role.
+    if (bookmarkSelectedRole.value !== 'all') {
+      const ch = props.context.channels.find(c => c.id === p.channelId);
+      if (!ch || (ch.accountRole || 'main') !== bookmarkSelectedRole.value) return false;
+    }
     // Text-only filter (hide posts without media)
     if (props.context.hideTextOnly && isTextOnlyPost(p)) {
       return false;
     }
-    // Search query
+    // Search query: text/author/#tag (tag word matches the creator's tags)
     if (bookmarkSearchQuery.value.trim()) {
-      const q = bookmarkSearchQuery.value.toLowerCase();
+      const raw = bookmarkSearchQuery.value.trim().toLowerCase();
+      const q = raw.startsWith('#') ? raw.slice(1) : raw;
       const matchText = (p.title || '').toLowerCase().includes(q) || p.content.toLowerCase().includes(q);
       const creator = props.context.creators.find(c => c.id === p.creatorId);
       const matchAuthor = creator?.name.toLowerCase().includes(q);
-      if (!matchText && !matchAuthor) return false;
+      const matchTag = Boolean(q) && (creator?.tags || []).some(t => t.toLowerCase().includes(q));
+      if (!matchText && !matchAuthor && !matchTag) return false;
     }
     return true;
   });
@@ -151,11 +171,10 @@ const bookmarkColumns = computed(() => {
           <input
             v-model="bookmarkSearchQuery"
             type="text"
-            placeholder="搜索收藏..."
+            placeholder="搜索内容 / 创作者 / #标签..."
             class="w-full pl-9 pr-8 py-2 bg-slate-100 dark:bg-slate-800 border-none rounded-xl text-xs outline-none focus:ring-2 focus:ring-amber-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
           />
           <button
-            v-if="bookmarkSearchQuery"
             type="button"
             @click="bookmarkSearchQuery = ''"
             class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full"
@@ -197,6 +216,39 @@ const bookmarkColumns = computed(() => {
             </span>
           </button>
         </template>
+      </div>
+
+      <!-- Account role filter (main / sub / alt / custom) -->
+      <div
+        v-if="bookmarkRoles.length > 0"
+        class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs"
+      >
+        <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
+          <UserRound class="w-3 h-3" />
+          账号角色:
+        </span>
+        <button
+          type="button"
+          @click="bookmarkSelectedRole = 'all'"
+          class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
+          :class="bookmarkSelectedRole === 'all'
+            ? 'bg-amber-600 text-white shadow-2xs font-semibold'
+            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
+        >
+          全部
+        </button>
+        <button
+          v-for="role in bookmarkRoles"
+          :key="role.key"
+          type="button"
+          @click="bookmarkSelectedRole = role.key"
+          class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
+          :class="bookmarkSelectedRole === role.key
+            ? 'bg-amber-600 text-white shadow-2xs font-semibold'
+            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
+        >
+          {{ role.label }}
+        </button>
       </div>
     </div>
 

@@ -3,6 +3,7 @@ import {
   putCreator,
   removeGlobalTag,
   updateCreatorRecord,
+  updateCreatorsSortOrder,
   updateCreatorTagsRecord,
 } from '../infrastructure/db/creatorRepository';
 import type { Creator } from '../types';
@@ -34,6 +35,11 @@ export const creatorService = {
    */
   async removeGlobalTag(tagToRemove: string): Promise<number> {
     return removeGlobalTag(tagToRemove);
+  },
+
+  /** Persist a manual creator order (writes sortOrder indices in one tx). */
+  async updateSortOrder(orderedIds: string[]): Promise<void> {
+    await updateCreatorsSortOrder(orderedIds);
   },
 
   /** Delete a creator and all bound channels + cached posts (single tx). */

@@ -220,6 +220,8 @@ export interface AppSettings {
   enableImageCache?: boolean; // 是否启用本地图片磁盘缓存
   imageCacheDirectoryName?: string; // 用户绑定的本地目录名称
   imageCacheStrategy?: 'all' | 'restricted_only' | 'bookmarks_only'; // all: 全平台; restricted_only: 仅限小红书/微博等有时效签名平台; bookmarks_only: 仅收藏
+  /** 侧栏平台筛选的自定义显示顺序（platform key 列表；未列出的平台排在其后按注册顺序）。 */
+  platformOrder?: string[];
 }
 
 export interface DeletedPostRecord {
