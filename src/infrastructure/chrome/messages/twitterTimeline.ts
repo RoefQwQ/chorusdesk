@@ -190,7 +190,7 @@ async function fetchTwitterTimelineViaTabOrSession(
   cursor: string = ''
 ) {
   if (!chrome.tabs || !chrome.scripting) {
-    return { success: false, error: 'Background 缺少 tabs 或 scripting 权限' };
+    return { success: false, error: 'Background 缺少标签页访问或脚本注入能力' };
   }
 
   let targetTabId: number | null = null;

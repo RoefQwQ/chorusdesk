@@ -1,4 +1,11 @@
 import { toSecureMediaUrl } from '../../../utils/media';
+import { hostMatches, isPlatformHost, parseFetchableUrl, resolveMediaReferer } from './hosts';
+
+/**
+ * Xiaohongshu media hosts: images from these need the authenticated session and
+ * the `sns-img-*` mirror rewrite, unlike every other platform's CDN.
+ */
+const XHS_MEDIA_HOSTS = ['xhscdn.com', 'xhscdn.net', 'xiaohongshu.com'] as const;
 
 // Minimal local types for the PROXY_IMAGE runtime-message contract. They only
 // describe what this handler reads / replies with — the protocol shape itself
@@ -37,28 +44,31 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
   (async () => {
     try {
       const url = (message.url as string || '').trim();
-      let parsedUrl: URL;
-      try {
-        parsedUrl = new URL(url);
-      } catch {
-        sendResponse({ ok: false, error: 'Invalid URL' });
+      // Host policy comes from `hosts.ts` alone: the proxy previously kept its
+      // own regex and had already fallen behind (Douyin covers were documented
+      // as proxied while this list rejected them). AGENTS.md rule 2.
+      const target = parseFetchableUrl(url);
+      if (!target) {
+        // Distinguish "not a URL" from "a URL we refuse to fetch", matching the
+        // replies callers already handle.
+        let parseable = true;
+        try {
+          new URL(url);
+        } catch {
+          parseable = false;
+        }
+        sendResponse({ ok: false, error: parseable ? 'Image host is not allowed' : 'Invalid URL' });
         return;
       }
-      const allowedHost = /(^|\.)((bilibili\.com|hdslb\.com|twimg\.com|x\.com|twitter\.com|pximg\.net|pixiv\.net|fantia\.jp|withny\.fun|xhscdn\.com|xhscdn\.net|xiaohongshu\.com|sinaimg\.cn|weibo\.com|weibo\.cn|youtube\.com))$/i.test(parsedUrl.hostname);
-      if (!['http:', 'https:'].includes(parsedUrl.protocol) || !allowedHost || parsedUrl.username || parsedUrl.password) {
+      if (!isPlatformHost(target.hostname)) {
         sendResponse({ ok: false, error: 'Image host is not allowed' });
         return;
       }
 
-      const isXhs = url.includes('xhscdn.com') || url.includes('xiaohongshu.com') || url.includes('xhscdn.net');
-      let referer = 'https://www.xiaohongshu.com/';
-      if (url.includes('sinaimg.cn') || url.includes('weibo.com')) {
-        referer = 'https://weibo.com/';
-      } else if (url.includes('pximg.net') || url.includes('pixiv.net')) {
-        referer = 'https://www.pixiv.net/';
-      } else if (url.includes('bilibili.com') || url.includes('hdslb.com')) {
-        referer = 'https://www.bilibili.com/';
-      }
+      const isXhs = XHS_MEDIA_HOSTS.some((domain) => hostMatches(target.hostname, domain));
+      // Referer per platform, matched on the parsed hostname — the previous
+      // `url.includes('weibo.com')` test would have matched a query parameter.
+      const referer = resolveMediaReferer(target.hostname);
 
       // Generate candidate URLs to try if first one returns 403/404
       const normalized = toSecureMediaUrl(url);
@@ -90,12 +100,16 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
 
       for (const targetUrl of urlsToTry) {
         try {
+          // CDNs without an expected Referer get none: sending another
+          // platform's Referer is worse than sending nothing.
+          const headers: Record<string, string> = {
+            Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          };
+          if (referer) headers.Referer = referer;
+
           const fetchOptions: RequestInit = {
             method: 'GET',
-            headers: {
-              Referer: referer,
-              Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            },
+            headers,
             // Use 'include' so extension host permissions attach user's authenticated cookies (e.g. web_session, a1)
             credentials: isXhs ? 'include' : 'omit',
           };
