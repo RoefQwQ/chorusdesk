@@ -519,6 +519,42 @@ Two things this cost:
 
 ---
 
+## 23. An injection has run only if it returned a value — "resolved" is not "ran"
+
+`chrome.scripting.executeScript` into a tab that navigates does **not** reliably reject. It can
+resolve with **no result**, because the frame the script was running in is gone.
+
+The old code read any resolution as success:
+
+```ts
+.then((r) => r?.[0]?.result === true).catch(() => false)
+```
+
+so a destroyed frame and a page that genuinely had no grid produced the same answer. That is what
+made a real sync log say「作品网格在等待时间内未渲染」**3.5 seconds into a 10-second deadline** —
+a sentence the probe is incapable of producing, because it only reports `false` when the deadline
+expires. The log line was simply false, and it pointed at the page instead of at us.
+
+- The injected functions here return a **boolean or an object** by construction, so "produced a
+  value" is a sound test of "ran to completion". Classify rejected / valueless / successful
+  separately (`InjectionOutcome`), and retry the valueless case — it is transient.
+- **Retry the collector too, not just the readiness probe.** A collector always returns an object
+  (an empty one for an empty grid), so no result is never data — yet it was reported as「未返回可
+  解析的作品数据」, which reads exactly like "this creator has no works". Two very different
+  conditions must not share a message.
+- **A timing contradiction in a log is a bug report about the code, not the network.** "It gave up
+  before its own deadline" is arithmetic, and it localizes the fault immediately. Read the
+  numbers before theorizing about the platform.
+- Retries are bounded (`INJECT_ATTEMPTS`) and the failure is still surfaced, so a page that keeps
+  dying reports a real error instead of spinning.
+
+**And check whether a diagnostic still means anything.** The Douyin tab-scan line appended a
+warning whenever no Douyin tab was found — which is the ordinary case, since the handler opens
+its own tab. It fired on nearly every sync and read as a problem when nothing was wrong. Once a
+probe has answered its question, stop shipping it as an alarm.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -536,4 +572,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 408 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 412 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
