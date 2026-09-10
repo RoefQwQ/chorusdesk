@@ -18,6 +18,7 @@
 import { collectDouyinSnapshot, deepCollectDouyinSnapshot } from '../../../adapters/douyin/collector';
 import { MAX_ITEMS_PER_SNAPSHOT } from '../../../adapters/douyin/contract';
 import { hostMatches } from './hosts';
+import { devLog } from '../../../utils/devLog';
 
 interface DouyinSnapshotMessage {
   type: 'FETCH_DOUYIN_SNAPSHOT';
@@ -59,108 +60,240 @@ export function handleDouyinSnapshot(
   sendResponse: SendResponse,
 ): boolean {
   (async () => {
-    const fail = (code: DouyinSnapshotErrorCode, error: string) =>
-      sendResponse({ success: false, code, error });
+    /** A tab this handler opened and must therefore close. */
+    let tempTabId: number | undefined;
 
-    try {
+    const fail = (code: DouyinSnapshotErrorCode, error: string) => ({ success: false, code, error });
+
+    /**
+     * The scrape itself, as a function that *returns* its response.
+     *
+     * It must not send the response directly: `sendResponse` closes the message
+     * channel, after which the worker may be torn down at any moment — so the
+     * throwaway tab has to be closed first, and every exit path has to funnel
+     * through the cleanup below. (A `return` inside an outer `try` would skip
+     * the code after the `finally`, which is exactly how the first version of
+     * this fix managed to stop answering on its failure paths.)
+     */
+    const scrape = async (): Promise<Record<string, unknown>> => {
       const secUid = typeof message.secUid === 'string' ? message.secUid.trim() : '';
-      if (!SEC_UID_RE.test(secUid)) {
-        fail('unsupported', '抖音创作者标识无效');
-        return;
-      }
+      if (!SEC_UID_RE.test(secUid)) return fail('unsupported', '抖音创作者标识无效');
+
       const limit = Math.min(
         Math.max(Number(message.limit) || 20, 1),
         MAX_ITEMS_PER_SNAPSHOT,
       );
 
       if (!chrome.tabs || !chrome.scripting) {
-        fail('unsupported', 'Background 缺少 tabs 或 scripting 权限');
-        return;
+        return fail('unsupported', 'Background 缺少标签页访问或脚本注入能力');
       }
 
       const profileUrl = `https://www.douyin.com/user/${secUid}`;
       const tabs = await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[]);
 
-      // Prefer a tab already showing THIS creator, then any douyin.com tab we can
-      // navigate. Never open a Douyin tab unprompted on a timer: repeatedly
-      // loading profile pages in the background is exactly what trips Douyin's
-      // rate limiting, and auto-sync must not do it.
-      const exact = tabs.find((t) => t.id && typeof t.url === 'string' && t.url.includes(secUid) && isDouyinTabUrl(t.url));
-      const anyDouyin = tabs.find((t) => t.id && isDouyinTabUrl(t.url));
-      const target = exact || anyDouyin;
+      // Reuse an existing tab ONLY when it is already showing this very creator:
+      // scraping in place is free and disturbs nothing. Any other douyin tab
+      // belongs to the user, and navigating it would move their page out from
+      // under them — a tab that is mid-navigation also briefly reports a stale
+      // or empty `url`, which is how the previous "navigate it" strategy ended up
+      // creating and closing an extra tab on a later channel of the same batch.
+      // So: matching tab in place, otherwise a throwaway tab of our own.
+      const exact = tabs.find(
+        (t) => t.id && typeof t.url === 'string' && t.url.includes(secUid) && isDouyinTabUrl(t.url),
+      );
 
-      if (!target?.id) {
-        fail(
-          'auth',
-          '未找到已打开的抖音页面。请在浏览器中打开该创作者主页（douyin.com）后再同步，抖音的作品列表只能在真实页面中加载。',
-        );
-        return;
+      let targetId: number | undefined = exact?.id;
+
+      if (targetId === undefined) {
+        // Nothing to reuse: open our own. Safe to do unconditionally here because
+        // this handler is only ever reached from a user-initiated page action —
+        // auto-sync runs in the service worker, where the douyin adapter refuses
+        // before messaging (a timer must never load profile pages on its own).
+        const created = await chrome.tabs.create({ url: profileUrl, active: false }).catch(() => null);
+        if (!created?.id) {
+          return fail('auth', '未能打开抖音页面。请在浏览器中打开任意抖音页面后再试。');
+        }
+        targetId = created.id;
+        tempTabId = created.id;
+        // Record it before doing anything slow, so a worker death during the
+        // load wait still leaves a trail the sweep can follow.
+        await rememberTempTab(created.id);
+        await waitForTabLoad(targetId);
       }
 
-      // Re-read the tab: `tabs.query` results can be stale, and we must not
-      // inject into a tab that has navigated elsewhere in the meantime.
-      const live = await chrome.tabs.get(target.id).catch(() => null);
-      if (!live || !isDouyinTabUrl(live.url)) {
-        fail('auth', '抖音标签页已跳转到其他站点，请重新打开抖音创作者主页后再同步。');
-        return;
-      }
-
-      // Only navigate when the tab is not already on the wanted creator; a
-      // same-page scrape is cheaper and does not disturb the user's browsing.
-      const onTargetCreator = typeof live.url === 'string' && live.url.includes(secUid);
-      if (!onTargetCreator) {
-        await chrome.tabs.update(target.id, { url: profileUrl }).catch(() => null);
-        await waitForTabLoad(target.id);
-      }
-
-      const confirmed = await chrome.tabs.get(target.id).catch(() => null);
+      const confirmed = await chrome.tabs.get(targetId).catch(() => null);
       if (!confirmed || !isDouyinTabUrl(confirmed.url)) {
-        fail('auth', '抖音页面加载失败，请手动打开该创作者主页后再同步。');
-        return;
+        return fail('auth', '抖音页面加载失败，请在浏览器中打开任意抖音页面后再试。');
       }
 
       const deep = message.deep === true;
       const injected = deep
         ? await chrome.scripting.executeScript({
-            target: { tabId: target.id },
+            target: { tabId: targetId },
             func: deepCollectDouyinSnapshot,
             // Scroll rounds are bounded so a dig cannot spin forever against a
             // grid that is gated rather than finished.
             args: [limit, 40],
           })
         : await chrome.scripting.executeScript({
-            target: { tabId: target.id },
+            target: { tabId: targetId },
             func: collectDouyinSnapshot,
             args: [limit],
           });
 
       const snapshot = injected?.[0]?.result;
       if (!snapshot || typeof snapshot !== 'object') {
-        fail('parse', '抖音页面未返回可解析的作品数据。');
-        return;
+        return fail('parse', '抖音页面未返回可解析的作品数据。');
       }
 
       const shot = snapshot as ReturnType<typeof collectDouyinSnapshot>;
       if (shot.requiresVerify) {
-        fail('rate_limit', '抖音页面出现安全验证。请在抖音标签页中完成验证后再同步。');
-        return;
+        return fail('rate_limit', '抖音页面出现安全验证。请在抖音标签页中完成验证后再同步。');
       }
       if (shot.requiresAuth) {
-        fail('auth', '抖音页面要求登录或该创作者不可见。请在抖音标签页中确认页面可正常浏览。');
-        return;
+        return fail('auth', '抖音页面要求登录或该创作者不可见。请在抖音标签页中确认页面可正常浏览。');
       }
       if (shot.gridError) {
-        fail('rate_limit', '抖音作品列表加载失败（页面提示服务异常）。请稍后在抖音页面刷新后再同步。');
-        return;
+        return fail('rate_limit', '抖音作品列表加载失败（页面提示服务异常）。请稍后在抖音页面刷新后再同步。');
       }
 
-      sendResponse({ success: true, snapshot: shot });
+      return { success: true, snapshot: shot };
+    };
+
+    let response: Record<string, unknown>;
+    try {
+      response = await scrape();
     } catch (err: unknown) {
       const messageText = err instanceof Error ? err.message : String(err);
-      fail('network', `抖音页面采集异常: ${messageText}`);
+      response = fail('network', `抖音页面采集异常: ${messageText}`);
+    } finally {
+      // Close the throwaway tab BEFORE responding. `sendResponse` closes the
+      // message channel, and once it is closed the service worker may be torn
+      // down immediately — a `finally` that runs after it cannot be relied on to
+      // finish an async `tabs.remove`, which is how a sync left its temporary
+      // Douyin tab open.
+      if (tempTabId !== undefined) {
+        // The record is cleared ONLY when the tab is really gone. Clearing it
+        // after a failed `tabs.remove` would strand the tab: the sweep would have
+        // nothing left to find, which is how a leftover survived the earlier fix.
+        let closed = false;
+        try {
+          await chrome.tabs.remove(tempTabId);
+          closed = true;
+        } catch (e: unknown) {
+          // A failed remove usually means the tab is already gone (the user closed
+          // it), which is fine — distinguish that from a real failure.
+          const stillOpen = await chrome.tabs.get(tempTabId).catch(() => null);
+          closed = !stillOpen;
+          if (!closed) {
+            devLog.warn(
+              'douyin',
+              `临时标签页未能关闭（tab ${tempTabId}），已登记待下次启动回收`,
+              String(e),
+            );
+          }
+        }
+        if (closed) {
+          await forgetTempTab();
+          devLog.debug('douyin', `已关闭抖音临时页（tab ${tempTabId}）`);
+        }
+      }
     }
+
+    sendResponse(response);
   })();
   return true;
+}
+
+/** Key under which an in-flight temporary Douyin tab is recorded. */
+const TEMP_TAB_KEY = 'douyin.tempTabId';
+/**
+ * A scrape (page load + paint wait + inject) is bounded well under this. An
+ * entry older than this belongs to a run that died rather than one in flight, so
+ * sweeping it cannot close a tab another sync is still using.
+ */
+const TEMP_TAB_STALE_MS = 60_000;
+
+/**
+ * Record the throwaway tab so it can be reclaimed if this worker dies before it
+ * finishes. `chrome.storage.session` survives a worker teardown (it lives for the
+ * browser session), which is exactly the window where an in-memory id is lost.
+ */
+async function rememberTempTab(id: number): Promise<void> {
+  try {
+    await chrome.storage.session?.set({ [TEMP_TAB_KEY]: { id, at: Date.now() } });
+  } catch {
+    // Recording is best-effort; the in-memory id still covers the normal path.
+  }
+}
+
+async function forgetTempTab(): Promise<void> {
+  try {
+    await chrome.storage.session?.remove(TEMP_TAB_KEY);
+  } catch {
+    // Same: nothing to do if the area is unavailable.
+  }
+}
+
+/**
+ * Close a throwaway Douyin tab left behind by an earlier run.
+ *
+ * The in-line cleanup in the handler covers the normal case, but a service
+ * worker can be torn down mid-scrape — and then an in-memory `setTimeout` and its
+ * `tabs.remove` go with it, leaving the tab open with nothing left to close it.
+ * This is the backstop for that window. Safe to call at any time: it only ever
+ * touches a tab this extension opened for a scrape and left recorded for over a
+ * minute, so an in-flight sync's own tab is never a candidate.
+ */
+export async function sweepOrphanDouyinTempTab(): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.session || !chrome.tabs) return;
+  try {
+    const stored = await chrome.storage.session.get(TEMP_TAB_KEY);
+    const entry = stored?.[TEMP_TAB_KEY] as { id?: number; at?: number } | undefined;
+    if (!entry || typeof entry.id !== 'number') return;
+
+    if (typeof entry.at === 'number' && Date.now() - entry.at < TEMP_TAB_STALE_MS) {
+      // Probably the scrape currently running: leave it alone.
+      return;
+    }
+
+    // Only ever consider a tab this extension opened for a scrape. The record is
+    // written solely in the branch that created the tab — a sync that reuses the
+    // user's own Douyin tab never records anything, so it is not a candidate
+    // here. (`chrome.storage.session` also dies with the browser session, and tab
+    // ids are unique for that session's lifetime, so a recorded id cannot end up
+    // pointing at a tab the user opened later.)
+    const tab = await chrome.tabs.get(entry.id).catch(() => null);
+
+    // Never touch the tab the user is currently looking at. This is the guard
+    // for the one case id bookkeeping cannot rule out: our throwaway tab being
+    // adopted as someone's browsing tab.
+    if (tab?.active) {
+      await forgetTempTab();
+      return;
+    }
+
+    // Navigated away from Douyin: it belongs to the user now, so drop only the
+    // record.
+    if (!tab || !isDouyinTabUrl(tab.url)) {
+      await forgetTempTab();
+      return;
+    }
+
+    let closed = false;
+    try {
+      await chrome.tabs.remove(entry.id);
+      closed = true;
+    } catch {
+      // Keep the record: the next startup retries rather than stranding the tab.
+    }
+    if (closed) {
+      await forgetTempTab();
+      devLog.info('douyin', `已回收上次同步遗留的抖音临时页（tab ${entry.id}）`);
+    }
+  } catch {
+    // Sweeping is opportunistic; a failure just leaves it for the next attempt.
+  }
 }
 
 /** Wait (bounded) for a tab to finish loading the creator page. */

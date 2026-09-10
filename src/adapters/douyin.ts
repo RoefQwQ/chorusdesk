@@ -139,6 +139,32 @@ export const douyinAdapter: PlatformAdapter = {
       };
     }
 
+    // An empty grid is not evidence that the creator has no works.
+    //
+    // This runs after navigating a tab and waiting for load; if the
+    // client-rendered grid had not painted yet, the snapshot is empty while the
+    // creator clearly does have works. Claiming `hasMore: false` here writes
+    // `__END__` and permanently blocks that channel from ever digging its
+    // history — the same "insufficient evidence declared as an end" failure
+    // AGENTS rule 10 records. Report it instead: the cursor stays resumable and
+    // the user can retry.
+    if (snapshot.items.length === 0) {
+      return {
+        posts: [],
+        authorMeta: {
+          name: snapshot.authorName || undefined,
+          avatar: snapshot.authorAvatar || undefined,
+        },
+        error: fetchError(
+          'parse',
+          snapshot.statedTotal > 0
+            ? `抖音页面显示该创作者有 ${snapshot.statedTotal} 篇作品，但作品列表未加载出来。请在抖音标签页中确认该主页能正常显示作品后再同步。`
+            : '抖音页面未加载出任何作品。若该创作者确有作品，通常是页面网格尚未渲染完成——请在抖音标签页中打开该主页、确认能看到作品后再同步。',
+        ),
+        totalFetched: 0,
+      };
+    }
+
     return {
       posts,
       authorMeta: {

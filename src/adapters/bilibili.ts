@@ -54,6 +54,8 @@ export const bilibiliAdapter: PlatformAdapter = {
     // Remember non-zero business codes so a total-empty result reports the real cause.
     let lastDynamicCode: number | undefined;
     let lastMediaCode: number | undefined;
+    /** Items the platform returned, counted before any adapter-side filtering. */
+    let rawFetched = 0;
     // Whether medialist responded with a successful business code (code 0). When it
     // does, it is the authoritative source: an empty list means "no videos", which
     // must not be re-reported as a permission error from the risk-controlled dynamic feed.
@@ -92,6 +94,12 @@ export const bilibiliAdapter: PlatformAdapter = {
             if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(String(moduleAuthor.face));
 
             const pubTime = moduleAuthor.pub_ts ? Number(moduleAuthor.pub_ts) * 1000 : 0;
+
+            // Counted before the watermark / onlyOriginal filters below: the
+            // difference between this and `posts.length` is what tells the sync
+            // log "the platform had content, we filtered it" apart from "the
+            // platform returned nothing".
+            rawFetched++;
 
             // WATERMARK CHECK: dynamic feed is newest-first, stop as soon as we hit old content
             if (sinceTs > 0 && pubTime > 0 && pubTime <= sinceTs) {
@@ -210,6 +218,7 @@ export const bilibiliAdapter: PlatformAdapter = {
               if (!bvid || seenBvids.has(bvid)) continue;
 
               const pubTime = item.pubtime ? item.pubtime * 1000 : 0;
+              rawFetched++;
               // Skip if it falls within already-covered time range
               if (sinceTs > 0 && pubTime > 0 && pubTime <= sinceTs) continue;
 
@@ -252,6 +261,7 @@ export const bilibiliAdapter: PlatformAdapter = {
         return {
           posts: [],
           authorMeta: { name: authorName, avatar: authorAvatar },
+          totalFetched: rawFetched,
         };
       }
 
@@ -273,6 +283,10 @@ export const bilibiliAdapter: PlatformAdapter = {
       authorMeta: { name: authorName, avatar: authorAvatar },
       nextCursor,
       hasMore,
+      // Raw items before the watermark / onlyOriginal / limit filters: lets the
+      // sync log separate "the adapter filtered everything away" from "the
+      // platform returned nothing".
+      totalFetched: rawFetched,
     };
   },
 

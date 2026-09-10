@@ -4,6 +4,28 @@ import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 
+/**
+ * Storage ceiling for one RSS body.
+ *
+ * Generous on purpose: RSS items are articles, and the card shows them in full.
+ * This only stops a pathological feed (a whole book in one `<description>`) from
+ * bloating IndexedDB; it is not a display length.
+ */
+const RSS_MAX_CONTENT_CHARS = 4000;
+
+/**
+ * Normalize a feed item's body for storage.
+ *
+ * Exported so the ceiling and its trim behaviour are testable without standing
+ * up a DOM: everything above this line in `fetchLatest` needs `document`, this
+ * does not.
+ */
+export function normalizeRssContent(rawText: string): string {
+  const text = rawText.trim();
+  if (text.length <= RSS_MAX_CONTENT_CHARS) return text;
+  return `${text.slice(0, RSS_MAX_CONTENT_CHARS).trimEnd()}…`;
+}
+
 
 /**
  * Deterministic short hash for feed item guids. `btoa` threw on non-ASCII
@@ -130,7 +152,11 @@ export const rssAdapter: PlatformAdapter = {
           id: `rss_${stableHash(guid)}`,
           channelLabel: channel.label,
           title,
-          content: cleanText.slice(0, 350) + (cleanText.length > 350 ? '...' : ''),
+          // RSS is the one platform whose body is prose the user is meant to
+          // read in place, so the full text is stored (see `normalizeRssContent`
+          // for the cap): the old 350-character teaser cut articles off
+          // mid-sentence, and the click-to-read view is gone.
+          content: normalizeRssContent(cleanText),
           mediaList,
           originalUrl: link,
           publishedAt,

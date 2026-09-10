@@ -164,4 +164,41 @@ describe('douyin history dig', () => {
     const res = await douyinAdapter.fetchLatest(channel, 50, { isHistory: true });
     expect(res.hasMore).toBe(false);
   });
+
+  it('never treats an empty grid as end-of-history on a plain sync', async () => {
+    // Observed in the 2026-09 Developer Log panel: a Douyin channel reported
+    // 「平台原始 0 条，hasMore=false」 with no error. The page had just been
+    // navigated and its client-rendered grid had not painted, so the snapshot was
+    // empty — but the adapter claimed the end of history, which `channelSync`
+    // writes as `__END__`, permanently blocking that channel's history dig.
+    //
+    // An empty grid is a missing observation, not evidence of an ending.
+    stubChannel({ ...videoSnapshot, items: [], statedTotal: 0 });
+    const res = await douyinAdapter.fetchLatest(channel, 10);
+
+    expect(res.posts).toEqual([]);
+    expect(res.error).toBeDefined();
+    expect(res.error!.code).toBe('parse');
+    expect(res.hasMore).not.toBe(false);
+    expect(res.totalFetched).toBe(0);
+  });
+
+  it('names the stated total when the grid contradicts it', async () => {
+    // The page says 29 works and the grid produced none: that is a load failure
+    // the user can act on, not an empty creator.
+    stubChannel({ ...videoSnapshot, items: [], statedTotal: 29 });
+    const res = await douyinAdapter.fetchLatest(channel, 10);
+
+    expect(res.error?.code).toBe('parse');
+    expect(res.error?.message).toContain('29');
+    expect(res.hasMore).not.toBe(false);
+  });
+
+  it('keeps an empty grid from ending a dig either', async () => {
+    stubChannel({ ...videoSnapshot, items: [], statedTotal: 0 });
+    const res = await douyinAdapter.fetchLatest(channel, 50, { isHistory: true });
+
+    expect(res.hasMore).not.toBe(false);
+    expect(res.error).toBeDefined();
+  });
 });

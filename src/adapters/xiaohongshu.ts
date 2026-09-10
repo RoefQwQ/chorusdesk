@@ -5,7 +5,7 @@ import { fetchError } from './types';
 import { bgFetch } from '../utils/http';
 import { toSecureMediaUrl } from '../utils/media';
 import type { JsonRecord, JsonValue } from '../utils/json';
-import { asRecord } from '../utils/json';
+import { asRecord, firstFilled } from '../utils/json';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -91,7 +91,8 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         if (!noteId || seenIds.has(noteId)) continue;
         seenIds.add(noteId);
 
-        const card = asRecord(item.noteCard) || item;
+        // `asRecord(item.noteCard) || item` was dead: an empty record is truthy.
+        const card = firstFilled(asRecord(item.noteCard), item);
         const displayTitle = str(card.displayTitle) || str(card.title) || '小红书精选笔记';
         const isVideo = card.type === 'video';
 
@@ -188,6 +189,21 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       // This fixes the random-order bug caused by multiple columns in waterfall layout
       allPosts.sort((a, b) => b.publishedAt - a.publishedAt);
 
+      // The profile page always embeds the creator's notes in its initial
+      // state. Zero parsed notes therefore means the page did not carry what
+      // this adapter reads — logged out, login-walled, or the state shape
+      // changed — and must not be reported as a successful empty sync.
+      if (rawNotes.length === 0) {
+        return {
+          posts: [],
+          error: fetchError(
+            'parse',
+            '小红书博主页面未包含任何笔记数据。请确认浏览器已在 xiaohongshu.com 登录，'
+            + '且该主页在浏览器中能正常显示笔记；若页面显示正常仍报此错，可能是页面结构已调整。',
+          ),
+        };
+      }
+
       // Support cursor-based pagination for history digging (offset)
       const isHistoryDig = Boolean(options?.cursor !== undefined || options?.isHistory);
       const isForce = Boolean(options?.forceRefresh);
@@ -223,6 +239,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         },
         nextCursor: hasMore ? String(nextOffset) : undefined,
         hasMore,
+        totalFetched: allPosts.length,
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
