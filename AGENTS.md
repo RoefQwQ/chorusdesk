@@ -412,6 +412,28 @@ observable fact is that the tab is no longer on the creator's profile, whatever 
 
 ---
 
+## 20. The developer log is a product surface — per-card telemetry is noise
+
+The log panel exists so the user can read it, and (in practice) paste it back when reporting a
+problem. Its signal-to-noise ratio is therefore a feature, and a per-item debug line inside a
+list is a defect in it.
+
+Measured on a real session: **102 of 150 lines (68%) were the per-card `磁盘探测` line**, in
+bursts of 72 and 26 as the feed was scrolled, around 11 lines that actually said what happened.
+Both of that user's last two log pastes had to be trimmed by hand to find the useful window.
+
+- Anything that fires **once per rendered item** must be **summed over a quiet period**, not
+  emitted per item. Cards probe in bursts (a render or scroll brings many into the observer's
+  margin at once), so one line per burst keeps every fact: how many cards, how many of their
+  images were cached, the worst case, and which platform it was.
+- **Sum, never sample or rate-limit.** Dropping lines would hide the one slow card that matters.
+  Nothing is lost in an aggregate; that is the whole point.
+- Let **severity carry the alarm**: a burst containing a slow card is emitted once at `warn`,
+  with the worst platform named for triage. Reporting a slow cache once per affected card is how
+  the original warning became part of the noise it was meant to cut through.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -429,4 +451,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 349 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 363 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
