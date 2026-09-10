@@ -369,6 +369,49 @@ asserts both that an unknown host is fetched *and* that it receives no cookies.
 
 ---
 
+## 19. Pacing is measured from the end of a request, and a rate limit is remembered
+
+Two independent defects, both surfaced by one user report (*"我刚刚多次抓取触发了验证码风控"*).
+
+**The spacing was measuring the wrong interval.** `batchUpdateChannelsInterleaved` recorded a
+platform's timestamp *before* awaiting its request, so the gap between two requests on that
+platform was `interval - duration` — **zero for any request slower than the interval**. Douyin's
+requests take seconds (a real page load in a tab), so "sync all" fired three page loads back to
+back. Measure from when the previous request **finished**, and record it on every path including
+failure: a failed request still hit the platform.
+
+**A platform's spacing floor is platform knowledge.** It lives on `PlatformAdapter`
+(`minRequestIntervalMs`; Douyin declares 15 s because a request there is a page load, not an API
+call). Callers pass the user's configured delay as an override, and the loop combines them with
+`Math.max` — an override may *raise* the floor but never lower it. Using `??` here let a default
+setting of 800 ms erase Douyin's minimum in the one code path users actually trigger.
+
+**A cool-down must outlive the process that detected it.** The strike count and expiry are
+persisted (`sync.platformCooldown` in settings, read/validated by `src/sync/rateLimit.ts`), because
+an MV3 service worker is torn down between syncs and the user clicking sync again is exactly when
+the memory matters. The back-off doubles per consecutive signal and is capped, so a hostile
+platform cannot lock itself out indefinitely. **A clean request clears it** — otherwise strikes
+accumulate over a long session until the platform sits at the maximum for reasons that stopped
+being true hours earlier.
+
+Three consequences worth keeping:
+
+- **Detecting the limit and then continuing to hammer the platform is worse than not detecting
+  it.** A `rate_limit` result starts a cool-down, and the rest of that platform is skipped for the
+  remainder of the run and subsequent runs.
+- **Every sync entry point needs this.** `updateCreator` had the same platform set and paced it at
+  a hard-coded 600 ms; a fix in the batch loop alone would have left it unprotected.
+- Non-retryable errors in one platform must not stop the others: a cooling platform is skipped,
+  not fatal.
+
+**When a platform answers with a redirect, classify it.** Douyin responds to a burst with a
+verification redirect; the tab then never renders a grid and the in-flight injection dies with
+`Frame with ID 0 was removed`. That was classified `network`, which told the user nothing and —
+worse — suppressed the rate-limit signal the sync layer needs in order to back off. The
+observable fact is that the tab is no longer on the creator's profile, whatever it was moved to.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -386,4 +429,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 314 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 349 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
