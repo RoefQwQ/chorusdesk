@@ -12,6 +12,8 @@ export interface CreatorsViewContext {
   channels: Channel[];
   /** creatorId -> 作品数（卡片统计与「作品数」排序） */
   creatorPostCountMap: Record<string, number>;
+  /** platform key -> 绑定了该平台的创作者数量（平台筛选胶囊角标） */
+  creatorCountByPlatform: Record<string, number>;
   /** 侧栏平台自定义顺序（platform 排序模式与手动排序展示用）。 */
   platformOrder: string[];
   /** 正在执行单人同步中的创作者 ID 集合 */
@@ -33,6 +35,7 @@ import {
   type Channel,
 } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
+import { compareManualEntries } from '../../../src/utils/order';
 import {
   RefreshCw,
   Plus,
@@ -78,6 +81,7 @@ const emit = defineEmits<{
   (e: 'batch-refresh', creatorIds: string[]): void;
   (e: 'batch-delete', creatorIds: string[]): void;
   (e: 'reorder-creators', orderedIds: string[]): void;
+  (e: 'demo-data'): void;
 }>();
 
 // ==================== MANUAL DRAG SORT (manual sort mode only) ====================
@@ -154,8 +158,10 @@ const creatorSortOptions = [
   { value: 'name', label: '字母名称' },
   { value: 'platform', label: '按平台分组' },
   { value: 'manual', label: '手动排序' },
-] as const;
+];
 const creatorSortBy = ref<'updated' | 'channels' | 'posts' | 'name' | 'platform' | 'manual'>('updated');
+/** 批量选择模式：开启后每行/卡片显示复选框，工具栏切换为批量操作。 */
+const isBatchMode = ref(false);
 const selectedCreatorIds = ref<Set<string>>(new Set());
 const includeTags = ref<Set<string>>(new Set());
 const excludeTags = ref<Set<string>>(new Set());
@@ -309,9 +315,9 @@ const filteredCreatorsList = computed(() => {
       if (byRank !== 0) return byRank;
     }
     if (creatorSortBy.value === 'manual') {
-      const bySort = (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity);
-      if (bySort !== 0) return bySort;
-      return (a.createdAt || 0) - (b.createdAt || 0);
+      // Shared with the persistence layer; must not return NaN when both
+      // records lack a sortOrder (the pre-drag state of every creator).
+      return compareManualEntries(a, b);
     }
     if (creatorSortBy.value === 'channels') {
       const countA = (creatorChannelMap.value[a.id] || []).length;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { History, RefreshCw, Trash2, AlertCircle, ExternalLink } from 'lucide-vue-next';
-import { ACCOUNT_ROLE_BADGE_CLASS, ACCOUNT_ROLE_LABELS, type Channel } from '../../../../src/types';
+import { ACCOUNT_ROLE_BADGE_CLASS, ACCOUNT_ROLE_LABELS, PLATFORM_REGISTRY, type Channel } from '../../../../src/types';
 
 /**
  * 创作者卡片内单个已绑定账号行：角色徽章（点击轮换）、平台链接、同步
@@ -11,7 +12,7 @@ import { ACCOUNT_ROLE_BADGE_CLASS, ACCOUNT_ROLE_LABELS, type Channel } from '../
  * - `compact`（网格展开区）：小图标、无头像、错误信息折行展示；
  * - 默认（详细视图）：带账号头像、@ID、同步失败徽章与最近同步时间。
  */
-defineProps<{
+const props = defineProps<{
   channel: Channel;
   /** 所属创作者（回溯入口需要上下文）。 */
   creatorId: string;
@@ -22,6 +23,30 @@ defineProps<{
   /** 紧凑样式（网格展开区：更小的图标与内边距）。 */
   compact?: boolean;
 }>();
+
+/**
+ * 账号行必须自报平台。
+ *
+ * 一位创作者常把同名账号绑到多个平台（B站与微博都叫「某某日记」），只显示
+ * 角色徽章 + 昵称时，两行看起来完全一样，无法判断哪一行属于哪个平台——
+ * 这正是「绑定账号只显示账号类型」造成的困惑。平台名与色点来自
+ * `PLATFORM_REGISTRY`（平台元数据的单一来源）。
+ */
+const platformMeta = computed(() => PLATFORM_REGISTRY[props.channel.platform]);
+const platformName = computed(() => platformMeta.value?.name || props.channel.platform);
+
+/**
+ * 最近一次同步时间。优先取成功时间，未成功过则退回最近一次检查时间——
+ * `Channel` 没有 `lastSyncAt` 字段，此前模板读取它恒为 undefined，整个
+ * 「上次同步」区块从未渲染过。
+ */
+const lastSyncAt = computed(() => props.channel.lastSuccessAt ?? props.channel.lastCheckAt);
+
+/** 同步失败徽章点击后的详情弹窗（模板内无法直接调用 `alert`）。 */
+function showSyncError() {
+  const name = props.channel.displayName || props.channel.accountId;
+  alert(`【${name} 同步未成功】\n\n原因：${props.channel.errorMessage || '未知异常'}`);
+}
 
 /**
  * 相对时间（与 CreatorsView.formatRelativeTime 同语义的本地实现）。
@@ -59,6 +84,20 @@ const emit = defineEmits<{
          instead of sitting at the right edge. -->
     <div :class="compact ? 'flex items-center justify-between gap-1.5' : 'contents'">
     <div class="flex items-center min-w-0 flex-1" :class="compact ? 'gap-1.5' : 'gap-2'">
+      <!-- Source platform: without it two same-named accounts on different
+           platforms render identically (see the note on `platformMeta`). -->
+      <span
+        class="inline-flex items-center gap-1 shrink-0 text-slate-500 dark:text-slate-400"
+        :class="compact ? 'text-[10px]' : 'text-[11px]'"
+        :title="`来源平台：${platformName}`"
+      >
+        <span
+          class="w-1.5 h-1.5 rounded-full shrink-0"
+          :style="{ backgroundColor: platformMeta?.color || '#94a3b8' }"
+        ></span>
+        <span class="truncate" :class="compact ? 'max-w-[60px]' : 'max-w-[90px]'">{{ platformName }}</span>
+      </span>
+
       <!-- Role Badge with Quick Cycle -->
       <button
         @click="emit('cycle-role', channel)"
@@ -113,17 +152,17 @@ const emit = defineEmits<{
         v-if="!compact && channel.status === 'error'"
         class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-100 cursor-pointer shrink-0"
         title="点击查看具体同步错误详情"
-        @click.stop="alert(`【${channel.displayName || channel.accountId} 同步未成功】\n\n原因：${channel.errorMessage || '未知异常'}`)"
+        @click.stop="showSyncError"
       >
         同步失败
       </span>
       <span
-        v-else-if="!compact && channel.lastSyncAt"
+        v-else-if="!compact && lastSyncAt"
         class="text-[10px] text-slate-400 dark:text-slate-500 hidden sm:inline-flex items-center gap-1 shrink-0 ml-auto mr-1"
-        :title="'上次同步：' + new Date(channel.lastSyncAt).toLocaleString('zh-CN')"
+        :title="'上次同步：' + new Date(lastSyncAt).toLocaleString('zh-CN')"
       >
         <span class="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600"></span>
-        <span>{{ relativeTime(channel.lastSyncAt) }}</span>
+        <span>{{ relativeTime(lastSyncAt) }}</span>
       </span>
     </div>
 

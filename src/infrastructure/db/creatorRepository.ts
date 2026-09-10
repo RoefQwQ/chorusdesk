@@ -1,4 +1,5 @@
 import type { Creator } from '../../types';
+import { compareManualEntries, reseatManualOrder } from '../../utils/order';
 import { db } from './database';
 
 /**
@@ -61,15 +62,27 @@ export async function removeGlobalTag(tagToRemove: string): Promise<number> {
 }
 
 /**
- * Persist a manual creator order: writes `sortOrder` (array index) to each
- * creator in one transaction. Unlisted creators keep their existing value.
+ * Persist a manual creator order.
+ *
+ * `orderedIds` is the new order of the creators the user dragged, which may be
+ * a filtered subset of the directory. The reordered items are re-seated into
+ * the slots they already occupied (see `reseatManualOrder`) and the whole list
+ * is then written with explicit indices, so the result is unambiguous no matter
+ * which filter was active during the drag.
+ *
+ * `sortOrder` is display-only: `updatedAt` is left alone so reordering never
+ * reshuffles the "recently active" sort as a side effect.
  */
 export async function updateCreatorsSortOrder(orderedIds: string[]): Promise<void> {
   await db.transaction('rw', db.creators, async () => {
-    for (let i = 0; i < orderedIds.length; i++) {
-      // sortOrder is display-only: bumping updatedAt would reshuffle the
-      // "recently active" sort as a side effect of reordering.
-      await db.creators.update(orderedIds[i], { sortOrder: i });
+    const all = await db.creators.toArray();
+    const ordered = reseatManualOrder(
+      [...all].sort(compareManualEntries),
+      orderedIds,
+    );
+    for (let i = 0; i < ordered.length; i++) {
+      if (ordered[i].sortOrder === i) continue;
+      await db.creators.update(ordered[i].id, { sortOrder: i });
     }
   });
 }

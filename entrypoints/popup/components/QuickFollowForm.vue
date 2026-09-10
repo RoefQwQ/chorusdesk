@@ -193,7 +193,7 @@ function toggleTag(tag: string) {
                 {{ selectedCreatorObj.name }}
               </div>
               <div class="text-[9px] text-slate-500 dark:text-slate-400 truncate">
-                已绑 {{ channels.filter(ch => ch.creatorId === selectedCreatorObj.id).length }} 个账号
+                已绑 {{ channels.filter(ch => ch.creatorId === selectedCreatorObj?.id).length }} 个账号
                 <span v-for="t in selectedCreatorObj.tags?.slice(0, 2)" :key="t" class="ml-1 px-1 rounded bg-white dark:bg-slate-800 text-slate-500 border border-slate-200/60 dark:border-slate-700">#{{ t }}</span>
               </div>
             </div>

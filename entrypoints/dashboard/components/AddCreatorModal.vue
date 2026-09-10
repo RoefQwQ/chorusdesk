@@ -208,7 +208,7 @@ function submit() {
                 </div>
                 <div class="flex items-center gap-1 mt-0.5">
                   <span class="text-[10px] text-slate-500 dark:text-slate-400">
-                    已绑 {{ channels.filter(ch => ch.creatorId === selectedCreatorObj.id).length }} 个账号
+                    已绑 {{ channels.filter(ch => ch.creatorId === selectedCreatorObj?.id).length }} 个账号
                   </span>
                   <span v-for="t in selectedCreatorObj.tags?.slice(0, 2)" :key="t" class="text-[9px] px-1 py-0.2 rounded bg-white dark:bg-slate-800 text-slate-500 border border-slate-200/60 dark:border-slate-700">
                     #{{ t }}

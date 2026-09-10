@@ -4,6 +4,7 @@ import type { FetchError, FetchOptions, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
 import { db } from '../infrastructure/db/database';
+import { devLog } from '../utils/devLog';
 
 /**
  * Resets any channels that were left in 'updating' status due to browser restart or crash.
@@ -33,6 +34,51 @@ function friendlyError(err: FetchError): string {
     default:
       return err.message;
   }
+}
+
+/**
+ * A body stored by the old RSS 350-character cap.
+ *
+ * The removed code produced exactly `cleanText.slice(0, 350) + '...'`, so a stored
+ * body of 353 characters ending in `...` is that artefact and nothing else —
+ * the marker is the bug's own fingerprint. Combined with "the freshly fetched
+ * body is longer", this can only ever replace a truncated row with a fuller one,
+ * which is why the repair is safe to run on the incremental path that otherwise
+ * never rewrites existing rows.
+ */
+export function isLegacyTruncatedRssContent(stored: string, fetched: string): boolean {
+  return stored.length === 353 && stored.endsWith('...') && fetched.length > stored.length;
+}
+
+/**
+ * A stored body that is nothing but X's shortened media link.
+ *
+ * A caption-less tweet's body is exactly this: the adapter now emits empty text
+ * for it (`display_text_range` / `isMediaOnlyLinkText`), but rows written before
+ * that fix — and by the payloads that omitted the range — keep the link as their
+ * body, and a normal sync never rewrites existing rows. The shape is unambiguous:
+ * a body that is *nothing but* a t.co URL is either that artefact or a stored
+ * media link, never author text worth preserving.
+ */
+function isBareShortLink(text: string): boolean {
+  return /^https:\/\/t\.co\/\w+$/.test(text.trim());
+}
+
+/**
+ * Whether a stored row's text should be replaced by what the adapter just parsed.
+ *
+ * Deliberately per-platform and narrow. Both rules match only shapes that can
+ * *only* be artefacts of a bug this project shipped, so the replacement can never
+ * discard correct content: the RSS rule needs the old cap's exact fingerprint,
+ * and the Twitter rule needs a body consisting solely of a media link.
+ */
+export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
+  if (stored.platform !== fresh.platform) return false;
+  if (stored.platform === 'rss') return isLegacyTruncatedRssContent(stored.content, fresh.content);
+  if (stored.platform === 'twitter') {
+    return isBareShortLink(stored.content) && fresh.content !== stored.content;
+  }
+  return false;
 }
 
 /**
@@ -123,6 +169,13 @@ export async function updateChannel(
         errorMessage: friendly,
         lastCheckAt: Date.now(),
       });
+      // The per-channel failure the UI only shows as a red pip: name the code
+      // and the platform, never the response body.
+      devLog.warn(
+        'channelSync',
+        `${channel.platform}/${channel.displayName || channel.accountId} 同步失败（${result.error.code}）`,
+        friendly,
+      );
       return { ...result, error: { ...result.error, message: friendly } };
     }
 
@@ -182,6 +235,44 @@ export async function updateChannel(
         }
       } else if (sinceTimestamp > 0) {
         newPosts = result.posts.filter(p => p.publishedAt > sinceTimestamp);
+
+        // Content repair for rows an earlier build wrote incorrectly.
+        //
+        // Strictly bounded: only the ids the adapter just returned (≤ one page,
+        // via `bulkGet` — never a table scan), and only rows matching a rule in
+        // `shouldRepairStoredContent`, each of which can only ever match a shape
+        // this project's own bugs produced. Repaired rows are written back
+        // silently: they are not new posts, so they must not inflate the count,
+        // and the user's read/bookmark state is preserved. Once repaired the
+        // conditions stop matching.
+        const alreadyKnown = result.posts.filter(p => p.publishedAt <= sinceTimestamp);
+        if (alreadyKnown.length > 0) {
+          try {
+            const storedRows = await db.posts.bulkGet(alreadyKnown.map(p => p.id));
+            const repaired: Post[] = [];
+            for (let i = 0; i < alreadyKnown.length; i++) {
+              const fresh = alreadyKnown[i];
+              const stored = storedRows[i];
+              if (stored && shouldRepairStoredContent(stored, fresh)) {
+                repaired.push({
+                  ...fresh,
+                  isRead: stored.isRead,
+                  isBookmarked: stored.isBookmarked,
+                });
+              }
+            }
+            if (repaired.length > 0) {
+              await db.posts.bulkPut(repaired);
+              devLog.info(
+                'channelSync',
+                `已修正 ${repaired.length} 条历史动态的正文`,
+                `${channel.platform}：旧的错误文本已用重新解析的结果覆盖`,
+              );
+            }
+          } catch {
+            // Repair is opportunistic: a failure leaves the row for the next sync.
+          }
+        }
       }
 
       // Filter out deleted posts by default; if restoreDeleted is true, clear them from deletedPostIds
@@ -345,6 +436,29 @@ export async function updateChannel(
     }
 
     // Return the genuinely newly discovered posts so caller alerts reflect actual new content
+    // `水位线` is what makes「平台返回 0 条」interpretable: with a watermark the
+    // adapter is expected to filter already-known posts away, without one it
+    // returned nothing on a first/forced sync — the case worth investigating.
+    const watermark = sinceTimestamp
+      // Timestamps may be seconds or milliseconds depending on the adapter.
+      ? new Date(sinceTimestamp < 1e12 ? sinceTimestamp * 1000 : sinceTimestamp).toLocaleString('zh-CN')
+      : '无（首次或强制同步）';
+    devLog.info(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 同步完成`,
+      [
+        `新增 ${enhancedPosts.length} 条`,
+        `平台返回 ${result.posts?.length || 0} 条`,
+        // Raw count before the adapter's own filtering. Only adapters that
+        // filter internally (bilibili / douyin / xiaohongshu / twitter) report
+        // it; for the rest this is omitted rather than printed as「未知」,
+        // because a placeholder sitting beside real numbers reads like a value.
+        ...(result.totalFetched === undefined ? [] : [`平台原始 ${result.totalFetched} 条`]),
+        `hasMore=${String(result.hasMore)}`,
+        `水位线=${watermark}`,
+        `仅原创=${mergedOptions.onlyOriginal ? '是' : '否'}`,
+      ].join('，'),
+    );
     return {
       ...result,
       posts: enhancedPosts,
@@ -361,6 +475,11 @@ export async function updateChannel(
       errorMessage: structured.message,
       lastCheckAt: Date.now(),
     });
+    devLog.error(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 抛出异常`,
+      structured.message,
+    );
     return { posts: [], error: structured };
   } finally {
     // Failsafe: Ensure channel is NEVER left in 'updating' status
