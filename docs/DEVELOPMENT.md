@@ -55,12 +55,22 @@
 4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册；不要改 `getAdapter` 的 rss 回退语义。
 5. 在 `src/types/index.ts` 增加 `Platform` 字面量、`PLATFORM_REGISTRY` 元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
 6. 在 `src/utils/urlParser.ts` 增加 URL → `{ platform, accountId, cleanUrl }` 分支（注意域名顺序：`weibo.cn` 在 `weibo.com` 前等，避免子串误判；XHS 短链 `xhslink.com`、YouTube `youtu.be` 这类别名要并进同平台分支）。
-7. 若走 Cookie 登录：在 Dashboard `App.vue` 的 `checkPlatformLogins` 的 `platformsToCheck` 增加 `{ key, domain, authCookieNames }` 行（登录状态灯）；并在 `wxt.config.ts` 增加最小必要 host permission。
+7. 平台域名：只需把域名加入 `src/infrastructure/chrome/messages/hosts.ts` 的 `PLATFORM_HOSTS`。manifest 的 `host_permissions` 由 `platformHostMatchPatterns()` **派生生成**，图片代理白名单、凭据策略与 Referer 选择同样读取该清单——不要再手写第二份列表（`tests/hosts.singleSource.test.ts` 会断言这一点）。
+   - 若走 Cookie 登录：在 `src/infrastructure/chrome/platformAuth.ts` 的 `platformsToCheck` 增加 `{ key, domain, authCookieNames }` 行（登录状态灯）。
+   - 若该平台的图片 CDN 需要特定 Referer：在 `hosts.ts` 的 `MEDIA_REFERER_BY_DOMAIN` 增加映射；不需要 Referer 的 CDN 不要加（扩展会发不带 Referer 的请求）。
 8. 若走页面令牌（localStorage Token 型平台）：设计 content script 采集 + 受 sender 策略约束的保存/同步消息链路（sender policy 见 `background.ts` `SENDER_POLICY` 与 AGENTS.md 规则 4），不要在 adapter 里直接假设凭证存在。
-9. 平台头像/内容走“受限 CDN”：在 `src/infrastructure/chrome/declarativeNetRequest.ts` 增补规则时**必须分配新规则 id**（现占用 1001–1006，remove/add 列表同步扩展，保持幂等）。
+9. 平台头像/内容走“受限 CDN”：在 `src/infrastructure/chrome/declarativeNetRequest.ts` 增补规则时**必须分配新规则 id**（现占用 1001–1006，remove/add 列表同步扩展，保持幂等）。仅当归宿 CDN 需要改写请求头时才加规则——已在 `MEDIA_REFERER_BY_DOMAIN` 覆盖且代理可用的平台通常无需 DNR。
 10. 验证不回归其他平台：增量过滤、去重、墓碑、收藏、图片缓存策略均与平台无关或按平台分支，新增平台不得改变既有分支行为。
 
 Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infrastructure/db` 写库、不修改 Vue 状态**；写库统一发生在 `src/sync/channelSync.ts` 的落库段。
+
+### 3.1 埋点与诊断
+
+新增平台或调整请求链路时，按需补 `src/utils/devLog.ts` 埋点（scope 命名见 `docs/ARCHITECTURE.md` §7.1）：
+
+- **必须脱敏**：只记主机名、HTTP 状态码、条数与错误消息；不得记录 Cookie、Token、请求头或响应体——面板的用途就是被截图贴进问题反馈。
+- 高频成功路径用 `debug`（默认不记录，用户开启「详细模式」后才留存）；失败与拒绝用 `warn`/`error`。
+- 新增失败分支时，确保日志里能看出**是哪一步**失败与**平台返回了什么码**，否则面板无法替代 devtools。
 
 ## 4. 数据库变更
 

@@ -4,7 +4,9 @@ Binding constraints for anyone (human or agent) editing this repo. Reusable rule
 One-off review output lives in `docs/REVIEW_2026-09.md` — do not copy it here.
 
 Stack: WXT 0.21 + Vue 3 + Dexie 4 + Tailwind 4, TypeScript strict, Chrome MV3.
-Commands: `npm run dev` / `build` / `zip` / `test` / `typecheck` / `lint`. CI runs typecheck + lint + vitest + build on every push/PR (fix queue #12).
+Commands: `npm run dev` / `build` / `zip` / `test` / `typecheck` / `lint`. CI runs typecheck + lint + vitest + build on every push/PR (fix queue #12); tagging `vX.Y.Z` runs `release.yml` (same gates + tag/version check + release asset).
+
+`typecheck` runs **twice on purpose**: `tsc` (native TS7, `.ts` only) then `vue-tsc` (`.vue` + `.ts`). A plain `tsc` pass parses **zero** `.vue` files, so before vue-tsc was added the gate silently could not see any component: a deleted `ref` still referenced by a template, a prop that did not exist on the type it was read from, and an undeclared `emit` all shipped green. Do not "simplify" this back to one command.
 
 ---
 
@@ -31,14 +33,19 @@ Substring tests are acceptable only for non-security cosmetics (labels, icons).
 ## 2. `hosts.ts` is the single source of truth for platform hosts
 
 `src/infrastructure/chrome/messages/hosts.ts` (`PLATFORM_HOSTS`) is the only allowlist.
-Adding a platform means updating **both**:
+Adding a platform means editing **that list alone**:
 
-1. `PLATFORM_HOSTS` in `hosts.ts`
-2. `host_permissions` in `wxt.config.ts`
+1. `PLATFORM_HOSTS` — the allowlist.
+2. Nothing else. The manifest's `host_permissions` is *derived* (`wxt.config.ts` calls
+   `platformHostMatchPatterns()`), and the image proxy's allowlist, credential policy and
+   Referer choice all read the same list.
 
-Never inline a second host list in a handler, adapter, or composable. Existing duplication that
-still violates this (two cookie-auth tables, `proxyImage`'s own regex) is queued at #10 — do not
-add to it.
+Never inline a second host list in a handler, adapter, or composable. This is not
+hypothetical: `proxyImage` kept its own alternation regex while the docs and the P0
+verification checklist claimed Douyin covers load through it — the handler answered
+`Image host is not allowed` and the only fallback for those covers never ran.
+`tests/hosts.singleSource.test.ts` asserts the derivation, that the proxy has no private
+list, and that every Referer key is a declared platform host.
 
 ## 3. The allowlist governs CREDENTIALS, not reachability
 
@@ -169,6 +176,110 @@ scrolls). So distinguish the two cases from evidence, don't guess:
   `channelSync` writes `__END__`, permanently blocking the dig from ever resuming.
 - Report the shortfall as a real error naming it, never as a successful sync with 0 new posts.
 
+## 11. The developer log is user-visible: redact at the call site
+
+`src/utils/devLog.ts` writes a 150-entry ring into `chrome.storage.session` and the dashboard's
+Developer Log panel renders it — the panel exists so a packaged extension can be diagnosed
+without devtools, which means **its contents get screenshotted into bug reports**.
+
+- Log hostnames, HTTP status codes, counts, and error messages. NEVER log cookies, tokens,
+  request headers, response bodies, or full URLs (query strings carry signatures).
+- Never let logging affect behavior: `record()` is synchronous and fire-and-forget, failures
+  are swallowed, and `flush()` exists only for tests and pre-shutdown durability.
+- Levels: `debug` for high-volume success paths (kept only while the panel's verbose switch is
+  on), `warn`/`error` for anything a user would need to see.
+- Storage is `session`, never `local`: logs must not reach a backup export or survive a restart.
+
+## 12. A user gesture is consumed by `permissions.request`
+
+`chrome.permissions.request` only works while the click's gesture token is live, and it consumes
+it. Any handler that may need a runtime grant MUST call it as the **first** `chrome.*` call —
+before `permissions.contains`, before status flags, before any unrelated `await`.
+
+RSS is the only platform needing this (`optional_host_permissions`, AGENTS.md rule 3): its hosts
+are user-supplied and cannot be allowlisted. Already-granted origins resolve `true` without a
+prompt, so the call is safe to make unconditionally.
+
+## 13. An empty platform result is an error, not a successful zero-post sync
+
+A sync that returns zero posts is only credible when the adapter can name *why* it is zero:
+
+| Situation | Verdict |
+|---|---|
+| Adapter filtered internally against the watermark (bilibili, douyin) | success — report `totalFetched` so the log distinguishes this |
+| Adapter returned a page that `channelSync` then filtered as already-known (weibo, youtube) | success |
+| Platform returned no items at all, or none matching the parser's shape | **error** |
+
+The third case was live on three platforms at once: four Twitter channels reported
+「同步完成 0 条，hasMore=false」with no error while the GraphQL payload contained no tweet
+entries at all (`hasMore=false` is the tell — it means no bottom cursor was found either).
+Xiaohongshu had the same shape when its profile state carried no notes.
+
+- `hasMore === false` on a *history dig* parks the cursor at `__END__`, so a fake empty
+  success can permanently block a channel from ever resuming.
+- Adapters MUST return an error naming the likely cause when the platform yielded nothing
+  to parse, and MUST set `totalFetched` (raw count before filtering) on success paths that
+  filter internally. `channelSync` logs it as `平台原始 N 条`.
+
+## 14. A UI action that writes the DB MUST reload the rendered snapshot
+
+`useDashboardData`'s `creators` / `channels` / `posts` are a **snapshot**. Every action that
+mutates them through the sync or repository layers MUST finish with `deps.reloadData()`,
+including on the failure path — an error changes `status` / `errorMessage` too.
+
+`handleRefreshChannel` omitted it while `handleRefreshAll`, `handleRefreshCreator` and the
+deep-sync driver all had it. Consequence: syncing one account from its row updated the row in
+IndexedDB but left the previous render on screen, so a **successful** sync kept showing the old
+「同步失败」badge and its error text until the user reloaded the page by hand — and a freshly
+introduced failure was equally invisible. Put the reload in `finally`, not after the success
+branch.
+
+## 15. `asRecord()` is never falsy — `asRecord(a) || asRecord(b)` is dead code
+
+`asRecord()` returns `{}` for a miss, and **`{}` is truthy**. So the natural "try one path,
+then another" idiom silently evaluates only the left side:
+
+```ts
+// BOTH fallbacks below never run. This is how the Twitter adapter shipped
+// reading `tweet_results.tweet_results.result` (one level too deep) while every
+// channel reported a successful sync with zero posts.
+const tweetResult = asRecord(a.tweet_results.result) || asRecord(b.tweet_results.result);
+const card = asRecord(item.noteCard) || item;
+```
+
+Use `firstFilled(...candidates)` (`src/utils/json.ts`) when "first non-empty wins" is meant.
+Sweep for this shape whenever touching an adapter — it has appeared three times.
+
+Related and worse in combination: **a test fixture must come from a real payload.** A fixture
+written to match what the parser currently reads only proves the parser agrees with itself; the
+doubled-nesting fixture above locked this bug in as expected behaviour, and it survived typecheck,
+lint and the whole suite. When a parser reads a third-party response, keep at least one fixture
+captured verbatim from the platform.
+
+## 16. Fixing an adapter does NOT fix the rows already stored
+
+A normal sync is incremental: `channelSync` filters against the newest stored `publishedAt`
+and writes only what is newer, so **existing rows are never rewritten**. A parser fix
+therefore changes what future syncs produce and nothing else — the user keeps seeing the old
+data, and the sync reports「新增 0 条」while doing it.
+
+This was made three times in one session (Twitter body text, then Twitter again, then RSS
+truncation) because each round verified the adapter's returned `Post` and stopped there. The
+`Post` object and the database row are two different things; a fix is not finished until the
+stored rows are handled too.
+
+- When a defect produced **stored** bad data, either repair those rows in `channelSync` or
+  give the user an explicit path (`Shift + click` forces a rewrite). Say which, and say it
+  in the response.
+- Repairs MUST be gated by a rule that can only match a shape the bug itself produced, so
+  replacement can never discard correct content. `shouldRepairStoredContent` is the worked
+  example: RSS by the old cap's exact fingerprint (length 353 ending `...`, new body longer),
+  Twitter by a body consisting solely of a media link.
+- Keep repairs bounded (the ids the adapter just returned — never a table scan), silent
+  (a repaired row is not a new post), and preserve user state (`isRead` / `isBookmarked`).
+- The log line is the evidence: `新增 0 条` with a non-zero platform count means nothing was
+  written, so a fix that only touched the adapter cannot have taken effect.
+
 ---
 
 ## Fix queue
@@ -188,4 +299,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 129 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint).
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 256 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09.

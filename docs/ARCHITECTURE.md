@@ -48,15 +48,19 @@ creator-feed-hub/
 │  │  │  └─ postRepository.ts       # 动态生命周期：删除/回收站/清理/媒体自愈
 │  │  └─ chrome/
 │  │     ├─ autoSync.ts             # Alarm 自动同步 + 未读角标
-│  │     ├─ declarativeNetRequest.ts# 防盗链规则 1001-1006
+│  │     ├─ declarativeNetRequest.ts# 防盗链规则 1001-1006（需 host 权限）
+│  │     ├─ optionalHostAccess.ts   # RSS 源站的按站点运行时授权
 │  │     └─ messages/               # 消息 handler（BG_FETCH/PROXY_IMAGE/...）
+│  │        └─ hosts.ts             # PLATFORM_HOSTS：平台域名唯一来源
 │  ├─ services/imageCache/          # File System Access 本地图片缓存
-│  │  ├─ index.ts                   # imageCacheService 编排
+│  │  ├─ index.ts                   # imageCacheService 编排（含 isPostFullyCached 增量探测）
 │  │  ├─ fsManager.ts               # 目录句柄持久化/权限/文件读写
 │  │  └─ pathResolver.ts            # 目录分段/文件名净化/扩展名推断
 │  └─ utils/                        # 无业务状态工具
+│     ├─ devLog.ts                  # 开发者日志环形缓冲（chrome.storage.session）
 │     ├─ http.ts                    # bgFetch（BG_FETCH 消息封装）
 │     ├─ media.ts                   # toSecureMediaUrl/proxyImage/失败记忆
+│     ├─ order.ts                   # 手动排序比较器与重排（sortOrder）
 │     └─ urlParser.ts               # parseProfileUrl
 ├─ assets/main.css
 ├─ public/icons/
@@ -383,11 +387,33 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 |---|---|---|---|
 | IndexedDB | 库 `CreatorFeedHubDB`（5 表） | 业务数据 | `src/infrastructure/db/*` |
 | IndexedDB | 库 `FeedHubFSCache`，store `handles`，key `root_cache_dir` | 图片缓存根目录句柄 | `src/services/imageCache/fsManager.ts` |
+| `chrome.storage.session` | `devLog.entries` / `devLog.verbose` | 开发者日志环形缓冲（150 条）与详细模式开关 | `src/utils/devLog.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_theme` | 明暗主题 | `useDarkMode.ts` |
-| `localStorage`（dashboard 页） | `creator_feed_hidden_creators` / `creator_feed_hidden_platforms` | 隐藏创作者/平台偏好 | `App.vue`（未抽离） |
-| JSON 备份 | `{ version:'1.0', exportedAt, creators, channels, settings, posts }` | 导出/导入 | `App.vue`（`exportBackup`/`exportBackupToFile`/`handleImportFile`） |
+| `localStorage`（dashboard 页） | `creator_feed_hidden_creators` / `creator_feed_hidden_platforms` | 隐藏创作者/平台偏好 | `useCreatorVisibility.ts` |
+| JSON 备份 | `{ version:'1.0', exportedAt, creators, channels, settings, posts }` | 导出/导入 | `useBackupManager.ts` → `src/application/backupService.ts` + `backupFileService.ts` |
 
-注意：当前备份格式**不含** `deletedPostIds`（回收站内容不随备份迁移）。
+注意：当前备份格式**不含** `deletedPostIds`（回收站内容不随备份迁移），也**不含**
+开发者日志（日志为会话级诊断数据，刻意排除）。
+
+## 7.1 开发者日志
+
+`src/utils/devLog.ts` 是所有上下文共用的日志出口：环形缓冲写入
+`chrome.storage.session`，因此 Service Worker 的记录能在 worker 被回收后仍然可见，
+而页面侧的订阅（`chrome.storage.onChanged`）可以实时看到后台写入。
+
+约束（新增埋点时必须遵守）：
+
+- **只记主机名、状态码、条数与错误消息**，不记 Cookie、Token、请求头或响应体——面板
+  的用途就是被截图贴进问题反馈。
+- 写入是**发后不理**（fire-and-forget）：日志失败绝不影响业务流程；`flush()` 是测试与
+  「关机前落盘」的等待点。
+- 缓冲上限 150 条，超出丢弃最旧；`debug` 级仅在详细模式开启时保留（判断在写入队列内完成，
+  因此 `record()` 是同步的）。
+- 跨上下文并发写入采用「先读后合并」，最坏情况丢一行诊断，不引入跨上下文锁。
+
+埋点位置（scope 名即面板中的筛选值）：`sw`（worker 启动）、`router`（消息接入与拒绝）、
+`alarm`（定时触发）、`bgFetch`（主机与 HTTP 状态）、`channelSync`（逐账号同步结果与错误码）、
+`hostAccess`（RSS 站点授权结果）、`imageCache`（离线归档统计）。
 
 ## 8. 数据库兼容策略（原则）
 

@@ -16,7 +16,7 @@ Chorus 直接复用浏览器对应平台的已登录会话（Cookie / LocalStora
 | Withny | withny.fun | 浏览器 Cookie | 图文动态、赞助更新 | 支持 | 不需要 |
 | 小红书 | xiaohongshu.com | 浏览器 Cookie | 图文笔记、视频笔记 | 支持 | 自动清洗 Referer |
 | 微博 | weibo.com | 浏览器 Cookie | 原创微博、转发、九宫格图片、视频 | 支持 | 自动清洗 Referer |
-| 抖音 | douyin.com | 已打开的抖音页面（不读取凭据） | 创作者短视频、图文作品 | 支持（需登录） | 封面走 Background 图片代理 |
+| 抖音 | douyin.com | 已打开的抖音页面（不读取凭据） | 创作者短视频、图文作品 | 支持（需登录） | 直连加载，失败时走 Background 图片代理（该 CDN 无 Referer 要求） |
 | 通用 RSS / Atom | 任意兼容 URL | 公开 XML 协议 | 博客、Substack 等通用订阅源 | 视源而定 | 不需要 |
 
 ---
@@ -71,6 +71,24 @@ Chorus 直接复用浏览器对应平台的已登录会话（Cookie / LocalStora
 ### 2.9 通用 RSS / Atom
 - 支持导入任何标准 RSS 2.0、Atom 1.0 的 XML 链接。
 - 可以配合 [RSSHub](https://docs.rsshub.app/) 将 Telegram 频道、Patreon、Substack 或播客等接入 Chorus 统一阅读。
+- **站点授权**：RSS 源的域名由用户自行填写，无法预先列入扩展的固定平台清单。因此首次同步某个 RSS 账号时，浏览器会就该站点单独询问一次授权；同意后即可抓取，拒绝则本次跳过该源（其余平台不受影响），再次同步可重新弹出提示。
+  - 授权按**单个源站**授予，扩展不会一次性获得所有网站的访问权。
+  - 大多数源站允许跨站读取，未授权也能抓取；授权是为限制跨站的源提供通道。
+  - 授权只影响**能否绕过 CORS**，与凭据无关：非平台域名的请求一律以 `credentials: 'omit'` 发出，见第 4 节。
+
+### 2.10 平台域名清单是唯一来源
+
+扩展中所有「哪些域名属于平台」的判断都来自同一份清单
+（`src/infrastructure/chrome/messages/hosts.ts` 的 `PLATFORM_HOSTS`）：
+
+- manifest 的 `host_permissions` 由该清单**派生生成**（`wxt.config.ts` 调用
+  `platformHostMatchPatterns()`），不再手写第二份列表；
+- 图片代理的域名白名单、凭据策略与 Referer 选择同样读取该清单；
+- 匹配一律基于解析后的 hostname（精确或合法子域），从不使用字符串包含判断。
+
+新增一个平台只需修改 `PLATFORM_HOSTS`，权限、凭据与代理三处会自动一致；有一条测试
+（`tests/hosts.singleSource.test.ts`）专门断言这一点，防止再次出现「文档说能代理、
+代码里却拒绝」的分裂。
 
 ---
 
@@ -119,3 +137,50 @@ Chorus 的网络调用方式如下：
 ```
 
 页面返回的所有数据都视为不可信输入：作品必须具备合法 `aweme_id` 与可用时间戳才会入库，媒体地址必须通过协议与 CDN 域名校验，否则整条或该字段被丢弃。
+
+---
+
+## 4. 凭据与权限边界
+
+### 4.1 凭据按域名清单决定，而非按可达性
+
+| 请求目标 | 携带的凭据 |
+|:---|:---|
+| 属于 `PLATFORM_HOSTS` 的平台域名 | `credentials: 'include'`（复用浏览器现有登录态） |
+| 其他任意域名（RSS、自建源） | `credentials: 'omit'`（绝不携带用户会话） |
+
+**任何域名都可以被请求，但只有已知平台域名才允许带走用户的登录态。** 这是刻意的：
+RSS 适配器要抓取用户自己填写的任意源地址，若把「可达性」也限制成白名单，第三方与
+自建 RSS 会全部失效。
+
+### 4.2 扩展申请的权限
+
+| 权限 | 用途 | 说明 |
+|:---|:---|:---|
+| `storage` | 主题、设置、日志会话存储 | 不含远程传输 |
+| `cookies` | 读取各平台登录 Cookie 判断登录状态 | 用于「检测登录状态」 |
+| `activeTab` | 读取当前标签页 URL | Popup 识别当前页面，仅在你点击扩展图标后生效 |
+| `scripting` | 向已打开的抖音 / 推特标签页注入只读采集脚本 | 不注入其他站点 |
+| `declarativeNetRequestWithHostAccess` | 重写防盗链图片请求的 Referer | 规则限定于本扩展发起的请求，且需要对应的 host 权限才生效 |
+| `alarms` | 后台定时增量同步 | 可在设置中关闭 |
+| `host_permissions` | 各平台域名 | 由平台清单派生，仅覆盖支持的平台 |
+| `optional_host_permissions` | RSS 源站 | **安装时不授予**，仅在你同步某个 RSS 源时按站点单独询问 |
+
+扩展不申请 `tabs` 权限：判定某标签页是否属于抖音 / 推特时读取的是标签页 URL，这由
+对应平台的 host 权限覆盖；Popup 读取当前标签页 URL 则由 `activeTab` 在你点击图标时提供。
+
+### 4.3 消息通道的调用方校验
+
+后台的敏感消息（带凭据抓取、读取存储、返回响应体）只接受**扩展自身页面**的调用，
+校验在路由层集中完成（`entrypoints/background.ts` 的 sender policy 表）。
+未在表中的消息类型一律拒绝。这层校验不依赖 manifest 当前是否声明
+`externally_connectable`——将来若声明，网页与其他扩展也无法借用这些通道。
+
+### 4.4 开发者日志的隐私边界
+
+设置页的开发者日志用于自助排查（消息拒绝、平台返回码、同步错误码、授权结果、归档统计）：
+
+- 存储位置：`chrome.storage.session`，**内存态**，关闭浏览器即清空；
+- 不进入 IndexedDB 业务库，不参与 JSON 备份导出；
+- 只记录主机名、HTTP 状态码、条目数量与错误消息，不记录 Cookie、Token、请求头或响应体；
+- 上限 150 条环形缓冲，不会无限增长。
