@@ -3,8 +3,9 @@
  * message handler.
  *
  * This is the single source of truth for "is this host one of the platforms we
- * were installed to talk to". It mirrors the `host_permissions` list in
- * `wxt.config.ts` — keep the two in sync when adding a platform.
+ * were installed to talk to". `wxt.config.ts` **derives** `host_permissions`
+ * from it (`platformHostMatchPatterns()`), so adding a platform means editing
+ * this list and nothing else.
  *
  * Matching is done on a parsed `URL.hostname`, never on `url.includes(...)`:
  * substring checks match attacker-controlled hosts such as

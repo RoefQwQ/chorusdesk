@@ -116,6 +116,12 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
   Check `alarms.get` first; only `onInstalled` and settings changes may (re)create.
 - Use `chrome.alarms`, never `setInterval`, for periodic work.
 - DNR dynamic rules persist across restarts; `removeRuleIds` before `addRules`.
+- **There is no `tabs` permission, by design** (removed 2026-09). `tabs.query` still works and
+  still hands back `url`/`title` — but only for tabs whose page we hold host permissions for
+  (`PLATFORM_HOSTS`), plus the active tab inside the popup via `activeTab`. Everything else
+  (including this extension's own pages) comes back with `url: undefined`, so never branch on
+  a tab URL without a platform-host fallback. Verified live in Chrome, 2026-09-11; see
+  `PROJECT_PROGRESS_2026-09.md` §四.P7.
 
 ## 8. Layering
 
@@ -299,4 +305,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 256 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 259 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09.
