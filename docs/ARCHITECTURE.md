@@ -130,7 +130,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
   - `Creator { id, name, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
   - `Channel { id, creatorId, platform, accountId, displayName, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。
   - `Post { id, creatorId, channelId, platform, channelLabel?, title?, content, mediaList: MediaItem[], originalUrl, publishedAt, fetchedAt, isRead, isBookmarked?, isRepost?, authorMeta? }`。
-  - `AppSettings`：`theme / itemsPerFetch / requestDelayMs / enableR18Blur / autoOpenOriginalUrl / enableAutoSync? / hideReposts? / hideTextOnly? / enableImageCache? / imageCacheDirectoryName? / imageCacheStrategy?`。
+  - `AppSettings`：`theme / itemsPerFetch / requestDelayMs / enableR18Blur / autoOpenOriginalUrl / enableAutoSync? / hideReposts? / hideTextOnly? / enableImageCache? / imageCacheDirectoryName? / imageCacheStrategy? / platformOrder?`（`platformOrder` 为侧边栏平台的自定义拖拽顺序，未列出的平台按 `PLATFORM_REGISTRY` 顺序）。
   - `DeletedPostRecord { id, channelId?, creatorId?, platform?, title?, deletedAt, postData?: Post }`。
 
 动态 `Post.id` 的生成前缀规则（分布在各自 adapter 内，**不得随意改变**，收藏/回收站/墓碑都依赖它）：
