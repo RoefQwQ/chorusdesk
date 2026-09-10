@@ -173,14 +173,28 @@ there (document height stays under the viewport), so that probe could only ever 
 Before concluding a feed cannot page: enumerate elements whose `scrollHeight > clientHeight` and
 check which one contains the feed. Walk the feed's scrollable ancestors and drive those.
 
-Equally important — **a grid that stops growing is not proof it is finished.** Douyin serves
-anonymous visitors a truncated grid (measured: 18 of a stated 29 works, then nothing however far it
-scrolls). So distinguish the two cases from evidence, don't guess:
+Equally important — **a grid that stops growing is not proof it is finished.** The two cases must
+be told apart from evidence, never guessed:
 
-- Capture whatever total the page states, and compare it against what loaded.
+- **Do not treat "shorter than the stated total" as evidence of truncation.** The profile's work
+  count **includes works the author has hidden** (confirmed against a real creator, 2026-09-11),
+  so a profile with hidden works permanently loads fewer than it states. That makes the count a
+  one-way signal only: loading *at least* as many as stated proves the grid is complete; loading
+  fewer proves nothing.
+  - Corollary: the "18 of a stated 29" measurement this rule was originally based on **is not
+    established evidence of an anonymous login wall** — 18 visible with 29 stated may equally have
+    been 11 hidden works and a complete grid. Do not cite it as proof.
 - Short of the total ⇒ do NOT return `hasMore: false`. That is the end-of-history signal, and
-  `channelSync` writes `__END__`, permanently blocking the dig from ever resuming.
+  `channelSync` writes `__END__`, permanently blocking the dig from ever resuming. The asymmetry
+  is deliberate: wrongly claiming complete is unrecoverable, wrongly staying resumable costs one
+  re-scroll.
+- **Report the shortfall without blaming the user.** A message that reads as "you should be seeing
+  all N" sends them to log in for a shortfall logging in cannot fix. Name the count as a total that
+  includes hidden works, and say a shortfall is expected.
 - Report the shortfall as a real error naming it, never as a successful sync with 0 new posts.
+
+See `docs/DOUYIN_RESEARCH_2026-09.md` for the surrounding survey (official API limits, the signing
+schemes, and why the extension must not take the API route).
 
 ## 11. The developer log is user-visible: redact at the call site
 

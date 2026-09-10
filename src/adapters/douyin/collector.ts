@@ -9,6 +9,18 @@
  * `localStorage`, `sessionStorage`, request headers, or any device/signature
  * state — the extension has no use for Douyin credentials, and not reading them
  * is what keeps this out of the "authenticated proxy" category.
+ *
+ * WHY NOT THE API — this is a settled decision, not an oversight. Douyin's web
+ * API needs `a_bogus` / `X-Bogus` / `__signature`, which are produced by an
+ * obfuscated JS VM fed with `msToken`, `ttwid` and device/signature state. That
+ * is exactly the state this file refuses to touch, and reproducing it would
+ * reclassify the extension. Reading the rendered page instead is the whole point.
+ * A background `bgFetch` of a creator page returns an anti-bot JS challenge shell
+ * with no data, which is why acquisition runs in a tab at all.
+ *
+ * The full survey (official API limits, the signing schemes, the community's
+ * recommended approach, and the one open question about embedded page data) is in
+ * `docs/DOUYIN_RESEARCH_2026-09.md`. Read it before proposing a new approach here.
  */
 
 /** Shape returned to the background. Mirrors `RawDouyinSnapshot`. */
@@ -31,10 +43,14 @@ export interface CollectedSnapshot {
   /**
    * The work count the profile header states ("作品 29"), when present.
    *
-   * Lets the adapter tell "this creator really has 18 works" apart from "the page
-   * stopped loading at 18 of 29" — anonymous browsing hits a login wall partway
-   * down the grid, and without this the sync layer would report a truncated dig
-   * as a complete one.
+   * **It counts works the author has hidden**, so it is NOT the number a visitor
+   * can see and NOT a completeness oracle (confirmed against a real creator,
+   * 2026-09-11). A shortfall against it is the normal state of any profile with
+   * hidden works.
+   *
+   * It is kept only as a one-way signal: loading *at least* this many proves the
+   * grid is complete, while loading fewer proves nothing. See the adapter's
+   * `truncated` computation for why the asymmetry is deliberate.
    */
   statedTotal: number | null;
   /** True when scrolling stopped producing new works (deep collect only). */
@@ -212,11 +228,17 @@ export function collectDouyinSnapshot(maxItems: number): CollectedSnapshot {
  * own `scrollTop` drives the lazy loader — a `window.scrollTo` never triggers it,
  * which is what made the original spike conclude Douyin had no usable pagination.
  *
- * Anonymous browsing hits a login wall partway down the grid (measured: 18 of a
- * stated 29 works, then no further growth no matter how far it is scrolled), so
- * `saturated` reports only that scrolling stopped helping. Whether that means
- * "reached the end" or "blocked" is decided by the adapter, which compares the
- * count against `statedTotal`.
+ * Anonymous browsing stops the grid growing at some point, so `saturated` reports
+ * only that scrolling stopped helping. Whether that means "reached the end" or
+ * "blocked" is decided by the adapter.
+ *
+ * **The original "login wall" evidence is now in doubt.** The spike that
+ * introduced this recorded "18 of a stated 29 works, then nothing however far it
+ * scrolls" — but the stated count includes works the author has hidden (confirmed
+ * 2026-09-11), so 18 visible with 29 stated may simply have been 11 hidden works
+ * and a complete grid. Do not treat that measurement as proof that anonymous
+ * browsing is truncated; it is not established. See
+ * `docs/DOUYIN_RESEARCH_2026-09.md`.
  *
  * SELF-CONTAINMENT IS LOAD-BEARING. This function is serialized by
  * `chrome.scripting.executeScript({ func })` via `Function.prototype.toString()`,
