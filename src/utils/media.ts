@@ -59,6 +59,47 @@ export function markImageFailed(url?: string | null): void {
 }
 
 /**
+ * Build a capture-phase `error` listener that recovers a failed image through
+ * the background proxy.
+ *
+ * Built for images inside `v-html` article bodies, which cannot carry Vue's
+ * `@error` binding. Two properties matter and are easy to get wrong:
+ *
+ *  - It must be registered with `capture: true`. `error` from an `<img>` does not
+ *    bubble, so a listener on the article container only sees it while the event
+ *    is travelling down.
+ *  - It attempts each element once. `proxyImage` returning null would otherwise
+ *    re-fire on the new failure forever; a `WeakSet` keys that on the element, so
+ *    nothing has to be cleaned up when the DOM is replaced.
+ *
+ * `proxied` is injectable so the behaviour is testable without the extension
+ * runtime that the real `proxyImage` needs.
+ */
+export function createImageErrorRecovery(
+  proxied: (url: string) => Promise<string | null> = proxyImage,
+): (event: Event) => void {
+  const attempted = new WeakSet<Element>();
+
+  return (event: Event): void => {
+    const target = event.target as HTMLImageElement | null;
+    if (!target || target.tagName !== 'IMG') return;
+    if (attempted.has(target)) return;
+    attempted.add(target);
+
+    const original = target.getAttribute('src');
+    if (!original) return;
+
+    void proxied(original)
+      .then((recovered) => {
+        if (recovered) target.src = recovered;
+      })
+      .catch(() => {
+        // Nothing further to try; the browser's own broken-image state stands.
+      });
+  };
+}
+
+/**
  * Fetch an image through the background service worker using extension host permissions
  * and custom Referer / Origin headers, returning a base64 data URL.
  */

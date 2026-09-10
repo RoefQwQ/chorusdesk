@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { X, ExternalLink, Clock, Bookmark } from 'lucide-vue-next';
 import BaseModal from './BaseModal.vue';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
-import { toSecureMediaUrl } from '../../../src/utils/media';
+import { createImageErrorRecovery, toSecureMediaUrl } from '../../../src/utils/media';
 import { shouldShowTitle, standaloneMedia } from '../../../src/utils/postText';
 
 /**
@@ -44,6 +44,25 @@ const avatar = computed(
 const isBookmarked = computed(() => Boolean(props.post.isBookmarked || props.bookmarked));
 const showTitle = computed(() => shouldShowTitle(props.post));
 const readerMedia = computed(() => standaloneMedia(props.post));
+
+/**
+ * Recovery for an article image that fails to load.
+ *
+ * The article's images are plain `<img>` tags inside `v-html`, so they cannot
+ * carry the `@error` handler the card's own media uses — without this they would
+ * be the one kind of image in the app with no fallback at all. The listener is
+ * registered in the capture phase because `error` from an `<img>` does not bubble.
+ */
+const articleRef = ref<HTMLElement | null>(null);
+const recoverArticleImage = createImageErrorRecovery();
+
+onMounted(() => {
+  articleRef.value?.addEventListener('error', recoverArticleImage, true);
+});
+
+onBeforeUnmount(() => {
+  articleRef.value?.removeEventListener('error', recoverArticleImage, true);
+});
 
 const formatDate = (timestamp: number) => {
   if (!timestamp) return '未知时间';
@@ -121,6 +140,7 @@ const formatDate = (timestamp: number) => {
              which is the whole point of a dedicated view for long text. -->
         <div
           v-if="post.contentHtml"
+          ref="articleRef"
           class="article-body text-sm sm:text-[15px] text-slate-700 dark:text-slate-200"
           v-html="post.contentHtml"
         ></div>
