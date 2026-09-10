@@ -144,26 +144,42 @@ export function handleDouyinSnapshot(
       // The tab's load event is not the grid being on screen. Wait for the works
       // to actually render before scraping, or a cold page yields an empty grid
       // and the collector can only report "no works" for a creator that has them.
-      const gridReady = await chrome.scripting
-        .executeScript({
-          target: { tabId: targetId },
-          func: awaitDouyinGrid,
-          args: [10_000],
-        })
-        .then((r) => r?.[0]?.result === true)
-        .catch(() => false);
-      if (!gridReady) {
-        devLog.warn('douyin', '作品网格在等待时间内未渲染，仍尝试采集', `tab ${targetId}`);
+      //
+      // A rejected injection is NOT the same as an unready grid, and conflating
+      // them cost us the wait entirely: a single `.catch(() => false)` made a
+      // destroyed frame look like a 10-second timeout expiring, when in fact the
+      // probe came back after 1.4s. Douyin is a single-page app that can replace
+      // the frame after `load`, which kills an injection already running in it —
+      // a transient condition that a retry routinely fixes.
+      let probe = await probeDouyinGrid(targetId);
+      for (let attempt = 1; attempt <= GRID_PROBE_ATTEMPTS && !probe.injected; attempt++) {
+        devLog.debug(
+          'douyin',
+          `网格探针注入失败，重试 ${attempt}/${GRID_PROBE_ATTEMPTS}`,
+          `tab ${targetId}：${probe.error ?? '未知原因'}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        probe = await probeDouyinGrid(targetId);
+      }
 
-        // Distinguish "slow to paint" from "sent somewhere else".
-        //
-        // Douyin answers a burst of requests with a verification redirect, and
-        // the in-flight injection then dies with a frame error rather than a
-        // verdict — observed as `Frame with ID 0 was removed` from a *network*
-        // classification, which told the user nothing and, worse, suppressed the
-        // rate-limit signal the sync layer needs in order to back off. The
-        // observable fact is simply that the tab is no longer on the creator's
-        // profile, whatever it was moved to (captcha, login wall, error page).
+      if (!probe.injected) {
+        devLog.warn('douyin', '网格探针始终无法注入，仍尝试采集', `tab ${targetId}：${probe.error ?? '未知原因'}`);
+      } else if (!probe.ready) {
+        // The probe ran and reported the grid genuinely did not appear in time.
+        devLog.warn('douyin', '作品网格在等待时间内未渲染，仍尝试采集', `tab ${targetId}`);
+      }
+
+      // Either failure mode lands here, because both raise the same question and
+      // it has one answer: where is the tab now?
+      //
+      // Douyin answers a burst of requests with a verification redirect, and the
+      // in-flight injection then dies with a frame error rather than a verdict —
+      // observed as `Frame with ID 0 was removed` from a *network* classification,
+      // which told the user nothing and, worse, suppressed the rate-limit signal
+      // the sync layer needs in order to back off. The observable fact is simply
+      // that the tab is no longer on the creator's profile, whatever it was moved
+      // to (captcha, login wall, error page).
+      if (!probe.injected || !probe.ready) {
         const landed = await chrome.tabs.get(targetId).catch(() => null);
         if (!landed) {
           return fail('auth', '抖音页面已被关闭，未能完成采集。请重试。');
@@ -344,6 +360,42 @@ export async function sweepOrphanDouyinTempTab(): Promise<void> {
     }
   } catch {
     // Sweeping is opportunistic; a failure just leaves it for the next attempt.
+  }
+}
+
+/** How long the in-page probe waits for the grid before reporting "not ready". */
+const GRID_WAIT_MS = 10_000;
+
+/** How many times a failed grid-probe injection is retried before giving up. */
+const GRID_PROBE_ATTEMPTS = 3;
+
+interface GridProbe {
+  /** The probe ran and the grid was on screen. */
+  ready: boolean;
+  /** The probe ran at all — `false` means the injection itself failed. */
+  injected: boolean;
+  error?: string;
+}
+
+/**
+ * Inject the in-page grid probe, reporting *why* it produced no answer.
+ *
+ * The distinction is the whole point: `ready: false, injected: true` means the
+ * page loaded but the grid is not there (a captcha, an auth wall, a genuinely
+ * slow render), while `injected: false` means the frame our script was running in
+ * no longer exists — which a retry can fix and which we must not read as a verdict
+ * about the page.
+ */
+async function probeDouyinGrid(tabId: number): Promise<GridProbe> {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: awaitDouyinGrid,
+      args: [GRID_WAIT_MS],
+    });
+    return { ready: result?.[0]?.result === true, injected: true };
+  } catch (err: unknown) {
+    return { ready: false, injected: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

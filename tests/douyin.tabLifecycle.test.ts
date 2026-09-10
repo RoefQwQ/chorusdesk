@@ -26,6 +26,8 @@ let snapshotResult: unknown;
 let gridResult: boolean;
 /** When set, the tab reports this URL instead of the profile it was sent to. */
 let navigatedAwayTo: string | null;
+/** How many grid-probe injections reject before one runs. */
+let probeRejections: number;
 
 let updateListeners: Array<(id: number, info: { status?: string }) => void>;
 /** Session storage behind `chrome.storage.session`, for reclaim-record assertions. */
@@ -45,6 +47,7 @@ function installChrome() {
   snapshotResult = { items: [], authorName: '作者', authorAvatar: '', statedTotal: 3 };
   gridResult = true;
   navigatedAwayTo = null;
+  probeRejections = 0;
 
   vi.stubGlobal('chrome', {
     storage: {
@@ -101,6 +104,12 @@ function installChrome() {
         // asserted at all.
         if (opts.func === awaitDouyinGrid) {
           events.push('await-grid');
+          // A destroyed frame surfaces as a rejected injection, not as a false
+          // result -- see `probeDouyinGrid`.
+          if (probeRejections > 0) {
+            probeRejections--;
+            throw new Error('Frame with ID 0 was removed.');
+          }
           return [{ result: gridResult }];
         }
         events.push('inject');
@@ -159,6 +168,45 @@ describe('douyin snapshot — grid readiness', () => {
 
     expect(events).toContain('inject');
     expect(res.success).toBe(true);
+  });
+});
+
+describe('douyin snapshot — a destroyed frame during the grid probe', () => {
+  it('retries a failed probe instead of abandoning the wait', async () => {
+    // Douyin is a single-page app and can replace the frame after `load`, which
+    // kills an injection already running in it. Conflating that with "the grid
+    // did not appear" cost us the entire wait: a single `.catch(() => false)`
+    // made a destroyed frame look like the 10s deadline expiring, when the probe
+    // had actually answered in 1.4s.
+    probeRejections = 1;
+
+    const res = await run();
+
+    expect(res.success).toBe(true);
+    // Two probe attempts: the rejected one, then the retry that ran.
+    expect(events.filter((e) => e === 'await-grid')).toHaveLength(2);
+    expect(events).toContain('inject');
+  });
+
+  it('gives up after bounded attempts and still scrapes', async () => {
+    // A frame that keeps dying must not spin forever, and must not be reported as
+    // a rate limit while the tab is still sitting on the creator's profile.
+    probeRejections = 99;
+
+    const res = await run();
+
+    expect(res.success).toBe(true);
+    expect(events.filter((e) => e === 'await-grid')).toHaveLength(4);
+    expect(events).toContain('inject');
+  });
+
+  it('never leaves its temporary tab open when the probe keeps failing', async () => {
+    probeRejections = 99;
+
+    await run();
+
+    expect(createdTabs).toHaveLength(0);
+    expect(events).toContain('remove:900');
   });
 });
 
