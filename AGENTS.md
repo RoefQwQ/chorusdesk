@@ -471,6 +471,52 @@ Rules that follow:
   (stored text must *begin with* the fresh text and end in nothing but t.co links), because
   "starts with" alone would match any row the author continued writing.
 
+**A payload's data is spread across levels, so a fix must survive being asked the wrong level.**
+The same defect took three rounds because each round fixed one level and the retweet kept its
+link:
+
+1. the media chain ended two of its four branches at `...legacy.extended_entities` — an
+   **object** — without reaching `.media`, so `Array.isArray` rejected it and a retweet whose
+   media lived only on the retweeted status rendered nothing. The appended-link candidates come
+   from those same entities, so the link had nothing to match and stayed;
+2. `hasMedia` / `authorUrlCount` asked only the outer tweet. For a retweet that is exactly
+   backwards — its media and its URLs are on the retweeted status — so the tweet most likely to
+   end in an appended link was the one that claimed to have no media;
+3. some payloads name the link nowhere at all (an outer media array carrying only
+   `media_url_https`), which no entity-driven approach can cover.
+
+Hence: collect **every** media array in the payload and let each consumer pick (display wants the
+first non-empty; link stripping wants the union, because the text and the entities can come from
+different levels), and keep a second, narrower pass for the payloads that name nothing — gated on
+the two conditions that together make a trailing link provably not the author's (the tweet has
+media, and `entities.urls` is empty).
+
+**The user's own words are the best spec available.** "Some still have it, some don't" was the
+whole diagnosis: it said the defect was conditional on the tweet's *shape*, and the screenshot
+named the shape — the ones keeping the link were retweets. A report of "it works sometimes" is a
+description of a condition to find, not a reason to test harder.
+
+---
+
+## 22. A migration test that re-implements the migration tests nothing
+
+`channelSync` repairs stored rows the adapter returns, but a normal sync only returns a channel's
+newest ~10 posts. A row older than that window **can never acquire a fresh counterpart**, and no
+UI action rewrites it either — force refresh replaces what the adapter returns, which is the same
+newest-N. So a parser fix plus a repair rule is still not enough for old rows; the last resort is
+a Dexie migration (here v5, cleaning stored tweets and tombstone snapshots).
+
+Two things this cost:
+
+- **Export the migration rule and have the test use it.** The first version of the migration test
+  declared its own copy of the upgrade callback — which is how the existing v4 test is written,
+  to pin the schema independently. The result was a test asserting a *copy* of the behaviour: a
+  mutation removing the media gate from the shipped rule left it green. Declare the version
+  chain inline (that is what pins the shape), but call the production callback.
+- On a media post, a **trailing** t.co link is removable; a mid-caption one is not. The database
+  keeps no entity list, so the text-only rule must be narrower than the adapter's — which is why
+  the two live in `src/utils/tco.ts` as separate functions with separate justifications.
+
 ---
 
 ## Fix queue
@@ -490,4 +536,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 384 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 408 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
