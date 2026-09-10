@@ -202,3 +202,58 @@ describe('douyin history dig', () => {
     expect(res.error).toBeDefined();
   });
 });
+
+/**
+ * The stated work count includes works the author has hidden.
+ *
+ * Confirmed by the user for a real creator: 「uimi 一共就这几个可见作品，正常用户
+ * 只能看到这些。有一部分是作者隐藏了」— so a visitor who can see fewer works than
+ * the header states is looking at the *normal* state of that profile, not at a
+ * loading failure or a login wall.
+ *
+ * Two things follow, and both were wrong before:
+ *   - the message must not read as "you should be seeing all N", because that
+ *     sends the user to log in for a shortfall logging in cannot fix;
+ *   - the count still must not be used to *claim* completeness, because the
+ *     asymmetry is real (writing __END__ wrongly is unrecoverable, staying
+ *     resumable wrongly costs one re-scroll).
+ */
+describe('douyin stated count versus hidden works', () => {
+  it('does not present the stated count as the number that should be visible', async () => {
+    // 10 loaded, 21 stated, an empty-ish grid path: the message must not promise
+    // that 21 works are reachable.
+    stubChannel({ ...videoSnapshot, items: [], statedTotal: 21 });
+    const res = await douyinAdapter.fetchLatest(channel, 10);
+
+    expect(res.error?.code).toBe('parse');
+    // Names the count, and says what it means.
+    expect(res.error?.message).toContain('21');
+    expect(res.error?.message).toContain('隐藏');
+    // Must not imply the grid failed to show works that exist.
+    expect(res.error?.message).not.toContain('但作品列表未加载出来');
+  });
+
+  it('says a shortfall against the stated count is expected, not a fault', async () => {
+    stubChannel({ ...videoSnapshot, statedTotal: 29, saturated: true });
+    const newest = Math.max(
+      ...videoSnapshot.items.map((i) => Number(BigInt(i.awemeId) >> 32n) * 1000),
+    );
+    const res = await douyinAdapter.fetchLatest(channel, 50, {
+      isHistory: true,
+      sinceTimestamp: newest,
+    });
+
+    expect(res.error?.code).toBe('auth');
+    expect(res.error?.message).toContain('隐藏');
+    expect(res.error?.message).toContain('属正常');
+  });
+
+  it('still refuses to end the dig on that shortfall', async () => {
+    // The safety property is unchanged: an unaccounted-for shortfall is never
+    // treated as "we reached the end", because __END__ is unrecoverable.
+    stubChannel({ ...videoSnapshot, statedTotal: 29, saturated: true });
+    const res = await douyinAdapter.fetchLatest(channel, 50, { isHistory: true });
+
+    expect(res.hasMore).not.toBe(false);
+  });
+});

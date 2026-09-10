@@ -120,11 +120,28 @@ export const douyinAdapter: PlatformAdapter = {
     // be a lie, so the truncation is surfaced as an auth error instead — the sync
     // layer shows the message and does NOT park the cursor at __END__.
     const isDeep = isDeepRequest(options);
-    // Unknown totals are treated as potentially truncated too: when the header
-    // count could not be read as a plain integer, "the grid stopped growing"
-    // carries no evidence of completeness, and claiming hasMore:false would park
-    // the cursor at __END__ on pure guesswork. Only a stated total that the grid
-    // actually reached may end the dig.
+
+    // Completeness is NOT provable from the stated work count.
+    //
+    // `statedTotal` counts works the author has hidden, so a creator who hid
+    // anything loads fewer works than it states and `items.length < statedTotal`
+    // is permanently true. That makes the count useless as a *positive* test for
+    // "we are done": it can only ever say "you have not yet loaded as many as are
+    // claimed", which is expected and not evidence of anything unseen.
+    //
+    // It stays the test anyway, deliberately, and only in the safe direction.
+    // The two ways to be wrong are not symmetric:
+    //   - claiming complete when works remain writes `__END__`, and the user can
+    //     never dig those works again — unrecoverable without editing the DB;
+    //   - leaving a dig resumable when it was already complete costs one needless
+    //     re-scroll, and loses nothing.
+    // So incompleteness is only ever *allowed* to be concluded from evidence that
+    // the grid reached the end of what this visitor can see
+    // (`snapshotCompleteAtLoginWall`), never inferable from the count.
+    //
+    // What the count must NOT do is blame the user: the message below no longer
+    // reads as "you should be seeing all N", because for a creator with hidden
+    // works that sends the user to log in for a shortfall logging in cannot fix.
     const truncated =
       snapshot.statedTotal > 0
         ? snapshot.items.length < snapshot.statedTotal
@@ -139,8 +156,8 @@ export const douyinAdapter: PlatformAdapter = {
         },
         error: fetchError(
           'auth',
-          snapshot.statedTotal > 0
-            ? `抖音页面只加载出 ${snapshot.items.length} / ${snapshot.statedTotal} 篇作品便停止。更早的作品需要在抖音标签页中登录后向下滚动加载，请登录后重试。`
+          snapshot.statedTotal > 0 && snapshot.items.length < snapshot.statedTotal
+            ? `抖音页面加载出 ${snapshot.items.length} 篇作品后停止增长（主页标注 ${snapshot.statedTotal} 篇，该数字包含作者隐藏的作品，故少于标注属正常）。若确有更早的作品，请在该创作者的抖音标签页中登录后向下滚动加载再重试。`
             : `抖音页面加载了 ${snapshot.items.length} 篇作品后停止增长，且未能读取作品总数，无法确认已到历史底部。请在抖音标签页中登录后向下滚动加载，再重新回溯。`,
         ),
         totalFetched: snapshot.items.length,
@@ -166,7 +183,10 @@ export const douyinAdapter: PlatformAdapter = {
         error: fetchError(
           'parse',
           snapshot.statedTotal > 0
-            ? `抖音页面显示该创作者有 ${snapshot.statedTotal} 篇作品，但作品列表未加载出来。请在抖音标签页中确认该主页能正常显示作品后再同步。`
+            // Does not promise the stated count is visible: it includes hidden
+            // works, so citing it as an expectation sent the user looking for
+            // works that were never going to appear.
+            ? `抖音作品列表未加载出来（主页标注 ${snapshot.statedTotal} 篇，含作者隐藏的作品）。请在抖音标签页中确认该主页能正常显示作品后再同步。`
             : '抖音页面未加载出任何作品。若该创作者确有作品，通常是页面网格尚未渲染完成——请在抖音标签页中打开该主页、确认能看到作品后再同步。',
         ),
         totalFetched: 0,
