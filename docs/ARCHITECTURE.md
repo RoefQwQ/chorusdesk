@@ -133,7 +133,13 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 - 实体：
   - `Creator { id, name, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
   - `Channel { id, creatorId, platform, accountId, displayName, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。
-  - `Post { id, creatorId, channelId, platform, channelLabel?, title?, content, mediaList: MediaItem[], originalUrl, publishedAt, fetchedAt, isRead, isBookmarked?, isRepost?, authorMeta? }`。
+  - `Post { id, creatorId, channelId, platform, channelLabel?, title?, content, contentHtml?, mediaList: MediaItem[], originalUrl, publishedAt, fetchedAt, isRead, isBookmarked?, isRepost?, authorMeta? }`。
+    - `content` 是纯文本正文，所有平台都有，用于卡片预览、搜索与过滤。
+    - `contentHtml` 是**已净化**的文章 HTML，目前仅 RSS 设置：其正文是文章而非配文，
+      标题层级 / 段落 / 列表 / 行内图片就是内容本身。取值经
+      `src/utils/sanitizeHtml.ts` 处理（元素与属性白名单 + 协议校验），
+      渲染端（阅读视图）可直接交给 `v-html`。纯文本正文不设置该字段，
+      以保留源自身的换行。
   - `AppSettings`：`theme / itemsPerFetch / requestDelayMs / enableR18Blur / autoOpenOriginalUrl / enableAutoSync? / hideReposts? / hideTextOnly? / enableImageCache? / imageCacheDirectoryName? / imageCacheStrategy? / platformOrder?`（`platformOrder` 为侧边栏平台的自定义拖拽顺序，未列出的平台按 `PLATFORM_REGISTRY` 顺序）。
   - `DeletedPostRecord { id, channelId?, creatorId?, platform?, title?, deletedAt, postData?: Post }`。
 

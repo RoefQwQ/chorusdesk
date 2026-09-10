@@ -328,6 +328,47 @@ happened to load more slowly, succeeded — the fixed sleep raced the page and w
 
 ---
 
+## 18. Third-party HTML is sanitized at the boundary, and structure is rendered, not flattened
+
+An RSS item's `<content:encoded>` is **arbitrary markup authored by whoever controls the
+feed**. The reader renders the body, and once it renders markup it does so inside an
+extension page — a page that holds the user's cookies. This is therefore a code-execution
+boundary, not a formatting concern.
+
+- Sanitize **at parse time** in the adapter (`src/utils/sanitizeHtml.ts`), so stored data is
+  already safe and no renderer has to remember that a feed is untrusted.
+- The policy is an allowlist, and unknown elements are **unwrapped** (children kept) while
+  `script`/`style`/`iframe`/`form`/`svg` are **dropped with their subtree** — unwrapping
+  `<style>` would print its CSS into the article as text, and `svg`/`math` are a different
+  namespace where `tagName` cannot distinguish an `xlink:href` carrier from a plain `<a>`.
+- URLs are validated by **parsing and testing the protocol**, never by prefix-matching the
+  raw string: `java\nscript:` and a leading control character are the standard bypasses.
+  Relative URLs resolve against the article's link (a bare `/img.png` on a
+  `chrome-extension://` page resolves against the extension and 404s). `href`/`src` are set
+  explicitly and are never copied by the generic attribute loop.
+- Serialize nodes **this code created**; never rewrite the input's markup with patterns.
+
+The other half of the lesson: **a feed's structure is its content.** Flattening an article to
+text is what pushed every image into a gallery under the body (measured: 23 images in one
+article, rendered as a "+17" placeholder grid) and left headings indistinguishable from
+paragraphs. Store the structure (`Post.contentHtml`), render it with tag-level typography
+(`.article-body` in `assets/main.css`), and **do not render the same media twice** —
+`standaloneMedia()` is the single rule both the card and the reader use.
+
+### The image proxy: reachability is not credentials
+
+`proxyImage` used to refuse any host outside `PLATFORM_HOSTS`. A feed may host its images
+anywhere, and the proxy is the only path that can load a CDN which blocks hotlinking or sends
+no CORS header — so every RSS article image was unreadable. The check was the same category
+error as rule 3, one layer down: **any http(s) host may be fetched; only a platform host
+gets the user's session** (`credentials: 'include'`, platform `Referer`). Reachability was
+never what the allowlist was for.
+
+Any change here MUST keep those two properties pinned together: `tests/proxyImage.test.ts`
+asserts both that an unknown host is fetched *and* that it receives no cookies.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -345,4 +386,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 266 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse test, which needs a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 308 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
