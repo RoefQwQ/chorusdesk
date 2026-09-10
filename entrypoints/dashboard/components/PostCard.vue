@@ -4,7 +4,7 @@ import { Bookmark, ChevronRight, Clock, ExternalLink, Video, ImageOff, Image as 
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '../../../src/utils/media';
 import { imageCacheService } from '../../../src/services/imageCache';
-import { devLog } from '../../../src/utils/devLog';
+import { recordMediaProbe } from '../../../src/utils/mediaProbeLog';
 import { shouldShowTitle, showsFullBody, standaloneMedia } from '../../../src/utils/postText';
 
 const props = withDefaults(defineProps<{
@@ -246,18 +246,15 @@ async function probeMedia(): Promise<void> {
     if (key) mediaProbed.value[key] = true;
   }
 
-  // A probe that takes this long means the session caches in `fsManager` are not
-  // doing their job; surface it rather than letting it show up as "images are slow".
-  const elapsed = Math.round(performance.now() - startedAt);
-  if (elapsed > 1500) {
-    devLog.warn(
-      'media',
-      `本地磁盘探测耗时 ${elapsed}ms（${cardMedia.value.length} 项，命中 ${hits}）`,
-      `平台 ${props.post.platform}`,
-    );
-  } else {
-    devLog.debug('media', `磁盘探测 ${elapsed}ms（命中 ${hits}/${cardMedia.value.length}）`);
-  }
+  // One line per burst, not per card: the per-card line above made the developer
+  // log 68% noise (measured: 102 of 150 lines), which is how a useful window
+  // becomes hard to find. See `mediaProbeLog.ts`.
+  recordMediaProbe(
+    cardMedia.value.length,
+    hits,
+    Math.round(performance.now() - startedAt),
+    props.post.platform,
+  );
 }
 
 onMounted(() => {
