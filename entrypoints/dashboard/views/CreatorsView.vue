@@ -43,6 +43,11 @@ import {
   Edit3,
   History,
   AlertCircle,
+  Users,
+  ChevronDown,
+  LayoutGrid,
+  List,
+  LayoutList,
 } from 'lucide-vue-next';
 import AppSelect from '../components/AppSelect.vue';
 import ChannelRow from '../components/creator/ChannelRow.vue';
@@ -475,10 +480,10 @@ function loadDemoData() {
 </script>
 
 <template>
-  <section class="space-y-6">
-    <!-- Header & Action Toolbar -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-      <div class="flex items-center gap-2.5 flex-wrap">
+  <section class="space-y-4">
+    <!-- Header & Action Toolbar (single compact row) -->
+    <div class="flex flex-wrap items-center justify-between gap-2.5">
+      <div class="flex items-center gap-2 flex-wrap">
         <h2 class="font-bold text-lg text-slate-900 dark:text-white">关注管理</h2>
         <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900">
           {{ filteredCreatorsList.length }} / {{ context.creators.length }} 位创作者
@@ -805,20 +810,22 @@ function loadDemoData() {
                 <AlertCircle class="w-2.5 h-2.5" />
                 <span>{{ getCreatorSyncSummary(c.id).errorCount }}个异常</span>
               </span>
-
               <button
                 type="button"
                 @click="toggleExpandCreator(c.id)"
-                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer"
-                :title="expandedCreatorIds.has(c.id) ? '收起账号详情' : '展开管理各平台账号'"
+                class="relative p-1.5 text-slate-400 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                :title="expandedCreatorIds.has(c.id) ? `收起账号详情（共 ${context.channels.filter(ch => ch.creatorId === c.id).length} 个账号）` : `展开管理各平台账号（共 ${context.channels.filter(ch => ch.creatorId === c.id).length} 个账号）`"
               >
-                <span class="font-mono">{{ context.channels.filter(ch => ch.creatorId === c.id).length }}</span>
-                <span class="text-slate-400 dark:text-slate-500">账号</span>
-                <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
+                <Users class="w-4 h-4" />
+                <span
+                  class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-white text-[9px] font-mono font-bold flex items-center justify-center leading-none"
+                >
+                  {{ context.channels.filter(ch => ch.creatorId === c.id).length }}
+                </span>
+                <ChevronDown class="w-3 h-3 absolute -bottom-0.5 -right-0.5 text-indigo-500 dark:text-indigo-400 transition-transform duration-200 bg-white dark:bg-slate-900 rounded-full" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
               </button>
             </div>
           </div>
-        </div>
 
         <!-- Expanded Account Details in Grid Mode -->
         <div
@@ -850,6 +857,7 @@ function loadDemoData() {
               @cycle-role="cycleChannelRole"
             />
           </div>
+        </div>
         </div>
       </div>
     </div>
