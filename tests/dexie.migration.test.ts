@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import type { Post, DeletedPostRecord } from '../src/types';
+import { migrateStoredTweetLinks } from '../src/infrastructure/db/database';
 
 /**
  * Permanent regression test for the Dexie v3 → v4 migration
@@ -180,5 +181,175 @@ describe('Dexie v3 → v4 migration (0|1 index keys)', () => {
     expect(rows.map((r) => r.id)).toEqual(['new_1']);
     fresh.close();
     db.close();
+  });
+});
+
+/**
+ * Permanent regression test for the Dexie v4 → v5 migration.
+ *
+ * The adapter stopped leaking X's appended `t.co` link, and `channelSync` repairs
+ * stored rows — but a normal sync only returns the newest ~10 posts of a channel,
+ * so a row older than that window can never acquire a fresh counterpart, and no
+ * UI action rewrites it (force refresh replaces what the adapter returns, which
+ * is the same newest-N). Observed on a real card: still carrying its link with a
+ * `4 小时前 同步` footer while a sync ran.
+ *
+ * The rule is text-only and therefore deliberately narrow — the entity list that
+ * lets the adapter tell an appended link from a typed one does not survive in the
+ * database — so it only touches rows WITH media and only a link at the very end.
+ * `isRead` / `isBookmarked` must survive, since the migration rewrites content on
+ * rows the user has already read or saved.
+ */
+const linkV5dbName = 'ChorusMigrationV5TestDB';
+
+function openV4ForV5(): Dexie {
+  const db = new Dexie(linkV5dbName);
+  db.version(1).stores({
+    creators: 'id, name, *tags, createdAt, sortOrder',
+    channels: 'id, creatorId, platform, accountId, status, lastCheckAt',
+    posts: 'id, creatorId, channelId, platform, publishedAt, fetchedAt, isRead, isBookmarked',
+    settings: 'key',
+  });
+  db.version(2).stores({
+    posts: 'id, creatorId, channelId, platform, publishedAt, fetchedAt, isRead, isBookmarked, [channelId+publishedAt]',
+  });
+  db.version(3).stores({ deletedPostIds: 'id, channelId, creatorId, deletedAt' });
+  db.version(4).upgrade(async (tx) => {
+    await tx.table('posts').toCollection().modify((post: Post) => {
+      post.isRead = post.isRead ? 1 : 0;
+      post.isBookmarked = post.isBookmarked ? 1 : 0;
+    });
+  });
+  return db;
+}
+
+/**
+ * v5 uses the **production** upgrade callback, not a copy.
+ *
+ * The version chain is still declared inline — that is what pins the schema shape
+ * independently — but the rule itself is imported. An earlier version of this
+ * test re-implemented the callback, and a mutation that removed the media gate
+ * from the shipped rule left the suite green: the test was asserting a copy of
+ * the behaviour, not the behaviour.
+ */
+function openV5Database(): Dexie {
+  const db = openV4ForV5();
+  db.version(5).upgrade(migrateStoredTweetLinks);
+  return db;
+}
+
+const LINK = 'https://t.co/abc1234567';
+
+function v4Post(overrides: Partial<Post> = {}): Post {
+  return {
+    id: 'twitter_1',
+    creatorId: 'creator-1',
+    channelId: 'twitter:a',
+    platform: 'twitter',
+    title: 'caption',
+    content: `caption ${LINK}`,
+    mediaList: [{ type: 'image', previewUrl: 'https://pbs.twimg.com/a.jpg', originalUrl: 'https://pbs.twimg.com/a.jpg' }],
+    originalUrl: 'https://x.com/a/status/1',
+    publishedAt: 1_700_000_000_000,
+    fetchedAt: 1_700_000_000_000,
+    isRead: 0,
+    isBookmarked: 0,
+    ...overrides,
+  };
+}
+
+beforeAll(async () => {
+  await Dexie.delete(linkV5dbName);
+  const v4 = openV4ForV5();
+  await v4.open();
+  await v4.table('posts').bulkPut([
+    // The shape the bug produced: caption + X's appended link, with media.
+    v4Post({ id: 'twitter_appended', isRead: 1, isBookmarked: 1 }),
+    // No media: a link here is the author's content, not X's append.
+    v4Post({ id: 'twitter_nomedia', mediaList: [], content: `作者写的 ${LINK}` }),
+    // A link mid-caption is the author's.
+    v4Post({ id: 'twitter_middle', content: `看看 ${LINK} 很好` }),
+    // Another platform, untouched.
+    v4Post({ id: 'weibo_1', platform: 'weibo', content: `微博正文 ${LINK}` }),
+    // A media-only tweet: the link WAS the whole body.
+    v4Post({ id: 'twitter_onlylink', content: LINK, title: '' }),
+  ]);
+  await v4.table('deletedPostIds').bulkPut([
+    {
+      id: 'twitter_dead',
+      channelId: 'twitter:a',
+      deletedAt: 1_700_000_100_000,
+      postData: v4Post({ id: 'twitter_dead' }),
+    },
+  ]);
+  v4.close();
+});
+
+describe('Dexie v4 → v5 migration (X appended t.co links)', () => {
+  it('strips a trailing link from a stored media tweet', async () => {
+    const v5 = openV5Database();
+    await v5.open();
+
+    const row = await v5.table('posts').get('twitter_appended');
+    expect(row.content).toBe('caption');
+  });
+
+  it('preserves the read and bookmark state of a rewritten row', async () => {
+    // The migration rewrites content on rows the user has already flagged.
+    const v5 = openV5Database();
+    await v5.open();
+
+    const row = await v5.table('posts').get('twitter_appended');
+    expect(row.isRead).toBe(1);
+    expect(row.isBookmarked).toBe(1);
+  });
+
+  it('empties a media-only tweet whose body was just the link', async () => {
+    const v5 = openV5Database();
+    await v5.open();
+
+    expect((await v5.table('posts').get('twitter_onlylink')).content).toBe('');
+  });
+
+  it('leaves a row with no media alone', async () => {
+    // Without media there is no reason to believe X appended anything, so the
+    // link is the author's and must survive.
+    const v5 = openV5Database();
+    await v5.open();
+
+    expect((await v5.table('posts').get('twitter_nomedia')).content).toBe(`作者写的 ${LINK}`);
+  });
+
+  it('leaves a link in the middle of a caption alone', async () => {
+    const v5 = openV5Database();
+    await v5.open();
+
+    expect((await v5.table('posts').get('twitter_middle')).content).toBe(`看看 ${LINK} 很好`);
+  });
+
+  it('leaves other platforms alone', async () => {
+    const v5 = openV5Database();
+    await v5.open();
+
+    expect((await v5.table('posts').get('weibo_1')).content).toBe(`微博正文 ${LINK}`);
+  });
+
+  it('cleans the tombstone snapshot too, so a restore does not bring the link back', async () => {
+    const v5 = openV5Database();
+    await v5.open();
+
+    const tombstone = await v5.table('deletedPostIds').get('twitter_dead');
+    expect(tombstone.postData.content).toBe('caption');
+  });
+
+  it('is idempotent: a second open changes nothing further', async () => {
+    const v5 = openV5Database();
+    await v5.open();
+    v5.close();
+
+    const again = openV5Database();
+    await again.open();
+    expect((await again.table('posts').get('twitter_appended')).content).toBe('caption');
+    again.close();
   });
 });

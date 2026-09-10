@@ -1,5 +1,43 @@
-import Dexie, { type Table } from 'dexie';
+import Dexie, { type Table, type Transaction } from 'dexie';
 import type { Creator, Channel, Post, DeletedPostRecord } from '../../types';
+import { stripTrailingTcoLink } from '../../utils/tco';
+
+/**
+ * Version 5: strip X's appended `t.co` link from stored tweets.
+ *
+ * The adapter now removes it at parse time, and `channelSync` repairs rows the
+ * adapter returns — but a normal sync only ever returns the newest ~10 posts of a
+ * channel, so a row older than that window is unreachable: it can never acquire a
+ * fresh counterpart, and no UI action rewrites it either (force refresh replaces
+ * what the adapter returns, which is the same newest-N). Observed on a real card:
+ * a row still showing its link with a `4 小时前 同步` footer while a sync ran.
+ *
+ * Only rows WITH media are touched, and only a link at the very end of the text:
+ * X appends one per medium, and without the entity list — which does not survive
+ * in the database — an appended link is otherwise indistinguishable from one the
+ * author typed. A row with no media is left alone, because there its link is the
+ * author's content.
+ */
+export function stripStoredTweetLink(post: Post): void {
+  if (post.platform !== 'twitter') return;
+  if (!Array.isArray(post.mediaList) || post.mediaList.length === 0) return;
+  post.content = stripTrailingTcoLink(post.content);
+}
+
+/**
+ * The v5 upgrade body.
+ *
+ * Exported, and referenced by the migration test, so the rule under test is the
+ * one that actually ships. The first version of that test declared its own copy
+ * of this callback and therefore could not fail when the shipped rule was
+ * weakened — a mutation removing the media gate left it green.
+ */
+export async function migrateStoredTweetLinks(tx: Transaction): Promise<void> {
+  await tx.table('posts').toCollection().modify(stripStoredTweetLink);
+  await tx.table('deletedPostIds').toCollection().modify((record: DeletedPostRecord) => {
+    if (record.postData) stripStoredTweetLink(record.postData);
+  });
+}
 
 export class FeedDatabase extends Dexie {
   creators!: Table<Creator, string>;
@@ -44,6 +82,7 @@ export class FeedDatabase extends Dexie {
         }
       });
     });
+    this.version(5).upgrade(migrateStoredTweetLinks);
   }
 }
 

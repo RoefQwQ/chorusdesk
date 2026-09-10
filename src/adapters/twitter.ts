@@ -6,6 +6,10 @@ import { IS_SERVICE_WORKER } from '../utils/runtime';
 import type { JsonRecord, JsonValue } from '../utils/json';
 import { asRecord, firstFilled } from '../utils/json';
 import { devLog } from '../utils/devLog';
+import { stripAppendedLinks, stripTrailingTcoLink } from '../utils/tco';
+
+// Re-exported so the strip stays pinned on its own, away from the parser.
+export { stripAppendedLinks };
 
 /**
  * The tweet's own text, as X says it should be shown.
@@ -49,56 +53,74 @@ export function isMediaOnlyLinkText(text: string, hasMedia: boolean, authorUrlCo
 }
 
 /**
- * Remove the `t.co` URLs X appends to a tweet's text.
+ * Every media array this payload attaches to the tweet, its retweeted source, or
+ * neither.
  *
- * X glues a shortened URL to the end of `full_text` for every attached medium
- * and for a quoted tweet. `display_text_range` was believed to exclude them, and
- * it does on some payloads — but not reliably, which is why a caption rendered as
- * `正文… https://t.co/xxxx` with the link stuck to the end, and why a short
- * caption's title line became the caption *plus* the link.
+ * Returned as a list of arrays rather than one, because the two questions asked
+ * of it want different answers: **display** wants the first non-empty one (the
+ * tweet's own media, else the retweeted tweet's), while **link stripping** wants
+ * the union — the body may be the retweeted tweet's text while the entities sit
+ * on the outer tweet, or the reverse.
  *
- * X's own clients do not lean on the range for this: they take each media
- * entity's `url` and remove that exact substring. Same approach, which is why
- * this only ever removes URLs the payload itself names as appended.
- *
- * An author-typed link is **never** removed: it lives in `entities.urls`, not in
- * a media entity, so it is absent from `appendedUrls`. Dropping it would silently
- * delete something the author actually wrote.
+ * The previous version of this chain ended two of its branches at
+ * `…legacy.extended_entities` without reaching `.media`. That yields an *object*
+ * (`{ media: [...] }`), the caller's `Array.isArray` check then rejected it, and
+ * a retweet whose media lived only on the retweeted status silently came out with
+ * no media at all — and, because the appended-link candidates come from the same
+ * entities, with X's `t.co` link still stuck to the end of its caption.
  */
-export function stripAppendedLinks(text: string, appendedUrls: readonly unknown[]): string {
-  let out = text;
-  for (const raw of appendedUrls) {
-    const url = typeof raw === 'string' ? raw.trim() : '';
-    // Only a real t.co URL: a malformed entity value must not be able to blank
-    // out arbitrary text by matching a substring of it.
-    if (!/^https:\/\/t\.co\/\w+$/.test(url)) continue;
-    // Removed occurrence by occurrence rather than with one `replace`, so the
-    // pass cannot restart inside text it already rewrote.
-    out = out.split(url).join(' ');
-  }
-  // A removed link leaves a gap where it stood: a stray double space when it was
-  // mid-caption, a blank line when it was alone on the last one. Collapse both so
-  // the body reads as the author wrote it.
-  return out
-    .replace(/[^\S\n]{2,}/g, ' ')
-    .replace(/[^\S\n]+$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+function mediaArraysIn(tweet: JsonRecord): unknown[][] {
+  const rtResult = asRecord(asRecord(tweet.retweeted_status_result).result);
+  const candidates: unknown[] = [
+    asRecord(tweet.extended_entities).media,
+    asRecord(tweet.entities).media,
+    asRecord(asRecord(rtResult.legacy).extended_entities).media,
+    asRecord(asRecord(asRecord(rtResult.tweet).legacy).extended_entities).media,
+  ];
+  return candidates.filter((candidate): candidate is unknown[] => Array.isArray(candidate) && candidate.length > 0);
 }
 
 /**
- * The `t.co` URLs this payload says were appended to the tweet's text.
+ * How many URLs the author typed, across the levels that can hold the text.
  *
- * Read from the entities rather than pattern-matched, because that is the only
- * way to tell X's appended link apart from one the author typed. Values are
- * passed through unvalidated — `stripAppendedLinks` is the single place that
- * decides what counts as an appended link.
+ * Read from the tweet *and* its retweeted source: the body may come from either,
+ * and a count that missed the level the text came from would let the text-only
+ * fallback below mistake an author's link for one of X's appended ones.
  */
-function appendedLinkUrls(mediaItems: readonly unknown[], tweet: JsonRecord): unknown[] {
+function authorUrlCountIn(tweet: JsonRecord): number {
+  const rtResult = asRecord(asRecord(tweet.retweeted_status_result).result);
+  const sources: unknown[] = [
+    asRecord(tweet.entities).urls,
+    asRecord(asRecord(rtResult.legacy).entities).urls,
+    asRecord(asRecord(asRecord(rtResult.tweet).legacy).entities).urls,
+  ];
+  return sources.reduce<number>((count, urls) => count + (Array.isArray(urls) ? urls.length : 0), 0);
+}
+
+/** The media to render: the tweet's own if it has any, else the retweeted tweet's. */
+function displayMediaIn(tweet: JsonRecord): unknown[] {
+  return mediaArraysIn(tweet)[0] ?? [];
+}
+
+/**
+ * The `t.co` URLs this payload names as appended to the text.
+ *
+ * Gathered from **every** media array plus the quoted tweet's permalink, not just
+ * from the media being rendered: for a retweet the text and the entities can come
+ * from different levels, and a candidate list missing the half that matches the
+ * text would silently leave the link in place.
+ *
+ * Values are passed through unvalidated — `stripAppendedLinks` is the single
+ * place that decides what counts as an appended link, so only exact `t.co` URLs
+ * are ever removed.
+ */
+function appendedLinkUrlsIn(tweet: JsonRecord): unknown[] {
   const urls: unknown[] = [];
-  for (const raw of mediaItems) {
-    const url = asRecord(raw).url;
-    if (typeof url === 'string' && url) urls.push(url);
+  for (const media of mediaArraysIn(tweet)) {
+    for (const raw of media) {
+      const url = asRecord(raw).url;
+      if (typeof url === 'string' && url) urls.push(url);
+    }
   }
   // A quoted tweet is appended the same way, from its permalink entity.
   const quotedPermalink = asRecord(tweet.quoted_status_permalink).url;
@@ -355,11 +377,14 @@ export const twitterAdapter: PlatformAdapter = {
       // Media presence and author-typed URL count are needed while deciding what
       // the body is (see `isMediaOnlyLinkText`), so they are read here rather
       // than in the media section further down.
-      const hasMedia = Array.isArray(asRecord(tweet.extended_entities).media)
-        || Array.isArray(asRecord(tweet.entities).media);
-      const authorUrlCount = Array.isArray(asRecord(tweet.entities).urls)
-        ? (asRecord(tweet.entities).urls as unknown[]).length
-        : 0;
+      //
+      // Both are read across the retweeted level as well. A retweet carries its
+      // media — and, if the original author typed a link, its URLs — on the
+      // retweeted status; asking only the outer tweet answered "no media" for
+      // exactly the tweets whose caption is most likely to end in X's appended
+      // link, and "no author URL" for tweets that do have one.
+      const hasMedia = mediaArraysIn(tweet).length > 0;
+      const authorUrlCount = authorUrlCountIn(tweet);
 
       // Support long-form text (NoteTweets). X ships this under
       // `result.note_tweet` in some responses and the tweet's own
@@ -437,13 +462,7 @@ export const twitterAdapter: PlatformAdapter = {
 
       // Extract media
       const mediaList: Post['mediaList'] = [];
-      const mediaSource =
-        asRecord(tweet.extended_entities).media ||
-        asRecord(tweet.entities).media ||
-        asRecord(asRecord(asRecord(tweet.retweeted_status_result).result).legacy).extended_entities ||
-        asRecord(asRecord(asRecord(asRecord(tweet.retweeted_status_result).result).tweet).legacy).extended_entities ||
-        [];
-      const mediaItems = Array.isArray(mediaSource) ? mediaSource : [];
+      const mediaItems = displayMediaIn(tweet);
 
       for (const rawM of mediaItems) {
         const m = asRecord(rawM);
@@ -473,7 +492,24 @@ export const twitterAdapter: PlatformAdapter = {
       // X appends a `t.co` URL per attached medium and for a quoted tweet.
       // Removed here, before the title is derived from the first line, so a short
       // caption does not become "caption https://t.co/…" in bold.
-      fullText = stripAppendedLinks(fullText, appendedLinkUrls(mediaItems, tweet));
+      //
+      // Two passes, because the payload does not always name the link. The
+      // entity-driven one is precise and works whatever the caption says; the
+      // text-only one covers the payloads where no entity carries a `url` (a
+      // retweet whose outer media array holds only `media_url_https`, or an inner
+      // status this parser could not read).
+      fullText = stripAppendedLinks(fullText, appendedLinkUrlsIn(tweet));
+
+      // The text-only pass runs under the two conditions that together make a
+      // trailing link provably not the author's: the tweet has media, so X
+      // appended something to the text, and the author typed no URL of their own
+      // (`entities.urls` is where a typed link lives). Same discriminator
+      // `isMediaOnlyLinkText` uses, applied to a trailing link rather than a whole
+      // body. Only trailing links are considered — a link mid-caption is far more
+      // likely to be the author's.
+      if (hasMedia && authorUrlCount === 0) {
+        fullText = stripTrailingTcoLink(fullText);
+      }
 
       // Clean title. A bare link (or a body we could not read) makes a useless
       // card title, so fall back to the account-based one rather than printing

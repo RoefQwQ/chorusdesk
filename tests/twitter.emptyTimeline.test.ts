@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { stripAppendedLinks, twitterAdapter } from '../src/adapters/twitter';
+import { stripTrailingTcoLink } from '../src/utils/tco';
 import type { Channel } from '../src/types';
 
 /**
@@ -573,5 +574,183 @@ describe('stripAppendedLinks', () => {
 
   it('ignores a non-string entry rather than throwing', () => {
     expect(stripAppendedLinks('正文', [null, undefined, 42, { url: MEDIA }])).toBe('正文');
+  });
+});
+
+/**
+ * Retweets, where the media and the text can live on different levels.
+ *
+ * The user's report was that **some** tweets kept X's appended `t.co` link and
+ * others did not, and the ones that kept it were retweets. The cause was the
+ * media chain: its last two branches ended at `extended_entities` — an object —
+ * and never reached `.media`, so `Array.isArray` rejected it and a retweet whose
+ * media lived only on the retweeted status produced **no media at all**. Since
+ * the appended-link candidates are read from those same entities, the link had
+ * nothing to match against and stayed on the caption.
+ */
+function retweetEntry(
+  id: string,
+  opts: {
+    outerMedia?: boolean;
+    innerMediaUrl?: string;
+    caption?: string;
+    rtText?: string;
+    /** Ship a retweeted status this parser cannot read at all. */
+    innerUnresolvable?: boolean;
+  } = {},
+) {
+  const innerLink = opts.innerMediaUrl ? 'https://t.co/inner001' : '';
+  const innerMedia = {
+    type: 'photo',
+    media_url_https: `https://pbs.twimg.com/${id}_inner.jpg`,
+    url: 'https://t.co/inner001',
+    expanded_url: 'https://x.com/original/status/777/photo/1',
+  };
+  const caption = opts.caption ?? '';
+  // X's own retweet text: the original's text, prefixed.
+  const innerText = opts.rtText ?? (caption ? `${caption} ${innerLink}` : innerLink);
+  const outerText = `RT @HongBsWs: ${innerText}`;
+
+  const innerLegacy: Record<string, unknown> = {
+    id_str: `${id}_inner`,
+    full_text: innerText,
+    created_at: 'Wed Sep 10 08:00:00 +0000 2026',
+    entities: { media: [innerMedia], urls: [] },
+    extended_entities: { media: [innerMedia] },
+  };
+
+  const legacy: Record<string, unknown> = {
+    id_str: id,
+    full_text: outerText,
+    created_at: 'Wed Sep 10 10:00:00 +0000 2026',
+    retweeted_status_result: opts.innerUnresolvable
+      ? { result: { __typename: 'Tweet', rest_id: `${id}_inner` } }
+      : {
+          result: {
+            __typename: 'Tweet',
+            rest_id: `${id}_inner`,
+            legacy: innerLegacy,
+            core: {
+              user_results: {
+                result: { legacy: { name: 'HongBsWs', screen_name: 'HongBsWs' } },
+              },
+            },
+          },
+        },
+  };
+
+  if (opts.outerMedia) {
+    // Some payloads carry a simplified copy of the media on the outer tweet —
+    // enough to render, without the entity `url` the strip needs.
+    legacy.extended_entities = {
+      media: [{ type: 'photo', media_url_https: `https://pbs.twimg.com/${id}_outer.jpg` }],
+    };
+  }
+
+  const result: Record<string, unknown> = {
+    __typename: 'Tweet',
+    rest_id: id,
+    legacy,
+    core: {
+      user_results: {
+        result: { legacy: { name: 'Artist', screen_name: 'artist' } },
+      },
+    },
+  };
+  return {
+    entryId: `tweet-${id}`,
+    content: { itemContent: { tweet_results: { result } } },
+  };
+}
+
+describe('twitter retweets', () => {
+  it('renders the retweeted tweet\'s media', () => {
+    // The chain bug: media on the retweeted status only.
+    const res = parse(payload([retweetEntry('r1', { innerMediaUrl: 'x', caption: 'クラレッタ' })]));
+
+    expect(res.posts[0].mediaList).toHaveLength(1);
+    expect(res.posts[0].mediaList[0].previewUrl).toContain('r1_inner.jpg');
+  });
+
+  it('strips the appended link when the media is on the retweeted status', () => {
+    // The user's case: a retweet whose caption kept the link.
+    const res = parse(payload([retweetEntry('r2', { innerMediaUrl: 'x', caption: 'クラレッタ・フリンツ' })]));
+
+    expect(res.posts[0].content).toContain('クラレッタ・フリンツ');
+    expect(res.posts[0].content).not.toContain('t.co/');
+  });
+
+  it('strips the link when the outer carries a copy of the media without an entity url', () => {
+    // The harder variant: the outer media array exists (so the image renders),
+    // but it has no `url`, and only the retweeted status names the link. Reading
+    // candidates from the rendered media alone missed it.
+    const res = parse(
+      payload([retweetEntry('r3', { outerMedia: true, innerMediaUrl: 'x', caption: 'クラレッタ' })]),
+    );
+
+    expect(res.posts[0].content).toBe('[转推 @HongBsWs]:\nクラレッタ');
+    expect(res.posts[0].content).not.toContain('t.co/');
+  });
+
+  it('strips the link when the payload names it nowhere at all', () => {
+    // The user's exact case. The retweeted status is unreadable, so no entity
+    // carries a `url` — and the outer text keeps X's own "RT @…" prefix rather
+    // than being rewritten, which is what the screenshot shows. Without the
+    // gated text-only pass there is nothing left to match against.
+    const res = parse(
+      payload([
+        retweetEntry('r6', { outerMedia: true, innerUnresolvable: true, innerMediaUrl: 'x', caption: 'クラレッタ' }),
+      ]),
+    );
+
+    expect(res.posts[0].content).toBe('RT @HongBsWs: クラレッタ');
+    expect(res.posts[0].content).not.toContain('t.co/');
+  });
+
+  it('keeps the retweet prefix and the caption', () => {
+    const res = parse(payload([retweetEntry('r4', { innerMediaUrl: 'x', caption: '新作公開' })]));
+
+    expect(res.posts[0].content).toBe('[转推 @HongBsWs]:\n新作公開');
+  });
+
+  it('leaves a retweet with no media untouched', () => {
+    const res = parse(payload([retweetEntry('r5', { caption: 'メディアなし', rtText: 'メディアなし' })]));
+
+    expect(res.posts[0].content).toBe('[转推 @HongBsWs]:\nメディアなし');
+  });
+});
+
+describe('stripTrailingTcoLink', () => {
+  const LINK = 'https://t.co/abc1234567';
+
+  it('removes a link at the very end', () => {
+    expect(stripTrailingTcoLink(`正文 ${LINK}`)).toBe('正文');
+  });
+
+  it('removes a link on its own trailing line', () => {
+    expect(stripTrailingTcoLink(`第一行\n第二行\n${LINK}`)).toBe('第一行\n第二行');
+  });
+
+  it('removes several trailing links', () => {
+    expect(stripTrailingTcoLink(`正文 ${LINK} https://t.co/zzz9999999`)).toBe('正文');
+  });
+
+  it('leaves a link in the middle of the text alone', () => {
+    // The text-only rule exists for rows with no entity data left, so it has to
+    // be narrow: a link mid-caption is far more likely to be the author's.
+    expect(stripTrailingTcoLink(`看看 ${LINK} 很好`)).toBe(`看看 ${LINK} 很好`);
+  });
+
+  it('leaves a non-t.co URL alone', () => {
+    expect(stripTrailingTcoLink('正文 https://example.com/a')).toBe('正文 https://example.com/a');
+  });
+
+  it('is a no-op when there is no link', () => {
+    expect(stripTrailingTcoLink('正文')).toBe('正文');
+  });
+
+  it('empties a body that was nothing but the link', () => {
+    // A media-only tweet: the link was the entire body.
+    expect(stripTrailingTcoLink(LINK)).toBe('');
   });
 });
