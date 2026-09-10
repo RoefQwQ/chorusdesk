@@ -154,7 +154,10 @@ async function run(message: Record<string, unknown> = {}): Promise<Record<string
       resolve((response ?? {}) as Record<string, unknown>);
     },
   );
-  await vi.advanceTimersByTimeAsync(20_000);
+  // Advance well past every bounded wait the handler uses: the 12s tab-load
+  // fallback, the 20s injection deadline, and the delays between retries. The
+  // handler settles as soon as it is done, so the surplus is inert.
+  await vi.advanceTimersByTimeAsync(60_000);
   return promise;
 }
 
@@ -284,17 +287,43 @@ describe('douyin snapshot — an injection the page destroyed', () => {
     expect(String(res.error)).toContain('跳转');
   });
 
-  it('gives up after a bounded number of attempts and still scrapes', async () => {
-    // A frame that keeps dying must not spin forever, and must not be reported as
-    // a rate limit while the tab is still sitting on the creator's profile.
+  it('still succeeds when a cold tab fails injection for many seconds', async () => {
+    // The user's case. A freshly created tab hydrates slowly; an injection into a
+    // page mid-hydration returns nothing. Under the old fixed count of three
+    // attempts (~1.4s) this was unrecoverable — the retries ran out long before
+    // the page was ready — so the channel failed with 「作品列表未加载出来」
+    // even though the very same page renders fine once given time.
+    //
+    // Eight failures at ~700ms apart is over five seconds of a page not being
+    // ready, which is the shape the logs showed.
+    probeFailures = 8;
+    failSilently = true;
+
+    const res = await run();
+
+    expect(res.success).toBe(true);
+    // It really did fail many times before giving a good answer.
+    expect(events.filter((e) => e === 'await-grid').length).toBeGreaterThan(8);
+    expect(res.code).toBeUndefined();
+  });
+
+  it('keeps retrying a cheap failure far more than a handful of times', async () => {
+    // The regression this replaced: retries were counted (3 attempts), and a
+    // failed injection costs about a second — so the loop gave up ~1.4s in while
+    // the page it was waiting for habitually takes ~10s to hydrate. Timing from
+    // the user's log showed three attempts inside 1.6s and the probe abandoned
+    // before its own 10s budget was ever reached once.
     probeFailures = 99;
     failSilently = true;
 
     const res = await run();
 
     expect(res.success).toBe(true);
-    // Three attempts: the initial one plus two retries.
-    expect(events.filter((e) => e === 'await-grid')).toHaveLength(3);
+    const probes = events.filter((e) => e === 'await-grid').length;
+    // Far beyond the old fixed count of three: the retry is bounded by time.
+    expect(probes).toBeGreaterThan(10);
+    // …and still bounded, so a hostile page cannot spin forever.
+    expect(probes).toBeLessThan(80);
     expect(events).toContain('inject');
   });
 

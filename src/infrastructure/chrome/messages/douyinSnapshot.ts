@@ -355,8 +355,16 @@ export async function sweepOrphanDouyinTempTab(): Promise<void> {
 /** How long the in-page probe waits for the grid before reporting "not ready". */
 const GRID_WAIT_MS = 10_000;
 
-/** Bounded attempts for an injection the page's own navigation destroyed. */
-const INJECT_ATTEMPTS = 3;
+/**
+ * Total time to keep retrying an injection that never completes.
+ *
+ * Bounded by TIME because the failure mode is a page that is not ready yet, and
+ * the cost of a failed attempt says nothing about how close the page is. Sized
+ * against the measured hydration time (~10s for a cold Douyin profile) plus room
+ * for a couple of full probe budgets, while staying well inside `channelSync`'s
+ * 45s fetch timeout.
+ */
+const INJECT_DEADLINE_MS = 20_000;
 
 /** Pause between attempts, long enough for a frame swap to settle. */
 const INJECT_RETRY_DELAY_MS = 700;
@@ -417,15 +425,32 @@ async function injectAndAwait<T>(
  *
  * `ready: false, ran: true` is a real answer — the page loaded and the grid is not
  * there (a captcha, an auth wall, a genuinely slow render). `ran: false` is a
- * transient condition a retry routinely fixes, and must never be read as a
- * verdict about the page.
+ * transient condition and must never be read as a verdict about the page.
+ *
+ * **The retry is bounded by TIME, not by attempt count.** This is the fix for a
+ * real failure: a freshly created tab is hydrating, and an injection into a page
+ * that is mid-hydration returns no result. Measured from the user's log, three
+ * attempts cost 1.6s in total — so the per-attempt 10s budget was never reached
+ * once, and the probe was abandoned about 1.4s in. The same page was observed to
+ * hydrate after roughly 10s, which means the attempts simply ran out long before
+ * the page was ready. Counting attempts hid that: a cheap failure bought another
+ * cheap failure.
+ *
+ * A deadline fixes it in the cheap-failure case and costs nothing in the
+ * expensive one: an attempt that actually runs already spends its full budget, so
+ * a real "the grid is not there" answer still short-circuits the loop.
  */
-async function probeDouyinGrid(tabId: number): Promise<InjectionOutcome> {
+async function probeDouyinGrid(
+  tabId: number,
+  deadlineMs: number = INJECT_DEADLINE_MS,
+): Promise<InjectionOutcome> {
+  const deadline = Date.now() + deadlineMs;
   let outcome = await injectAndAwait(tabId, awaitDouyinGrid, [GRID_WAIT_MS]);
-  for (let attempt = 1; attempt < INJECT_ATTEMPTS && !outcome.ran; attempt++) {
+
+  while (!outcome.ran && Date.now() < deadline) {
     devLog.debug(
       'douyin',
-      `网格探针未完成，重试 ${attempt}/${INJECT_ATTEMPTS - 1}`,
+      '网格探针未能完成，重试',
       `tab ${tabId}：${outcome.error ?? '未知原因'}`,
     );
     await new Promise((resolve) => setTimeout(resolve, INJECT_RETRY_DELAY_MS));
@@ -441,6 +466,10 @@ async function probeDouyinGrid(tabId: number): Promise<InjectionOutcome> {
  * missing result is never data. It is the same transient frame swap, and it is
  * what made a channel whose probe had already failed report "no parseable works"
  * with nothing to distinguish it from a genuinely empty profile.
+ *
+ * Bounded on the same deadline as the probe. The collector is a better retry
+ * target than the probe was: it answers "not ready" and "here are the works" with
+ * one call, so a run that succeeds ends the loop immediately.
  */
 async function collectDouyinSnapshotReliably(
   tabId: number,
@@ -449,11 +478,13 @@ async function collectDouyinSnapshotReliably(
   func: (...args: never[]) => CollectedSnapshot | Promise<CollectedSnapshot>,
   args: unknown[],
 ): Promise<InjectionOutcome> {
+  const deadline = Date.now() + INJECT_DEADLINE_MS;
   let outcome = await injectAndAwait(tabId, func, args);
-  for (let attempt = 1; attempt < INJECT_ATTEMPTS && !outcome.ran; attempt++) {
+
+  while (!outcome.ran && Date.now() < deadline) {
     devLog.debug(
       'douyin',
-      `采集注入未完成，重试 ${attempt}/${INJECT_ATTEMPTS - 1}`,
+      '采集注入未完成，重试',
       `tab ${tabId}：${outcome.error ?? '未知原因'}`,
     );
     await new Promise((resolve) => setTimeout(resolve, INJECT_RETRY_DELAY_MS));
