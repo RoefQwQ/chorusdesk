@@ -797,6 +797,47 @@ other option) rather than silently picking.
 
 ---
 
+## 30. To verify a real component in a real browser, bundle it into one inlined HTML file
+
+Rule 28 covers what cannot be done here (loading the extension). This is the technique that
+covers what remains: real layout, real CSS, real component, no extension host.
+
+```bash
+# tiny harness: index.html + main.ts mounting the component, plus a vite config with
+npx vite build --config .tmp-harness/vite.config.ts
+# then inline the emitted JS and CSS into one file
+```
+
+Reasons each part is needed, all learned by it failing first:
+
+- **Vite, because Tailwind's content scan is rooted at the harness directory.** The first
+  attempt imported `assets/main.css` and produced a page with *no spacing at all*: every
+  utility class was absent, so `p-2.5` and `space-y-2` did nothing and rows came out 24px with
+  a 0px gap. Inline the **production** stylesheet (`.output/chrome-mv3/assets/main-*.css`)
+  instead — then the geometry is the extension's geometry.
+- **Inlined, because an ES module cannot be loaded from `file://`.** `<script type="module"
+  src="...">` fails with a CORS error ("Cross origin requests are only supported for protocol
+  schemes: chrome, chrome-extension, …"), and the page renders empty with no clue why. Putting
+  the JS and CSS text directly in the HTML removes the fetch. Use a lambda for the
+  replacement — the bundle contains backslashes that `re.sub` reads as group references.
+- **Real geometry, not assertions about geometry.** This is what jsdom cannot do, and the
+  numbers are worth reading: a scroll viewport's height, whether one copy of a list overflows
+  it, where a row boundary actually falls.
+
+Worked example — a seamless looping list: the wrap is `scrollTop -= copyHeight` with the
+content rendered twice. jsdom proves the arithmetic; only this proves the *seam*, by tracing
+`scrollTop` across the boundary and confirming the content under the viewport's top edge
+advances continuously (offset within a row going `33 → row ends → 0 of the next row`, never
+jumping). Measure and print the trace; do not eyeball it.
+
+Corollary worth stating: **when a test cannot distinguish two configurations, find out which
+one it is and say so.** Removing a `:loop="false"` from a list left the suite green because
+jsdom reports every height as 0, so the copy count is always 1 there. The fix was not a
+cleverer assertion — it was moving that check to the browser, where the copy count differs
+(1 vs 2) and the difference is directly observable.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -814,4 +855,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 457 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 475 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
