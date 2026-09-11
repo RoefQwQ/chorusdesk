@@ -121,7 +121,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 - `main.ts` 挂载 `App.vue`；`index.html` 含 `<meta name="referrer" content="no-referrer">`。
 - `App.vue` 负责顶部导航、跨页面状态组合、全局弹窗与仍未下沉的应用动作。
 - `views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均为真实页面承载组件，通过显式 context 与 emits 接收数据、上抛动作；原四个大模板区块已从 App.vue 删除。
-- `CreatorsView` 的目录筛选与工具条已下沉（2026-09-11，P4 切片 1）：`composables/useCreatorDirectoryFilters.ts` 持有搜索/平台/角色/标签三态筛选、排序键与方向及 `filteredCreatorsList` 等派生值（依赖以 getter 注入，保持对 props 的响应式追踪）；`components/creator/CreatorDirectoryToolbar.vue` 只渲染工具条，值与动作全部经单一 context 契约进出，自身不持有状态（根节点为三个 fragment，以保持 `<section class="space-y-4">` 的兄弟间距不变）。
+- `CreatorsView` 已两刀下沉（2026-09-11，P4 切片 1–2）：`composables/useCreatorDirectoryFilters.ts` 持有搜索/平台/角色/标签三态筛选、排序键与方向及 `filteredCreatorsList` 等派生值（依赖以 getter 注入，保持对 props 的响应式追踪）；`components/creator/CreatorDirectoryToolbar.vue`（工具条）与 `components/creator/CreatorListView.vue`（紧凑列表）只渲染，**不持有状态**，值与动作经单一 context 契约进出；三套视图共用的 9 个动作定义在 `types/creatorDirectory.ts`（`CreatorDirectoryActions`），避免同一接口复制三遍。工具条与列表视图的根节点分别为三个 fragment 与单个 div，以保持 `<section class="space-y-4">` 的兄弟间距与原有 DOM 结构不变（逐字节渲染对比见 `e2e/creators-render.mjs`）。
 - 已抽离部件：`composables/useDarkMode.ts`、`useDeletedPosts.ts`、`useDashboardData.ts`，以及 `components/PostCard.vue`、`MediaLightbox.vue`、`ImageCacheSettings.vue` 等；`composables/` 按功能分组，不在此逐一列举（列举与计数会随每次拆分失效）。
 - 当前未完成：App.vue 仍直接协调部分数据库/同步、Chrome Storage、备份导入导出和全局弹窗；真实 Chromium 点击回归仍需执行。不得据此宣称入口层已完全变薄。
 

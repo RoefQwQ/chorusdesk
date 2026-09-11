@@ -1,6 +1,13 @@
 # E2E / real-browser probes
 
 在**真实 Chrome 宿主**里验证扩展行为的脚本。不属于构建，不属于单元测试套件。
+`release-gate.mjs` 是发布门禁（`release.yml` 会跑）；`creators-render.mjs` 是重构期的
+渲染对比工具；其余为按需手跑的一次性探针。
+
+## 依赖
+
+`release-gate.mjs` 与 `creators-render.mjs` **零依赖**（用 Node ≥22 自带的全局 `WebSocket`），
+无需 `npm install`。两个老探针需要 `ws`：`cd e2e && npm install`。
 
 ## 约束（先读这段）
 
@@ -58,6 +65,30 @@ Linux/CI 无显示环境用 `xvfb-run -a node e2e/release-gate.mjs`。
   service worker target 里求值。
 
 不跨浏览器重启留存（重启后重新加载等同全新安装），所以 **alarm 跨重启行为在这里仍不可验**。
+
+## `creators-render.mjs` — 重构前后渲染对比（捕获 + 对比）
+
+**不是测试，不进 CI**。只回答一个问题：改 `CreatorsView` 时「有没有任何可观察的变化」。
+
+它加载构建产物、经**真实备份导入路径**播种固定 fixture（4 创作者 / 6 账号 / 6 动态，含角色、
+标签、报错账号、无账号创作者），再按脚本化顺序驱动交互（三视图切换、5 个表头排序与方向翻转、
+平台/角色/三态标签筛选、搜索、展开行、批量模式、手动排序拖拽），逐步记录创作者区块的
+`outerHTML`：
+
+```bash
+npm run build
+node e2e/creators-render.mjs capture /tmp/before.json
+# …改视图…
+node e2e/creators-render.mjs capture /tmp/after.json
+node e2e/creators-render.mjs diff /tmp/before.json /tmp/after.json   # 有差异则退出码 1
+```
+
+`capture` 每步都断言后置条件（渲染出的「N / M 位创作者」计数、`aria-sort` 方向、全选计数）
+以及拖拽后的落库顺序，**否则一次没点到的点击会让整个对比变得毫无意义**（`AGENTS.md` 规则 26）。
+两个选择器陷阱也已写进脚本头：查询必须限定在创作者区块内（仪表盘会同时保留其他视图的 DOM，
+FeedView 的标签芯片标题几乎一字之差），搜索框必须按 placeholder 定位。
+
+Chrome 路径可用 `--chrome <path>` 或 `CHROME_PATH` 指定；profile 自建自删，不碰任何正在运行的浏览器。
 
 ## 一次性探针
 

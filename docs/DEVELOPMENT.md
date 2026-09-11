@@ -20,7 +20,7 @@
 仓库正处于兼容式重构中，额外三条铁律：
 - **Dashboard 四个页面 View 已完成接入**：`FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 承载各自 Tab 模板，通过 context/emits 与 `App.vue` 通信。App.vue 仍保留跨页面组合、全局弹窗和部分应用动作，不能宣称入口层已完全变薄。
 - `useDashboardData` 只承载数据加载、媒体修复和统计刷新；回收站刷新仍由 Dashboard 组合流程协调，避免 composable 循环依赖。
-- **继续拆分 View 时的既定形状**（`CreatorsView` P4 切片 1 已示范）：派生状态与筛选/排序进 `composables/`（依赖以 getter 注入，例如 `creators: () => props.context.creators`，否则 computed 会失去响应式追踪）；纯展示块进 `components/`，**不持有状态**，值与动作经单一 context 契约进出。拆分前先写下「改什么/不改什么/怎么证明没变」——验收用**改动前后逐字节渲染对比**（jsdom 脚本化交互 + 真实 Chrome 里对 `section` 取 `outerHTML`，每步带可见计数断言防空点），比对时排除注释与已知机械差异（如 `v-model` 写 DOM property、`:value` 另写 attribute）。
+- **继续拆分 View 时的既定形状**（`CreatorsView` P4 切片 1–2 已示范）：派生状态与筛选/排序进 `composables/`（依赖以 getter 注入，例如 `creators: () => props.context.creators`，否则 computed 会失去响应式追踪）；纯展示块进 `components/`，**不持有状态**，值与动作经单一 context 契约进出（三套视图共用的动作定义一次，别复制接口）。验收用 `e2e/creators-render.mjs`：改动前后各 `capture` 一次再 `diff`，**要求逐步逐字节相同**；比对时排除已知机械差异（如 `v-model` 只写 DOM property、`:value` 另写 attribute）。探针每步带后置条件断言，否则「点了但没点到」会让对比失去意义。
 生产调用方已直接依赖 `src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；三个迁移期兼容桶（`src/db/index.ts`、`src/adapters/index.ts`、`src/platform/index.ts`）已于 2026-09-11 删除。禁止重新引入兼容桶或在其位置新增业务逻辑。
 
 开始开发前按顺序阅读：`README.md`（产品与入口）→ `docs/ARCHITECTURE.md`（当前事实与契约）→ 本手册（改动流程）→ 涉及 Dashboard 时再读 `docs/DASHBOARD_MIGRATION.md`。冲突时以源码和 `ARCHITECTURE.md` 的当前状态为准。

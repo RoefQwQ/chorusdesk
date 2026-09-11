@@ -34,21 +34,19 @@ import {
 } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import {
-  RefreshCw,
   Plus,
-  CheckSquare,
   Search,
-  Square,
   Edit3,
-  History,
-  Trash2,
   AlertCircle,
   Users,
   ChevronDown,
-  ChevronsUpDown,
 } from 'lucide-vue-next';
 import ChannelRow from '../components/creator/ChannelRow.vue';
 import CreatorCardHeader from '../components/creator/CreatorCardHeader.vue';
+import CreatorListView, {
+  type CreatorListViewContext,
+} from '../components/creator/CreatorListView.vue';
+import type { CreatorSyncSummary } from '../types/creatorDirectory';
 import CreatorDirectoryToolbar, {
   type CreatorDirectoryToolbarContext,
 } from '../components/creator/CreatorDirectoryToolbar.vue';
@@ -314,6 +312,22 @@ function batchDeleteSelectedCreators() {
   emit('batch-delete', ids);
 }
 
+/**
+ * Drag events that the row template used to handle inline.
+ *
+ * `dragleave` fires for every element the pointer crosses, so it must only clear
+ * the highlight when the row being left is the one currently highlighted —
+ * otherwise moving across a row's own cells clears it and the drop target flickers.
+ */
+function onDragLeave(creatorId: string) {
+  if (dragOverCreatorId.value === creatorId) dragOverCreatorId.value = null;
+}
+
+function onDragEnd() {
+  dragCreatorId.value = null;
+  dragOverCreatorId.value = null;
+}
+
 /** Leaving batch mode drops the selection: the checkboxes are gone from the UI. */
 function toggleBatchMode() {
   isBatchMode.value = !isBatchMode.value;
@@ -361,6 +375,61 @@ const toolbarContext = computed<CreatorDirectoryToolbarContext>(() => ({
   getTagFilterState,
 }));
 
+/**
+ * The compact list view's contract.
+ *
+ * Same shape and same reason as `toolbarContext`: the child renders only, so the
+ * sort, expansion, selection and drag state stay owned here and cannot drift
+ * between the three view templates. The presentation helpers (`syncSummary`,
+ * `relativeTime`, `groupedChannels`, `creatorAvatar`) are passed rather than
+ * re-implemented, so there is exactly one definition of each.
+ */
+const listContext = computed<CreatorListViewContext>(() => ({
+  creators: filteredCreatorsList.value,
+  channels: props.context.channels,
+  postCountMap: props.context.creatorPostCountMap,
+  syncingChannelIds: props.context.syncingChannelIds,
+
+  isBatchMode: isBatchMode.value,
+  selectedIds: selectedCreatorIds.value,
+  expandedIds: expandedCreatorIds.value,
+  dragOverId: dragOverCreatorId.value,
+  sortBy: creatorSortBy.value,
+  sortDir: creatorSortDir.value,
+
+  isSortedBy,
+  ariaSortFor,
+  onToggleSort: toggleSort,
+  onCycleTag: cycleTagFilter,
+  onToggleExpand: toggleExpandCreator,
+  onRowClick,
+
+  onDragStart: onCreatorDragStart,
+  onDragOver: onCreatorDragOver,
+  onDragLeave,
+  onDrop: onCreatorDrop,
+  onDragEnd,
+
+  onSelectAll: selectAllFilteredCreators,
+  onToggleSelect: toggleSelectCreator,
+
+  groupedChannels: getCreatorGroupedChannels,
+  syncSummary: getCreatorSyncSummary,
+  relativeTime: formatRelativeTime,
+  creatorAvatar: getCreatorAvatar,
+  onAvatarError: handleAvatarError,
+
+  onAddChannel: (creator) => openAddModal('channel', creator),
+  onAvatarPicker: openAvatarPicker,
+  onDeepSync: openDeepSyncModal,
+  onEditTags: openEditCreatorTags,
+  onRefreshCreator: handleRefreshCreator,
+  onRefreshChannel: handleRefreshChannel,
+  onDeleteCreator: deleteCreator,
+  onDeleteChannel: deleteChannel,
+  onCycleRole: cycleChannelRole,
+}));
+
 // Account role labels/badge classes live in ChannelRow (single source).
 
 function getCreatorGroupedChannels(creatorId: string): Record<string, Channel[]> {
@@ -376,9 +445,12 @@ function getCreatorGroupedChannels(creatorId: string): Record<string, Channel[]>
 }
 
 /**
- * 聚合分析创作者旗下全部频道的同步健康状况
+ * 聚合分析创作者旗下全部频道的同步健康状况。
+ *
+ * 返回类型显式标注为 `CreatorSyncSummary`：它同时被紧凑列表、网格与详细卡片消费，
+ * 靠结构巧合一致是不够的——签名变了要在这里报错。
  */
-function getCreatorSyncSummary(creatorId: string) {
+function getCreatorSyncSummary(creatorId: string): CreatorSyncSummary {
   const chs = context.value.channels.filter(ch => ch.creatorId === creatorId);
   const total = chs.length;
   const errorChannels = chs.filter(ch => ch.status === 'error');
@@ -610,324 +682,10 @@ function loadDemoData() {
     </div>
     </div>
 
-    <!-- 2. Compact Table List View (15-25+ Creators per screen, highest density) -->
-    <div v-else-if="viewMode === 'list'" class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
-      <div class="overflow-x-auto">
-        <!-- `table-fixed` + a width on EVERY column, and the percentages must keep
-             summing to 100%.
-             Reported 2026-09-11: the row had a ~500px blank hole between the platform
-             badges and the tags. Cause: under the default auto layout, `w-full` hands
-             all leftover width to whichever column declares none — that was
-             已绑平台账号 — and its badges are left-aligned inside it, so the slack
-             read as a hole in the middle of the row rather than as padding.
-             Auto layout also re-derives that split from content, so it could not be
-             fixed by sizing one column. With `table-fixed`, declared widths are
-             honoured exactly and the slack is allocated by design; every cell already
-             truncates or wraps (name truncates, badges and tags wrap), so nothing
-             overflows. `tests/creatorsTable.test.ts` asserts the sum, because a
-             missing width here is what reintroduces the hole.
+    <!-- 2. Compact Table List View — rendered by CreatorListView: stateless, driven
+         entirely by `listContext`. -->
+    <CreatorListView v-else-if="viewMode === 'list'" :context="listContext" />
 
-             The percentages are derived from measured content, not picked by eye.
-             At a 1471px table the columns need roughly: 创作者 175, 已绑平台账号 240
-             (the widest row is four badges), 标签 165, 作品数 97, 同步状态 80, 操作 200
-             — about 1000px in total, so ~470px has to live somewhere. The failure
-             mode to avoid is one column absorbing all of it, which is what made one
-             row read as 「a 500px hole between the badges and the tags」. These
-             values keep the badge column at its content width (so the tags sit
-             directly after the badges — the gap the user circled) and spread the rest
-             so no column exceeds about 1.8x its content.
-
-             One measured subtlety: slacks in ADJACENT columns read as a single gap,
-             because the left cell's content sits at its column's start and the right
-             cell's at its end. 同步状态 and 操作 are left- and right-aligned
-             respectively, so an over-wide pair of them produced a 265px gap that the
-             first attempt at this fix created. Both are kept tight for that reason.
-             If a platform gains a much longer name, re-measure rather than guess. -->
-        <table class="w-full table-fixed text-left border-collapse text-xs">
-          <thead>
-            <tr class="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              <th v-if="isBatchMode" class="py-2.5 px-3 w-10 text-center">
-                <button @click="selectAllFilteredCreators" class="cursor-pointer text-indigo-600">
-                  <CheckSquare class="w-3.5 h-3.5" />
-                </button>
-              </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[24%]" :aria-sort="ariaSortFor('name')">
-                <button
-                  type="button"
-                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
-                  title="按创作者名称排序"
-                  @click="toggleSort('name')"
-                >
-                  <span>创作者</span>
-                  <ChevronDown v-if="isSortedBy('name')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
-                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
-                </button>
-              </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[17%]" :aria-sort="ariaSortFor('channels')">
-                <button
-                  type="button"
-                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
-                  title="按已绑定账号数量排序"
-                  @click="toggleSort('channels')"
-                >
-                  <span>已绑平台账号</span>
-                  <ChevronDown v-if="isSortedBy('channels')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
-                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
-                </button>
-              </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[18%]" :aria-sort="ariaSortFor('tags')">
-                <button
-                  type="button"
-                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
-                  title="按标签排序"
-                  @click="toggleSort('tags')"
-                >
-                  <span>标签</span>
-                  <ChevronDown v-if="isSortedBy('tags')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
-                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
-                </button>
-              </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[12%]" :aria-sort="ariaSortFor('posts')">
-                <button
-                  type="button"
-                  class="sort-header w-full py-2.5 px-3 flex items-center justify-center gap-1 cursor-pointer"
-                  title="按作品数量排序"
-                  @click="toggleSort('posts')"
-                >
-                  <span>作品数</span>
-                  <ChevronDown v-if="isSortedBy('posts')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
-                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
-                </button>
-              </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[10%]" :aria-sort="ariaSortFor('updated')">
-                <button
-                  type="button"
-                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
-                  title="按最近同步时间排序"
-                  @click="toggleSort('updated')"
-                >
-                  <span>同步状态</span>
-                  <ChevronDown v-if="isSortedBy('updated')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
-                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
-                </button>
-              </th>
-              <!-- Not sortable, so no button and no aria-sort: it holds row actions,
-                   not data. -->
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-[19%] text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-            <template v-for="c in filteredCreatorsList" :key="'row-' + c.id">
-              <tr
-                :draggable="creatorSortBy === 'manual'"
-                @dragstart="onCreatorDragStart(c.id)"
-                @dragover="(e: DragEvent) => onCreatorDragOver(e, c.id)"
-                @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
-                @drop="onCreatorDrop(c.id)"
-                @dragend="dragCreatorId = null; dragOverCreatorId = null"
-                @click="onRowClick($event, c.id)"
-                class="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group cursor-pointer"
-                :class="[
-                  { 'bg-indigo-50/20 dark:bg-indigo-950/20': selectedCreatorIds.has(c.id) },
-                  dragOverCreatorId === c.id ? 'ring-2 ring-inset ring-indigo-400' : '',
-                ]"
-              >
-                <!-- Batch Checkbox -->
-                <td v-if="isBatchMode" class="py-2.5 px-3 text-center">
-                  <button @click.stop="toggleSelectCreator(c.id)" class="cursor-pointer text-indigo-600">
-                    <CheckSquare v-if="selectedCreatorIds.has(c.id)" class="w-4 h-4 text-indigo-600" />
-                    <Square v-else class="w-4 h-4 text-slate-400" />
-                  </button>
-                </td>
-
-                <!-- Creator: expander, avatar, name.
-                     The expander is a leading chevron because that is where the
-                     pattern puts a row-level disclosure control — first thing in
-                     a left-to-right scan, and its x stays put regardless of how
-                     many platform badges the row has. It previously sat after the
-                     badges, which made its position depend on that row's content. -->
-                <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <!-- `.stop` is required: the row itself toggles on click, so
-                         without it this button and the row would each toggle once
-                         and cancel out. -->
-                    <button
-                      type="button"
-                      class="shrink-0 p-0.5 -ml-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                      :aria-expanded="expandedCreatorIds.has(c.id)"
-                      :title="expandedCreatorIds.has(c.id) ? '收起已绑定账号' : '展开已绑定账号'"
-                      @click.stop="toggleExpandCreator(c.id)"
-                    >
-                      <ChevronDown
-                        class="w-3.5 h-3.5 transition-transform duration-200"
-                        :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }"
-                        aria-hidden="true"
-                      />
-                    </button>
-
-                    <div
-                      class="relative w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer shadow-2xs"
-                      @click.stop="openAvatarPicker(c)"
-                      title="更换主头像"
-                    >
-                      <img
-                        v-if="getCreatorAvatar(c)"
-                        :src="getCreatorAvatar(c)"
-                        referrerpolicy="no-referrer"
-                        @error="handleAvatarError(getCreatorAvatar(c))"
-                        class="w-full h-full object-cover"
-                      />
-                      <span v-else class="w-full h-full flex items-center justify-center font-bold text-indigo-600 text-xs">
-                        {{ c.name.slice(0, 1) }}
-                      </span>
-                    </div>
-
-                    <span class="font-semibold text-xs text-slate-900 dark:text-slate-100 truncate max-w-[150px] sm:max-w-[200px]">{{ c.name }}</span>
-                  </div>
-                </td>
-
-                <!-- Attached Platform Badges (before 标签: these are what identify
-                     the creator across sites, and they read better against the
-                     name than the free-form tags do) -->
-                <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-1.5 flex-wrap min-w-0">
-                    <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
-                      <PlatformBadge :platform="platform as string" :count="chs.length" />
-                    </template>
-                    <span v-if="!Object.keys(getCreatorGroupedChannels(c.id)).length" class="text-[11px] text-slate-300 dark:text-slate-600">无账号</span>
-                  </div>
-                </td>
-
-                <!-- Tags -->
-                <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-1 flex-wrap">
-                    <span
-                      v-for="t in c.tags"
-                      :key="t"
-                      class="px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer border border-slate-200/50 dark:border-slate-700/50"
-                      @click.stop="cycleTagFilter(t)"
-                      :title="'点击过滤标签 #' + t"
-                    >
-                      #{{ t }}
-                    </span>
-                    <span v-if="!c.tags?.length" class="text-[11px] text-slate-300 dark:text-slate-600">未分类</span>
-                  </div>
-                </td>
-
-                <!-- Post Count -->
-                <td class="py-2.5 px-3 text-center text-slate-600 dark:text-slate-400">
-                  <span class="font-semibold text-slate-700 dark:text-slate-200">{{ context.creatorPostCountMap[c.id] || 0 }}</span>
-                  <span class="text-[10px] text-slate-400 ml-0.5">篇</span>
-                </td>
-
-                <!-- Sync Health & Last Checked -->
-                <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-1.5">
-                    <span
-                      v-if="getCreatorSyncSummary(c.id).isUpdating"
-                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40"
-                    >
-                      <RefreshCw class="w-2.5 h-2.5 animate-spin" />
-                      <span>同步中</span>
-                    </span>
-                    <span
-                      v-else-if="getCreatorSyncSummary(c.id).hasError"
-                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200/60 dark:border-rose-900/40 cursor-pointer hover:bg-rose-100 transition-colors"
-                      @click.stop="toggleExpandCreator(c.id)"
-                      :title="getCreatorSyncSummary(c.id).firstErrorChannel?.errorMessage"
-                    >
-                      <AlertCircle class="w-2.5 h-2.5" />
-                      <span>异常 ({{ getCreatorSyncSummary(c.id).errorCount }})</span>
-                    </span>
-                    <span
-                      v-else
-                      class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400"
-                    >
-                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      <span>{{ formatRelativeTime(getCreatorSyncSummary(c.id).lastCheckAt) }}</span>
-                    </span>
-                  </div>
-                </td>
-
-                <!-- Action Toolbar -->
-                <td class="py-2.5 px-3 text-right">
-                  <div class="flex items-center justify-end gap-1">
-                    <button
-                      @click.stop="handleRefreshCreator(c.id)"
-                      title="同步最新动态"
-                      class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': getCreatorSyncSummary(c.id).isUpdating }" />
-                    </button>
-                    <button
-                      @click.stop="openDeepSyncModal(c)"
-                      title="回溯历史作品"
-                      class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <History class="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      @click.stop="openAddModal('channel', c)"
-                      title="绑定新账号"
-                      class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <Plus class="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      @click.stop="openEditCreatorTags(c)"
-                      title="编辑标签"
-                      class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <Edit3 class="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      @click.stop="deleteCreator(c.id)"
-                      title="移除创作者"
-                      class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <Trash2 class="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-
-              <!-- Nested Table Row if Expanded -->
-              <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-800/40">
-                <td :colspan="isBatchMode ? 7 : 6" class="p-3">
-                  <div class="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
-                    <div class="flex items-center justify-between text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
-                      <span class="font-bold text-slate-700 dark:text-slate-200">【{{ c.name }}】全部已绑定平台账号</span>
-                      <button
-                        @click="openAddModal('channel', c)"
-                        class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
-                      >
-                        <Plus class="w-3 h-3" />
-                        <span>绑定新平台账号</span>
-                      </button>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <ChannelRow
-                        v-for="ch in context.channels.filter(ch => ch.creatorId === c.id)"
-                        :key="ch.id"
-                        :channel="ch"
-                        :creator-id="c.id"
-                        :is-syncing="ch.status === 'updating' || context.syncingChannelIds?.has(ch.id)"
-                        compact
-                        @deep-sync="() => openDeepSyncModal(c, ch.id)"
-                        @refresh="payload => handleRefreshChannel(payload.channel, payload.force)"
-                        @delete="deleteChannel"
-                        @cycle-role="cycleChannelRole"
-                      />
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-    </div>
 
     <!-- 3. Detailed Cards View (The complete accordion layout) -->
     <div v-else class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 xl:gap-5 items-start">
