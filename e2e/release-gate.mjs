@@ -542,13 +542,40 @@ async function clickLocated(target, locator, label) {
   if (attempts > 0) detail(`${label}: input needed ${attempts + 1} attempt(s)`);
   await target.eval(`document.querySelector('[${MARK}]')?.removeAttribute('${MARK}')`);
   if (!delivered.click) {
+    // Gather the geometry, because this failure is intermittent on CI and the
+    // first three explanations I tried were all wrong. What is known: the page is
+    // mounted, its DOM is queryable, `Page.bringToFront` was called, the retry
+    // loop ran all 4 extra attempts, and the element's own listeners never fired —
+    // i.e. the input went somewhere that is not this window. Whether that is
+    // "window off-screen", "window not mapped", "pointer root focus" or "a second
+    // window took it" is exactly what these numbers distinguish.
+    const geo = await target.eval(`(() => ({
+      screenX: window.screenX, screenY: window.screenY,
+      outerWidth: window.outerWidth, outerHeight: window.outerHeight,
+      innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+      dpr: window.devicePixelRatio,
+      hasFocus: document.hasFocus(),
+      visibility: document.visibilityState,
+    }))()`);
+    let bounds = null;
+    try {
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      const page = targetInfos.find((t) => t.type === 'page');
+      bounds = (await cdp.send('Browser.getWindowBounds', {
+        windowId: (await cdp.send('Browser.getWindowForTarget', { targetId: page.targetId })).windowId,
+      })).bounds;
+    } catch (e) {
+      bounds = `unavailable: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    detail(`geometry at failure: ${JSON.stringify(geo)} window=${JSON.stringify(bounds)}`);
+    detail(`page targets at failure: ${JSON.stringify((await cdp.send('Target.getTargets')).targetInfos.filter((t) => t.type === 'page').map((t) => t.url.slice(0, 60)))}`);
     // Deliberately a different message from "the control was not found" and
     // from "the app ignored the click": this is the environment, not the code.
     throw new Error(
       `the click at (${Math.round(x)},${Math.round(y)}) for ${label} was never delivered to the page ` +
-        `(mousedown=${delivered.down} mouseup=${delivered.up} click=${delivered.click}). ` +
-        'Synthetic input reached nothing — check the display/occlusion of the browser window ' +
-        '(e.g. a window positioned outside the X screen), not the view under test.',
+        `(mousedown=${delivered.down} mouseup=${delivered.up} click=${delivered.click}) after ${attempts + 1} attempts. ` +
+        `geometry=${JSON.stringify(geo)} window=${JSON.stringify(bounds)}. ` +
+        'Synthetic input reached nothing — this is the environment, not the view under test.',
     );
   }
   detail(`${label}: click delivered (down=${delivered.down} up=${delivered.up} click=${delivered.click})`);
