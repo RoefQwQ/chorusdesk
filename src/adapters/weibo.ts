@@ -265,20 +265,6 @@ export const weiboAdapter: PlatformAdapter = {
       return { posts: [], error: fetchError('network', message || '微博网络连接异常', true) };
     }
   },
-
-  async checkAuthStatus(): Promise<{ loggedIn: boolean; username?: string }> {
-    if (typeof chrome === 'undefined' || !chrome.cookies?.get) {
-      return { loggedIn: false };
-    }
-    try {
-      const sub = await chrome.cookies.get({ url: 'https://weibo.com', name: 'SUB' });
-      const subp = await chrome.cookies.get({ url: 'https://weibo.com', name: 'SUBP' });
-      const isLogged = Boolean(sub?.value || subp?.value);
-      return { loggedIn: isLogged };
-    } catch {
-      return { loggedIn: false };
-    }
-  },
 };
 
 function cleanWeiboHtml(html: string): string {

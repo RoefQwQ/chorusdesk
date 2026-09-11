@@ -157,6 +157,18 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
 `types → adapters/platform → infrastructure/db + sync → application → entrypoints (UI)`
 
 - Adapters MUST NOT import the db. Repositories MUST NOT import `chrome.*`.
+- **Adapters may call `chrome.runtime.sendMessage` when the platform cannot be fetched from
+  the worker at all.** Two do: `douyin.ts` (page-driven acquisition, rule 9) and `twitter.ts`
+  (its tab path). There is no narrower port for this — the adapter is asking the worker to run
+  something only a page can run, and an intermediate wrapper would be the same call one layer
+  down. Anything else `chrome.*` in an adapter is a finding, not a pattern.
+
+  This note exists because the rule used to name only *repositories* as forbidden from
+  `chrome.*`, leaving adapters in a grey zone: `bilibili.ts`, `weibo.ts` and `xiaohongshu.ts`
+  each had a `checkAuthStatus()` reading `chrome.cookies.get` directly, and nobody could say
+  whether that was a violation. It was not — it was **dead code**, and the same cookie-name
+  tables live (and are used) in `platformAuth.ts`. Found 2026-09-12 and deleted; the lesson is
+  in the shape of the question, not the answer: "is this allowed?" hid "does this run?".
 - **Adapters reach the network through `src/infrastructure/chrome/http.ts` (`bgFetch`).** That port
   lives in the chrome layer, not in `utils`, because its service-worker mode calls
   `performBgFetch`, which reads `chrome.cookies`. So `adapters → infrastructure/chrome` is a real,

@@ -421,15 +421,4 @@ export const bilibiliAdapter: PlatformAdapter = {
       hasMore,
     };
   },
-
-  async checkAuthStatus(): Promise<{ loggedIn: boolean; username?: string }> {
-    if (typeof chrome === 'undefined' || !chrome.cookies?.get) return { loggedIn: false };
-    try {
-      const sessdata = await chrome.cookies.get({ url: 'https://www.bilibili.com', name: 'SESSDATA' });
-      const dedeUserId = await chrome.cookies.get({ url: 'https://www.bilibili.com', name: 'DedeUserID' });
-      return { loggedIn: Boolean(sessdata?.value || dedeUserId?.value) };
-    } catch {
-      return { loggedIn: false };
-    }
-  },
 };

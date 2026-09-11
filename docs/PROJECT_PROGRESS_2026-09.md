@@ -646,13 +646,21 @@ B14. ~~**`postService.deleteToRecycleBin` 为什么死，有明确原因**~~ —
     该组合式现只从 `src/application` 导入，规则 8 台账漂移的那一格已归位。原条目：`useDeletedPosts.ts:6` 直接 import
     `deletePostAndTombstone` 绕过门面。把这一处调用改走 service，既复活该方法，
     又消掉 AGENTS 规则 8 那 9 处直连中的一处——**这是该笔债里唯一有名字成因的一处**。
-B15. **adapter 直接调 `chrome.*`（5 个文件，不在任何已有规则里）**：`bilibili.ts:426-429`、
-    `weibo.ts:269-274`、`xiaohongshu.ts:254-259`（`chrome.cookies.get` 登录检测）与
-    `douyin.ts:68-82`、`twitter.ts:146-154`（`chrome.runtime.sendMessage`）。
-    **已核实不是正确性/安全问题**：两处 `sendMessage` 都先判 `IS_SERVICE_WORKER`，
-    规则 6 的自发自收不可能发生；cookie 只读存在性，凭据仍只在 `bgFetch` 里按
-    `PLATFORM_HOSTS` 附加。代价是 adapter 在扩展之外不可测 + 5 处手写
-    `typeof chrome === 'undefined'` 守卫。要不要收拢请用户定（改的是分层口径，不只是代码）。
+B15. ~~**adapter 直接调 `chrome.*`（5 个文件，不在任何已有规则里）**~~ —— **已完成（2026-09-12）**。
+    查证后发现队列条目的前提是错的：这**不是分层口径问题，而是死代码**。
+    5 处里 3 处是 `bilibili`/`weibo`/`xiaohongshu` 各自的 `checkAuthStatus()`，直接读本平台
+    cookie（`SESSDATA`/`DedeUserID`、`SUB`/`SUBP`、`web_session`/`a1`）——**全仓零调用方**
+    （src/entrypoints/tests/e2e 全查），**产物里 6 处全是对象字面量方法定义、无一处调用**
+    （SW 与 dashboard 各打包一份），且无任何动态访问（`['checkAuthStatus']`、`?.`、反射）。
+    同一份 cookie 名知识在 `platformAuth.ts` 里另有一份**活着的**（`usePlatformLogins.ts` 在用，
+    驱动设置页的登录指示灯），并且**已经开始漂移**：`platformAuth` 的 bilibili 有 3 个 cookie 名、
+    adapter 那份只有 2 个；小红书 `platformAuth` 有 `webId`、adapter 没有。
+    已删除三个实现 + `PlatformAdapter` 的 `checkAuthStatus?` 声明。验证：产物中该标识符
+    **6 → 0 处**，typecheck/lint/525 项测试全过，真机门禁 **17/17**（含设置页渲染）。
+    剩下 2 处 `chrome.runtime.sendMessage`（`douyin.ts`、`twitter.ts`）**保留并在 AGENTS 规则 8
+    明文承认为 sanctioned 边**——adapter 无法自己完成页面注入采集，包一层只是把同一个调用下移。
+    教训：这条挂了三轮的口径问题，真身是 B28 的同类（声明了却没人跑）；「这算不算违规」这个问法
+    把「它到底跑不跑」给盖住了。
 B16. ~~**`e2e/README.md:97` 承诺了一个不存在的样例文件**：它说 `e2e/probe-result.json` 是探针的
     输出样例，但该文件被 `e2e/.gitignore:2` 正确忽略（已核实未跟踪），新克隆的人拿不到。
     要么提交一份脱敏样例，要么删掉这句话。

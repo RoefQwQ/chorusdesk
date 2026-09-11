@@ -250,20 +250,6 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       };
     }
   },
-
-  async checkAuthStatus(): Promise<{ loggedIn: boolean; username?: string }> {
-    if (typeof chrome === 'undefined' || !chrome.cookies?.get) {
-      return { loggedIn: false };
-    }
-    try {
-      const session = await chrome.cookies.get({ url: 'https://www.xiaohongshu.com', name: 'web_session' });
-      const a1 = await chrome.cookies.get({ url: 'https://www.xiaohongshu.com', name: 'a1' });
-      const isLogged = Boolean(session?.value || a1?.value);
-      return { loggedIn: isLogged };
-    } catch {
-      return { loggedIn: false };
-    }
-  },
 };
 
 function extractXhsInitialState(html: string): JsonRecord | null {

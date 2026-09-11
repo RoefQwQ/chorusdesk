@@ -74,7 +74,6 @@ export interface PlatformAdapter {
    */
   minRequestIntervalMs?: number;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
-  checkAuthStatus?(): Promise<{ loggedIn: boolean; username?: string }>;
 
   /** Optional platform-specific historical fetch implementation. */
   fetchHistory?(
