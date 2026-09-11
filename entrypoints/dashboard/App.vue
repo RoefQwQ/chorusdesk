@@ -690,15 +690,15 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
     />
 
     <!-- Floating Actions: Scroll to top, mark reading position, jump to mark.
-         Post-feed tabs only. This is a reading aid for a long list of posts, and it
-         was mounted unconditionally — so it also floated over 关注管理 and 设置,
-         where a lone bookmark icon with no context read as an unexplained artifact
-         (reported 2026-09-11). 收藏 renders the same kind of scrolling post list
-         (`PostCard` in masonry columns), so it keeps the toolbar; the two
-         management tabs do not. -->
+         动态 ONLY. This was mounted unconditionally, so it also floated over
+         关注管理 and 设置 — and over 收藏, where a white bookmark button with no
+         context sitting on top of a post card reads as an artifact. The user's
+         wording was 「动态内才有的位置记录标签」: the feed is where it belongs, and
+         the 收藏 page is still a list being read, but it is not the feed.
+         Narrowed to the feed on that basis (2026-09-11). -->
     <!-- Aligns with the right-hand creator filter card column (lg:w-64 xl:w-68) -->
     <div
-      v-if="activeTab === 'feed' || activeTab === 'bookmarks'"
+      v-if="activeTab === 'feed'"
       class="fixed bottom-6 inset-x-0 pointer-events-none z-40"
     >
       <div class="w-full max-w-[98%] 2xl:max-w-[96%] mx-auto px-3 sm:px-6 flex justify-end">

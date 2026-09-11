@@ -1034,7 +1034,37 @@ function loadDemoData() {
     <!-- 2. Compact Table List View (15-25+ Creators per screen, highest density) -->
     <div v-else-if="viewMode === 'list'" class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-xs">
+        <!-- `table-fixed` + a width on EVERY column, and the percentages must keep
+             summing to 100%.
+             Reported 2026-09-11: the row had a ~500px blank hole between the platform
+             badges and the tags. Cause: under the default auto layout, `w-full` hands
+             all leftover width to whichever column declares none — that was
+             已绑平台账号 — and its badges are left-aligned inside it, so the slack
+             read as a hole in the middle of the row rather than as padding.
+             Auto layout also re-derives that split from content, so it could not be
+             fixed by sizing one column. With `table-fixed`, declared widths are
+             honoured exactly and the slack is allocated by design; every cell already
+             truncates or wraps (name truncates, badges and tags wrap), so nothing
+             overflows. `tests/creatorsTable.test.ts` asserts the sum, because a
+             missing width here is what reintroduces the hole.
+
+             The percentages are derived from measured content, not picked by eye.
+             At a 1471px table the columns need roughly: 创作者 175, 已绑平台账号 240
+             (the widest row is four badges), 标签 165, 作品数 97, 同步状态 80, 操作 200
+             — about 1000px in total, so ~470px has to live somewhere. The failure
+             mode to avoid is one column absorbing all of it, which is what made one
+             row read as 「a 500px hole between the badges and the tags」. These
+             values keep the badge column at its content width (so the tags sit
+             directly after the badges — the gap the user circled) and spread the rest
+             so no column exceeds about 1.8x its content.
+
+             One measured subtlety: slacks in ADJACENT columns read as a single gap,
+             because the left cell's content sits at its column's start and the right
+             cell's at its end. 同步状态 and 操作 are left- and right-aligned
+             respectively, so an over-wide pair of them produced a 265px gap that the
+             first attempt at this fix created. Both are kept tight for that reason.
+             If a platform gains a much longer name, re-measure rather than guess. -->
+        <table class="w-full table-fixed text-left border-collapse text-xs">
           <thead>
             <tr class="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
               <th v-if="isBatchMode" class="py-2.5 px-3 w-10 text-center">
@@ -1042,7 +1072,7 @@ function loadDemoData() {
                   <CheckSquare class="w-3.5 h-3.5" />
                 </button>
               </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-56 sm:w-64" :aria-sort="ariaSortFor('name')">
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[24%]" :aria-sort="ariaSortFor('name')">
                 <button
                   type="button"
                   class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
@@ -1054,7 +1084,7 @@ function loadDemoData() {
                   <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
                 </button>
               </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300" :aria-sort="ariaSortFor('channels')">
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[17%]" :aria-sort="ariaSortFor('channels')">
                 <button
                   type="button"
                   class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
@@ -1066,7 +1096,7 @@ function loadDemoData() {
                   <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
                 </button>
               </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-40" :aria-sort="ariaSortFor('tags')">
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[18%]" :aria-sort="ariaSortFor('tags')">
                 <button
                   type="button"
                   class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
@@ -1078,7 +1108,7 @@ function loadDemoData() {
                   <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
                 </button>
               </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-24" :aria-sort="ariaSortFor('posts')">
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[12%]" :aria-sort="ariaSortFor('posts')">
                 <button
                   type="button"
                   class="sort-header w-full py-2.5 px-3 flex items-center justify-center gap-1 cursor-pointer"
@@ -1090,7 +1120,7 @@ function loadDemoData() {
                   <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
                 </button>
               </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-32" :aria-sort="ariaSortFor('updated')">
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-[10%]" :aria-sort="ariaSortFor('updated')">
                 <button
                   type="button"
                   class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
@@ -1104,7 +1134,7 @@ function loadDemoData() {
               </th>
               <!-- Not sortable, so no button and no aria-sort: it holds row actions,
                    not data. -->
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-36 text-right">操作</th>
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-[19%] text-right">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 dark:divide-slate-800">

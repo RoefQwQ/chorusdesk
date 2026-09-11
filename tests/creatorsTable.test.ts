@@ -452,3 +452,32 @@ describe('creators compact list — row click', () => {
     expect(expanded()).toBe(false);
   });
 });
+
+describe('creators compact list — column widths', () => {
+  /**
+   * Widths must be declared for every column and add up to 100%.
+   *
+   * Reported 2026-09-11: a ~500px blank hole sat between the platform badges and
+   * the tags. Under `table-fixed` the split is exactly what these widths say, so a
+   * column with no width takes the whole remainder and a total below 100% leaves
+   * one column over-wide. Neither is visible without a layout engine, so the sum is
+   * the assertable invariant — and it fails loudly on the real mistake.
+   */
+  it('gives every column a percentage width, summing to 100%', async () => {
+    const root = await mount();
+    const widths = [...root.querySelectorAll('thead th')]
+      .flatMap((th) => [...th.classList].filter((c) => /^w-\[\d+(\.\d+)?%\]$/.test(c)))
+      .map((c) => Number(c.slice(3, -2)));
+
+    const headers = root.querySelectorAll('thead th').length;
+    expect(widths.length, 'every column must declare a width').toBe(headers);
+    expect(widths.reduce((a, b) => a + b, 0)).toBe(100);
+  });
+
+  it('uses a fixed table layout, so those widths are honoured', async () => {
+    // Under the default auto layout the browser re-derives the split from content,
+    // which is what let one column absorb all the slack no matter how it was sized.
+    const root = await mount();
+    expect(root.querySelector('table')!.className).toContain('table-fixed');
+  });
+});
