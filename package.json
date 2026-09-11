@@ -27,6 +27,7 @@
     "build": "wxt build",
     "zip": "wxt zip",
     "test": "vitest run",
+    "e2e": "node e2e/release-gate.mjs",
     "typecheck": "npm run typecheck:ts && npm run typecheck:vue",
     "lint": "eslint .",
     "typecheck:ts": "tsc --noEmit -p tsconfig.json",

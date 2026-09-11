@@ -504,10 +504,31 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
    理由（原文）：本次会话两次读到过期数字（`CreatorsView` 记 1409 实为 1481、Dexie schema
    只列到 v3 实为 1–5）都是穿越长文造成的。遵守手册第 14 节：文档保存长期规则、当前状态
    与代码入口，不复制所有历史日志。
-2. **把 2026-09-11 的 E2E 探针固化成脚本**（`e2e/` 目录已存在，内含 `douyin-probe.mjs`
-   与 `drive-extension.mjs` 可作范式）：三步——`Extensions.loadUnpacked` 加载构建产物 →
-   备份导出/导入往返 → 连开 popup 读 `alarms.getAll()`。接进 `release.yml` 作为发布前门禁。
-   今天这些是手工跑的一次性验证，不固化就只值一次。
+2. ~~**把 2026-09-11 的 E2E 探针固化成脚本**~~ —— **已完成（2026-09-11）**：
+   产出 `e2e/release-gate.mjs`（`npm run e2e`），接进 `release.yml`（在 `npm run zip` 之后、
+   发布之前；CI 无显示环境用 `xvfb-run -a`）。它自己启动独立 profile 的 Chrome
+   （`--remote-debugging-port=0` → 读 `DevToolsActivePort`）、自己 `Extensions.loadUnpacked`
+   加载 `.output/chrome-mv3`、用真实鼠标事件点击、自己收尾删 profile，共 15 项检查：
+   产物版本与 `package.json` 一致性、扩展页挂载、备份导出（真实下载）→ 导入导出逐字节等价 →
+   清库 → 真实 file input 导回并比对行与设置、以及 alarm 三段（拨开关建立 → 连开 3 次 popup
+   → **`ServiceWorker.stopWorker` 冷停 worker 再唤醒** → 关开关清除），三次 `scheduledTime`
+   读数 Δ 0 ms。
+   **它跑的第一件事就抓到一个真缺陷**（详见下方「本轮发现」）。
+   变异验证（规则 26）：把 `SettingsView` 的通知改回「先通知后落库」→ `alarm.enable-auto-sync`
+   失败且退出码 1；把 `createBackup` 的 posts 换成 `[]` → `backup.import-export-lossless`
+   与 `backup.reimport-restores` 失败；恢复后两次全绿。
+   未验证项：`release.yml` 的 Linux/Xvfb 路径本机无法跑（Windows 上验证的是同一脚本的
+   Chrome/CDP 部分）；`ServiceWorker` 域不可用时该步会记 `skip` 并在末尾列出原因，不会算通过。
+
+#### 本轮发现（已修）
+
+- **自动同步开关的通知早于落库**（提交 `de90894`）：`SettingsView.updateBooleanSetting`
+  先 `void onUpdateSettings(...)` 再 `onNotifyAutoSyncChanged()`，而 worker 的
+  `setupAutoSync` 读的是**已存**的设置，于是读到旧值 `false`、走 `else` 分支
+  **把用户刚打开的 alarm 清掉了**，直到下一次 worker 启动才补建。现象是「开关好像过一会儿才生效」，
+  所以一直没人报。已改为 `await` 落库后再通知，写失败则只警告不通知；不变量补进
+  `AGENTS.md` 规则 7。
+
 3. **P4 `CreatorsView` 拆分**（**1481 行**，仍在增长；证据已足，唯一「证据齐了却没排期」
    的债）。按手册第 9 节写清边界再动手，建议第一个切片：
    问题位置=视图同时承担搜索排序/标签三态/批量模式/masonry 分列/三种主模板/同步状态聚合；
@@ -537,6 +558,12 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
 9. **P6 整体 UI 风格重设计**：用户明确「当前不排期」。注意与队列 A.3 撞车，先拆后设计。
 10. **Non-goals**（`AGENTS.md` 有专节，不要再提议）：RSS 卡片不显示配图；视频缩略图不加
     角标/播放图标。
+11. **E2E 门禁要不要也跑在 PR 上**（A.2 的后续，需要用户拍板）。现状：只在打 tag 的
+    `release.yml` 里跑，所以「自动同步开关通知早于落库」这类**只有真实宿主能暴露**的回归，
+    要等到发版才被拦住。放到 `ci.yml`（push/PR）上跑一遍的代价是每个 PR 多起一次
+    Chrome + Xvfb（本机实测整轮 **3.5 s**，CI 上主要是浏览器启动与拉镜像）。
+    取舍：PR 覆盖 vs CI 时长与被浏览器环境波动拖累的风险。想加的话，加在 `ci.yml` 的
+    `verify` job 之后、`xvfb-run -a node e2e/release-gate.mjs`，`.output` 已由该 job 构建。
 
 #### 仍不可验（环境限制，别浪费时间重试）
 

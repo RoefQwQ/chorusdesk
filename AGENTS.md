@@ -137,6 +137,12 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
   `return true`. A wrong return value silently drops the reply.
 - `chrome.alarms.create` with an existing name **replaces** the alarm and restarts its countdown.
   Check `alarms.get` first; only `onInstalled` and settings changes may (re)create.
+- **A message that tells the worker to reconcile state MUST be sent after that state is stored.**
+  The worker reads it back, so notifying first makes it act on the previous value — the
+  auto-sync switch did exactly that and *cleared* the alarm the user had just enabled, because
+  `setupAutoSync` read `enableAutoSync: false` before the settings write committed. The symptom
+  was invisible: the next worker start reads the stored setting and repairs it, so the switch
+  only looked "slow". `await` the write, then notify.
 - Use `chrome.alarms`, never `setInterval`, for periodic work.
 - DNR dynamic rules persist across restarts; `removeRuleIds` before `addRules`.
 - **There is no `tabs` permission, by design** (removed 2026-09). `tabs.query` still works and

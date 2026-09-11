@@ -1,26 +1,72 @@
 # E2E / real-browser probes
 
-一次性 CDP 探针脚本，用于在真实 Chrome 中验证扩展行为。不属于 CI，不属于构建。
+在**真实 Chrome 宿主**里验证扩展行为的脚本。不属于构建，不属于单元测试套件。
 
-## 前置
+## 约束（先读这段）
+
+- 只开**独立 profile** 的专用实例，绝不指向用户正在浏览的 Chrome（`AGENTS.md` 规则 25）。
+- 探针只读；`release-gate.mjs` 会写自己的临时 profile（会自动创建、退出时删除），不碰任何既有数据。
+- Chrome 152 起 `--load-extension` 被忽略。加载构建产物必须走 CDP，且必须带
+  `--enable-unsafe-extension-debugging`，否则 `Extensions.loadUnpacked` 报
+  `Method not available`（`AGENTS.md` 规则 28）。
+
+## `release-gate.mjs` — 发布前门禁（推荐入口）
+
+把 2026-09-11 手跑的三项验证固化为可重复的脚本，并接进 `.github/workflows/release.yml`：
+**构建产物加载 → 备份导出/导入往返 → 自动同步 alarm 存活**。
 
 ```bash
-cd e2e && npm install   # 仅安装 ws
+npm run build            # 门禁读 .output/chrome-mv3，必须是最新构建
+npm run e2e              # 或 node e2e/release-gate.mjs
 ```
 
-以远程调试端口启动（或复用已有的）Chrome，拿到目标页面的 `ws://…/devtools/page/<id>` 地址：
+它自己启动 Chrome（`--remote-debugging-port=0`，端口从 `DevToolsActivePort` 读）、
+自己加载扩展、自己在页面上用**真实鼠标事件**点击、自己收尾（关浏览器 + 删 profile）。
+Linux/CI 无显示环境用 `xvfb-run -a node e2e/release-gate.mjs`。
 
-```bash
-# 页面列表: http://127.0.0.1:9222/json
+```text
+  --extension <dir>   构建产物目录（默认 .output/chrome-mv3）
+  --chrome <path>     Chrome 可执行文件（默认 CHROME_PATH，再退到各平台常见安装路径）
+  --timeout <ms>      整轮看门狗，默认 240000
+  --keep-profile      保留临时 profile 并打印路径（排查用）
+  --verbose           附带页面 console 与逐步细节
 ```
 
-## 脚本
+检查项（`pass` / `FAIL` / `skip` 三态；`skip` 会在末尾列出原因，不会被算成通过）：
+
+| 步骤 | 断言的东西 |
+|---|---|
+| `build.artifact` | 产物存在，且 manifest 版本 == `package.json`（防止拿旧 `.output` 放行） |
+| `host.launch` / `host.load-extension` | Chrome 起得来、扩展加载成功并拿到 id |
+| `dashboard.mounts` | dashboard.html 是真实扩展页（`chrome.runtime.id` 与加载 id 一致）且应用挂载 |
+| `backup.arm-downloads` / `seed-fixture` | 下载目录已接管；固定 fixture 经**真实 file input** 导入并落库 |
+| `backup.export` | 点「下载 JSON 备份」产生真实文件：文件名、`version: '1.0'`、四个 section |
+| `backup.import-export-lossless` | 导出的 creators/channels/posts 与导入的 fixture **逐字节等价** |
+| `backup.destroy` / `reimport-restores` | 清库后把导出的文件交回真实 input，行与设置都还原 |
+| `alarm.enable-auto-sync` | 拨开关后设置确实落库，且 worker 建立了 30 分钟周期 alarm |
+| `alarm.survives-popup-opens` | 连开 3 次 popup，`scheduledTime` 不变 |
+| `alarm.survives-worker-restart` | **把 worker 冷停再唤醒**（`ServiceWorker.stopWorker`），`scheduledTime` 不变 |
+| `alarm.scheduled-time-unchanged` | 三次读数一致（Δ 0 ms） |
+| `alarm.cleared-when-disabled` | 关掉开关后 alarm 被清除 |
+
+两个容易踩的点，已经写进脚本：
+
+- **导入成功路径会 `alert()`**，它阻塞渲染进程并连带阻塞 CDP。脚本对每个页面会话都先
+  `Page.enable` 并自动应答 `Page.javascriptDialogOpening`。
+- **`ServiceWorker` 域只在页面会话上暴露**；在浏览器会话上调 `ServiceWorker.enable` 会得到
+  `'ServiceWorker.enable' wasn't found`。同理 `chrome.alarms.getAll()` 只能在扩展自己的
+  service worker target 里求值。
+
+不跨浏览器重启留存（重启后重新加载等同全新安装），所以 **alarm 跨重启行为在这里仍不可验**。
+
+## 一次性探针
 
 ### `douyin-probe.mjs` — 抖音创作者页面结构探针
 
-验证采集器依赖的页面事实：登录面板状态、作品总数候选元素、作品网格与真实滚动容器、驱动滚动后的网格增长与声明总数对比。`e2e/probe-result.json` 是它的一次输出样例（匿名访问，18/29 篇截断）。
+验证采集器依赖的页面事实：登录面板状态、作品总数候选元素、作品网格与真实滚动容器、驱动滚动后的网格增长与声明总数对比。`probe-result.json` 是它的一次输出样例。
 
 ```bash
+cd e2e && npm install          # 仅这两个探针需要 ws
 node douyin-probe.mjs <douyin-page-ws-url> [out.json]
 ```
 
@@ -32,7 +78,5 @@ node douyin-probe.mjs <douyin-page-ws-url> [out.json]
 node drive-extension.mjs <dashboard-ws-url>
 ```
 
-## 约束
-
-- 只读探针：不点击、不提交、不修改扩展数据（drive-extension 仅 `readonly` 事务）。
-- 不得指向用户日常浏览的 Chrome 实例；使用独立的调试 profile。
+这两个探针按需手跑（连接已有的调试实例，参数是目标页面的 ws 地址）。`release-gate.mjs` 不使用
+`ws` 包——它用 Node ≥22 自带的全局 `WebSocket`，这样 CI 里不需要任何安装步骤。

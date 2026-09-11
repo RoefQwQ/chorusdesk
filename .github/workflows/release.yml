@@ -49,6 +49,32 @@ jobs:
       - name: Build and package
         run: npm run zip
 
+      # The extension-host gate: loads the built extension into its own Chrome
+      # (isolated profile, off-screen) and drives the three flows no unit test
+      # can reach — backup export as a real download, import through the real
+      # file input, and the auto-sync alarm surviving popup opens and a cold
+      # service-worker restart. See e2e/release-gate.mjs and AGENTS rule 28.
+      #
+      # It needs a display, so it runs under Xvfb. Both Chrome and xvfb-run are
+      # present on the runner image; the fallbacks are insurance for a future
+      # image change, not the normal path.
+      #
+      # Run this before tagging with the workflow_dispatch button if you want to
+      # check the gate itself: a tag-push failure means the diagnosis happens
+      # during a release.
+      - name: Ensure Chrome and Xvfb are available
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y xvfb
+          fi
+          if ! command -v google-chrome >/dev/null && ! command -v google-chrome-stable >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y google-chrome-stable
+          fi
+          (command -v google-chrome || command -v google-chrome-stable) --version
+
+      - name: Extension E2E gate
+        run: xvfb-run -a node e2e/release-gate.mjs
+
       - name: Name the artifact for the download page
         run: |
           version=$(node -p "require('./package.json').version")
