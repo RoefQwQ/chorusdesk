@@ -798,6 +798,35 @@ Reasons each part is needed, all learned by it failing first:
   numbers are worth reading: a scroll viewport's height, whether one copy of a list overflows
   it, where a row boundary actually falls.
 
+**A synthetic click aimed at a stale position is indistinguishable from a window that
+cannot be clicked — and the environment will look perfect while it happens.** The CI gate
+failed intermittently for a day and I offered four explanations, all wrong (window placed
+off-screen, window not yet mapped, retry budget too short, window wider than the Xvfb
+screen). What finally settled it was making the failure print the geometry, which cleared
+every environmental suspect at once:
+
+    display 1920x1080 fits the window 1440x900     ← the display is fine
+    screenX:10 screenY:10 outer 1440x900           ← the window is fully on it
+    hasFocus: true  visibility: visible            ← and focused
+    mousedown=0 mouseup=0 click=0                  ← yet nothing arrived
+
+The coordinates had been measured **once**, before `Page.bringToFront` and the focus wait
+— seconds during which the app is still mounting and re-laying out. All five retry attempts
+then dispatched at that same stale point. Fix: measure again before **every** dispatch. It
+is cheap, and it is why the failure correlated with how fast the app settled rather than
+with anything about the display.
+
+Two process notes, because they cost more than the bug did:
+
+- **A single green run is not evidence.** I declared this fixed four times on one passing
+  run each; the commit that "fixed" it twice failed 2 of 4 runs. The fix is only believable
+  because `3e70768` was measured at 2/4 and its successor at **10/10** on unchanged
+  arguments — at the old rate, ten straight passes is about a one-in-a-thousand outcome.
+  Sample a flake more than once before believing anything, including a repair.
+- **When the environment is exonerated, stop blaming it.** Four hypotheses about
+  occlusion and mapping all pointed outward; the fault was a stale measurement in our own
+  code. Let the failure carry numbers, and read them before theorising.
+
 ### Pitfalls of driving an occluded browser
 
 Three failures that all trace to the same cause — **a window that is not composited produces no
