@@ -113,12 +113,18 @@ export const douyinAdapter: PlatformAdapter = {
     const buildLimit = isDeepRequest(options) ? MAX_HISTORY_ITEMS : limit;
     const posts = buildDouyinPosts(channel, snapshot, buildLimit, options);
 
-    // Did the grid stop short of the creator's stated work count? Anonymous
-    // browsing hits a login wall partway down (measured: 18 of a stated 29, with
-    // no further growth however far it is scrolled), and the works behind it are
-    // exactly the older ones a history dig is after. Saying "已到底" there would
-    // be a lie, so the truncation is surfaced as an auth error instead — the sync
-    // layer shows the message and does NOT park the cursor at __END__.
+    // Did the grid stop short of the creator's stated work count? The stated
+    // total counts works the author has hidden (see below), so a shortfall is the
+    // normal state of such a profile and proves nothing on its own. What the
+    // shortfall does forbid is claiming "已到底": a dig that cannot see more works
+    // is surfaced as an auth error instead, so the sync layer shows the message
+    // and does NOT park the cursor at __END__.
+    //
+    // The original reading of this branch — "anonymous browsing hits a login wall
+    // partway down (measured: 18 of a stated 29)" — is withdrawn: that
+    // measurement is equally explained by 11 hidden works and a complete grid
+    // (AGENTS.md rule 10, and the longer note in collector.ts). The branch below
+    // is kept because it is the safe direction, not because the wall is proven.
     const isDeep = isDeepRequest(options);
 
     // Completeness is NOT provable from the stated work count.
