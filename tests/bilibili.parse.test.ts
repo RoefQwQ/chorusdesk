@@ -163,8 +163,11 @@ describe('bilibili — parsing a captured space-dynamic payload', () => {
     expect(res.error).toBeTruthy();
     // The whole point: it must NOT say the account has nothing. It was refused.
     expect(res.error!.code).not.toBe('not_found');
-    expect(res.error!.code).toBe('rate_limit');
-    expect(res.error!.message).toContain('风控');
+    // `auth`, not `rate_limit`: the measured cause is a missing session, and the class
+    // decides BOTH the wording the user sees (rate_limit's message is replaced by a
+    // hardcoded 「请等待 2~3 分钟」) and whether a platform cool-down is persisted.
+    expect(res.error!.code).toBe('auth');
+    expect(res.error!.message).toContain('登录');
   });
 
   it('still reports a refusal without a JSON body (HTML 412)', async () => {
@@ -175,7 +178,7 @@ describe('bilibili — parsing a captured space-dynamic payload', () => {
 
     const res = await bilibiliAdapter.fetchLatest(channel, 10);
 
-    expect(res.error?.code).toBe('rate_limit');
+    expect(res.error?.code).toBe('auth');
   });
 
   it('swallows a rejected dynamic feed when medialist answers code 0 with an empty list', async () => {

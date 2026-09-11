@@ -46,7 +46,19 @@ function biliCodeError(code: number): FetchError {
     case -403:
       return fetchError('auth', 'B站接口拒绝访问（权限不足或签名失效），请确认登录状态后重试');
     case -412:
-      return fetchError('rate_limit', 'B站请求被拦截（风控），请稍后重试');
+      // MEASURED 2026-09-12, and it changed this mapping's class:
+      //     no session, adapter headers -> HTTP 412, {"code":-412,"message":"request was banned"}
+      //     the same request from a signed-in browser -> HTTP 200, code 0
+      // So -412 is what the endpoint returns when the request carries no usable
+      // session. It is NOT the risk-control code — that is -352, which stays
+      // `rate_limit` on the next line.
+      //
+      // Why the class matters twice over: `rate_limit` makes channelSync DISCARD the
+      // adapter's message in favour of a hardcoded 「请等待 2~3 分钟」, and batchSync
+      // starts a PERSISTED cool-down for the platform. So a signed-out user was told to
+      // wait, given no reason to log in, and then had the platform skipped even after
+      // logging in. `auth` surfaces this message verbatim instead.
+      return fetchError('auth', 'B站拒绝了本次请求，通常是浏览器未登录或登录已过期。请在浏览器中登录 bilibili 后重试。');
     default:
       return fetchError('parse', `B站接口异常 (code ${code})`);
   }

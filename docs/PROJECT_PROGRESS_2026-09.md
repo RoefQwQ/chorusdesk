@@ -135,7 +135,9 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 - JSON/XML parse error 可能归类为 network。
 - 未特殊处理的 401/403 可能归类为 network。
 - 平台返回格式变化可能没有归类为 parse。
-- `retryable` 尚未驱动实际重试。
+- ~~`retryable` 尚未驱动实际重试~~ —— **该字段已于 2026-09-12 删除**（队列 B31）：
+  全仓无读取方，行为一直由 `code` 决定；且「按可重试性重试」会与规则 19 的冷却机制冲突，
+  当时无实测收益数据支撑。若将来要按阶段分类后做受限指数退避，应重新设计而不是复活该字段。
 
 后续应按 HTTP、解析、schema、timeout 和 transport 阶段分别分类，再统一实现受限指数退避。
 
