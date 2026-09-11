@@ -684,10 +684,33 @@ Chrome (since 137), and the flag that decides whether CDP can load the build is
 hub({ op: 'start', name: '<name>', application: '<chrome>', args: [
   '--user-data-dir=<temp>', '--remote-debugging-port=<port>', '--remote-allow-origins=*',
   '--enable-unsafe-extension-debugging',   // ← the flag that decides this
-  '--window-position=-2400,-2400',         // off-screen: the user is not disturbed
+  '--window-position=-2400,-2400',         // necessary, NOT sufficient — see below
 ], ready: { port: <port> } });
 await cdp('Extensions.loadUnpacked', { path: '<repo>/.output/chrome-mv3' });  // → { id }
+// Then MINIMIZE it:
+const { targetInfos } = await cdp('Target.getTargets');
+const { windowId } = await cdp('Browser.getWindowForTarget', { targetId: firstPage.targetId });
+await cdp('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
 ```
+
+**`--window-position=-2400,-2400` alone does not hide the window from the user.** It is
+honoured — measured on Windows, `Browser.getWindowBounds` reports
+`{left: -2400, top: -2400, width: 1440, height: 900, state: "normal"}` — and that is exactly the
+problem: the window exists, off the coordinate range. It still appears in the taskbar, it can
+still be alt-tabbed to, and if the virtual desktop extends to negative coordinates (a monitor
+placed to the left of the primary) it is visibly **on a real display**. The user said so
+directly: 「你开的测试浏览器在我的屏幕可显示范围内」. Every comment in this repo claiming
+"off-screen: the user is not disturbed" was wrong.
+
+Minimizing is what actually keeps it out of the way, and CDP does it properly (same
+measurement: `state: "minimized"`). `release-gate.mjs`, `creators-render.mjs` and
+`feed-render.mjs` all do this now, and **skip it when `CI` is set** — on a runner the window
+must stay on the X screen, because an off-screen window under Xvfb receives no synthetic input
+at all (a real intermittent failure; see the CI history for 2026-09-11).
+
+Minimizing does not break driven input — verified, not assumed: after the change all four
+clicks in the release gate still report delivery (`mousedown=1 mouseup=1 click=1`), and
+`feed-render` stays byte-identical across two runs of the same build.
 
 With it, the extension's **service worker** appears as a target (`background.js`) and can be
 evaluated in, so `chrome.alarms`, `chrome.tabs`, message handlers and the router are drivable;

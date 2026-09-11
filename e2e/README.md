@@ -111,3 +111,8 @@ node drive-extension.mjs <dashboard-ws-url>
 
 这两个探针按需手跑（连接已有的调试实例，参数是目标页面的 ws 地址）。`release-gate.mjs` 不使用
 `ws` 包——它用 Node ≥22 自带的全局 `WebSocket`，这样 CI 里不需要任何安装步骤。
+
+- 跑起来之后**把窗口最小化**（`Browser.setWindowBounds { windowState: 'minimized' }`）。只加
+  `--window-position=-2400,-2400` **不算隐藏**：窗口照旧出现在任务栏、能被 Alt-Tab 切到，桌面
+  向左延伸时更是直接落在显示器上（用户实测指出过）。本仓库三个脚本都已最小化，并在 `CI` 下跳过
+  ——runner 上没有用户，而 Xvfb 下放到屏外的窗口**收不到任何合成输入**（2026-09-11 的间歇性失败）。
