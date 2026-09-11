@@ -14,6 +14,28 @@ import { asRecord } from '../utils/json';
 const BILI_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
+/**
+ * The business code out of an HTTP failure body, when there is one.
+ *
+ * Bilibili answers a rejected request with an HTTP status AND a JSON body carrying the
+ * real code — measured 2026-09-12: `HTTP 412`, body `{"code":-412,"message":"request was
+ * banned"}`. Without this, a rejected request never reaches `biliCodeError` at all: the
+ * status check skips the whole parse, and the run ends up reporting 「账号可能无投稿或
+ * 已注销」 for what is actually a refusal.
+ */
+function businessCodeFromBody(data: string | undefined): number | undefined {
+  if (!data) return undefined;
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    const code = asRecord(parsed).code;
+    return typeof code === 'number' ? code : undefined;
+  } catch {
+    // Some refusals come back as HTML rather than JSON (measured: a bare request with no
+    // Referer). No code then — the caller falls back to the HTTP status.
+    return undefined;
+  }
+}
+
 /** Map Bilibili business error codes to a structured, user-facing error. */
 function biliCodeError(code: number): FetchError {
   switch (code) {
@@ -76,6 +98,12 @@ export const bilibiliAdapter: PlatformAdapter = {
         },
       });
 
+      if (!res.ok) {
+        // A refusal is not an absence. Without this the run reports "no content" for a
+        // channel the platform declined to serve (measured: HTTP 412 with
+        // `{"code":-412}` when the session is missing or rejected).
+        lastDynamicCode = businessCodeFromBody(res.data) ?? (res.status === 412 ? -412 : undefined);
+      }
       if (res.ok && res.data) {
         const json = JSON.parse(res.data) as JsonRecord;
         if (json.code !== 0) {
@@ -144,6 +172,9 @@ export const bilibiliAdapter: PlatformAdapter = {
           },
         });
 
+        if (!res.ok) {
+          lastMediaCode = businessCodeFromBody(res.data) ?? (res.status === 412 ? -412 : undefined);
+        }
         if (res.ok && res.data) {
           const json = JSON.parse(res.data);
           if (json.code !== 0) {

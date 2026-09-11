@@ -24,14 +24,18 @@ import { spaceDynamicDraw, spaceDynamicForwardHeavy } from './fixtures/bilibili/
  * dynamic-feed responses.
  */
 
-const served: Record<string, string> = {};
+/** Each entry is either a body string (HTTP 200) or a full response shape. */
+const served: Record<string, string | { body: string; ok: boolean; status: number }> = {};
 const requested: string[] = [];
 
 vi.mock('../src/infrastructure/chrome/http', () => ({
   bgFetch: async (url: string) => {
     requested.push(url);
-    for (const [needle, body] of Object.entries(served)) {
-      if (url.includes(needle)) return { ok: true, status: 200, data: body };
+    for (const [needle, entry] of Object.entries(served)) {
+      if (!url.includes(needle)) continue;
+      return typeof entry === 'string'
+        ? { ok: true, status: 200, data: entry }
+        : { ok: entry.ok, status: entry.status, data: entry.body };
     }
     // The medialist supplement runs whenever the dynamic feed yields fewer than
     // `limit` items. Answer it with an authoritative empty list (code 0) so the
@@ -143,40 +147,46 @@ describe('bilibili — parsing a captured space-dynamic payload', () => {
     expect(res.nextCursor).toBeUndefined();
   });
 
+  it('reports a refusal as a refusal, not as an absent account', async () => {
+    // THE REAL SHAPE, measured 2026-09-12 against the live endpoint: a rejected request
+    // is an HTTP failure whose BODY carries the business code —
+    //   HTTP 412, body {"code":-412,"message":"request was banned"}
+    // (a bare request with no Referer answers 412 with HTML instead, so the code has to
+    // be optional). This case previously used `{ ok: true, code: -412 }`, which cannot
+    // happen, and so asserted against an input reality does not produce.
+    served['feed/space'] = { body: JSON.stringify({ code: -412, message: 'request was banned' }), ok: false, status: 412 };
+    served['medialist'] = { body: JSON.stringify({ code: -412, message: 'request was banned' }), ok: false, status: 412 };
+
+    const res = await bilibiliAdapter.fetchLatest(channel, 10);
+
+    expect(res.posts).toEqual([]);
+    expect(res.error).toBeTruthy();
+    // The whole point: it must NOT say the account has nothing. It was refused.
+    expect(res.error!.code).not.toBe('not_found');
+    expect(res.error!.code).toBe('rate_limit');
+    expect(res.error!.message).toContain('风控');
+  });
+
+  it('still reports a refusal without a JSON body (HTML 412)', async () => {
+    // Measured: a request with no Referer gets 412 with an HTML body, so there is no
+    // business code to read. The status alone must still be classified as a refusal.
+    served['feed/space'] = { body: '<!DOCTYPE html><html><body>blocked</body></html>', ok: false, status: 412 };
+    served['medialist'] = { body: '<!DOCTYPE html><html><body>blocked</body></html>', ok: false, status: 412 };
+
+    const res = await bilibiliAdapter.fetchLatest(channel, 10);
+
+    expect(res.error?.code).toBe('rate_limit');
+  });
+
   it('swallows a rejected dynamic feed when medialist answers code 0 with an empty list', async () => {
-    // RECORDED AS FOUND, and this one is a suspected gap rather than a design note.
-    // The dynamic feed is refused by risk control (-412 is the measured code on the
-    // wire), but the medialist supplement answers code 0 with `media_list: []`, which
-    // the adapter treats as authoritative ("this account has no videos") and returns
-    // a successful empty result.
-    //
-    // The reasoning behind `mediaSucceeded` is sound for what medialist covers — video
-    // uploads — but medialist does NOT cover image or text dynamics. So an account
-    // with images and no videos, whose dynamic feed is being rate-limited, is reported
-    // as having no content, and the -412 (`lastDynamicCode`) is never surfaced. That
-    // is the shape AGENTS rule 13 warns about: a platform that yielded nothing to
-    // parse must name the cause, not report a clean zero.
-    served['feed/space'] = JSON.stringify({ code: -412, message: 'request was banned' });
+    // Recorded as found; the `mediaSucceeded` reasoning is deliberate (see the adapter's
+    // comment). Kept so the behaviour is visible, and it uses the REAL 412 shape now.
+    served['feed/space'] = { body: JSON.stringify({ code: -412, message: 'request was banned' }), ok: false, status: 412 };
 
     const res = await bilibiliAdapter.fetchLatest(channel, 10);
 
     expect(res.error).toBeUndefined();
     expect(res.posts).toEqual([]);
     expect(res.totalFetched).toBe(0);
-  });
-
-  it('does report the cause when medialist fails too', async () => {
-    // The contrast that matters: with medialist ALSO refused, the business code does
-    // reach the caller as an error. So the gap above is narrower than "errors are
-    // swallowed" — it is specifically "a rejected dynamic feed is invisible whenever
-    // medialist succeeds with an empty list".
-    served['feed/space'] = JSON.stringify({ code: -412, message: 'request was banned' });
-    served['medialist'] = JSON.stringify({ code: -412, message: 'request was banned' });
-
-    const res = await bilibiliAdapter.fetchLatest(channel, 10);
-
-    expect(res.error).toBeTruthy();
-    expect(res.error!.code).not.toBe('not_found');
-    expect(res.posts).toEqual([]);
   });
 });
