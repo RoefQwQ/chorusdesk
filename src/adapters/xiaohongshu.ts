@@ -4,7 +4,6 @@ import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { toSecureMediaUrl } from '../utils/media';
 import { errorMessage } from '../utils/errorMessage';
-import type { JsonRecord } from '../utils/json';
 import { asRecord } from '../utils/json';
 import {
   collectRawNotes,
@@ -123,41 +122,6 @@ export const xiaohongshuAdapter: PlatformAdapter = {
   },
 };
 
-function extractXhsInitialState(html: string): JsonRecord | null {
-  if (!html) return null;
-
-  try {
-    for (const prefix of ['window.__INITIAL_STATE__', 'window.__INITIAL_SSR_STATE__']) {
-      const idx = html.indexOf(prefix);
-      if (idx !== -1) {
-        const assignIdx = html.indexOf('=', idx);
-        if (assignIdx !== -1) {
-          const scriptEnd = html.indexOf('</script>', assignIdx);
-          if (scriptEnd !== -1) {
-            let raw = html.slice(assignIdx + 1, scriptEnd).trim();
-            if (raw.endsWith(';')) raw = raw.slice(0, -1).trim();
-
-            if (raw.startsWith('JSON.parse(')) {
-              const quoteStart = raw.indexOf('"');
-              const quoteEnd = raw.lastIndexOf('"');
-              if (quoteStart !== -1 && quoteEnd > quoteStart) {
-                const inner = JSON.parse(raw.slice(quoteStart, quoteEnd + 1)) as unknown;
-                return asRecord(JSON.parse(String(inner)));
-              }
-            } else if (raw.startsWith('{')) {
-              const cleaned = raw.replace(/:\s*undefined\b/g, ': null');
-              return asRecord(JSON.parse(cleaned) as unknown);
-            }
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[Xiaohongshu] Parse INITIAL_STATE error:', e);
-  }
-
-  return null;
-}
 
 /**
  * Cap on detail-page fetches per sync round. XHS risk control is strict;
@@ -206,7 +170,7 @@ async function enrichImageNoteMedia(channel: Channel, posts: Post[]): Promise<vo
       });
       if (!res.ok) continue;
 
-      const state = extractXhsInitialState(res.data);
+      const state = extractInitialState(res.data);
       const note = asRecord(asRecord(asRecord(asRecord(asRecord(state).note).noteDetailMap)[noteId]).note);
       const imageList: unknown = note.imageList || note.imagesList;
       if (!Array.isArray(imageList) || imageList.length === 0) continue;

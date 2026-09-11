@@ -4,6 +4,7 @@ import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { errorMessage } from '../utils/errorMessage';
+import { devLog } from '../utils/devLog';
 
 export const youtubeAdapter: PlatformAdapter = {
   platform: 'youtube',
@@ -48,7 +49,16 @@ export const youtubeAdapter: PlatformAdapter = {
             }
           }
         } catch (e) {
-          console.warn('Failed to resolve YouTube handle to channelId', e);
+          // This is the fragile step documented in DEVELOPMENT.md §10: three fallback
+          // regexes over page HTML, and if all three miss, the `@handle` is used as a
+          // channelId in the RSS request. Whether YouTube then errors or returns an
+          // empty feed was never measured — so at minimum the failure has to be
+          // visible in the Developer Log, not only in a console the panel cannot read.
+          devLog.warn(
+            'youtube',
+            `未能解析 ${channelId} 的频道 ID（页面改版或未登录）`,
+            errorMessage(e),
+          );
         }
       }
 
