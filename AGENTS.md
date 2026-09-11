@@ -762,6 +762,41 @@ rule 25's isolated-browser recipe uses.
 
 ---
 
+## 29. Whitespace in a table is conserved — decide where it goes, and measure
+
+Two rounds were spent moving a blank around instead of eliminating it. What the user
+circled as 「a 500px hole between the badges and the tags」 was one column absorbing every
+pixel the other five did not need.
+
+What the measurements showed, on a 1471px table whose six columns need about 1000px:
+
+- **The slack is conserved.** ~470px has to live somewhere. There is no allocation that
+  removes it; a fix that only moves it produces a new complaint one round later. Say that
+  out loud rather than implying the gap can be designed away.
+- **Under the default `table-layout: auto`, `w-full` gives the whole remainder to whichever
+  column declares no width** — here 已绑平台账号 — and its content is left-aligned, so the
+  slack reads as a hole mid-row. Sizing that one column does not help: auto layout re-derives
+  the split from content. `table-fixed` plus a width on every column makes the split
+  explicit, and then a test can assert it (`tests/creatorsTable.test.ts` asserts the
+  percentages sum to 100, because a missing width is what brings the hole back).
+- **Adjacent columns' slacks add up visually.** A left-aligned cell sits at its column's
+  start and a right-aligned one at its end, so an over-wide 同步状态 next to an over-wide
+  操作 produced a single 265px gap — created by the first attempt at this fix. Check
+  neighbours, not columns in isolation.
+- **Measure the content, not the container.** The first measurement reported "only 12px of
+  slack" because it measured the flex wrapper, which fills the cell by definition. Measure
+  the rightmost *leaf* element (the badge itself). A measurement that reports the answer you
+  expect deserves one more look.
+- **Percentages derived from measured content go stale when content changes.** A platform
+  with a much longer display name changes the requirement. Re-measure; the numbers carry a
+  comment saying so.
+
+Honest framing for the next person: a wide table with narrow content will look airy. The
+choice is *where*, and that is the user's call — offer it (table not filling the card is the
+other option) rather than silently picking.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
@@ -779,4 +814,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 450 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 457 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
