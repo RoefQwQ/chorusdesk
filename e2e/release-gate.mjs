@@ -401,6 +401,34 @@ async function launchChrome({ chromePath, profileDir }) {
   const [port, wsPath] = fs.readFileSync(portFile, 'utf8').split('\n');
   assert(port && wsPath, `unreadable DevToolsActivePort: ${JSON.stringify({ port, wsPath })}`);
   const cdp = await Cdp.connect(`ws://127.0.0.1:${Number(port)}${wsPath.trim()}`);
+
+  // MINIMIZE the window when a person is watching.
+  //
+  // `--window-position=-2400,-2400` does move the window there, but an off-screen
+  // window is still on screen in every way that matters to the user: it shows in
+  // the taskbar, it can be alt-tabbed to, and if the virtual desktop extends to
+  // negative coordinates (a monitor placed left of the primary) it is simply ON a
+  // real display. Measured on Windows: the position is honoured exactly, and
+  // `Browser.setWindowBounds … { windowState: 'minimized' }` is honoured too. So
+  // minimize — that is what actually keeps it out of the way — and keep the
+  // negative position as well, since a minimized window can still flash on show.
+  //
+  // Skipped on CI, where there is no user and the window must stay on the X
+  // screen: an off-screen window there receives no synthetic input at all (that
+  // was a real, intermittent failure — see the CI history for 2026-09-11).
+  if (!process.env.CI) {
+    try {
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      const page = targetInfos.find((t) => t.type === 'page');
+      if (page) {
+        const { windowId } = await cdp.send('Browser.getWindowForTarget', { targetId: page.targetId });
+        await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+      }
+    } catch (e) {
+      // Cosmetic only: never fail the gate because the window could not be hidden.
+      detail(`could not minimize the browser window: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   return { child, cdp, chromeVersion: await versionOf(cdp) };
 }
 

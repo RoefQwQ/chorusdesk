@@ -109,6 +109,25 @@ ws.addEventListener('message', (ev) => {
   }
 });
 await new Promise((r) => ws.addEventListener('open', r));
+
+// Keep the window out of the user's way. `--window-position=-2400,-2400` alone is
+// not enough: an off-screen window still appears in the taskbar and can be
+// alt-tabbed to, and on a virtual desktop that extends to negative coordinates it
+// is visibly on a monitor. Minimizing is what actually hides it (measured on
+// Windows with Browser.getWindowBounds).
+await new Promise(async (resolve) => {
+  try {
+    const { targetInfos } = await send('Target.getTargets');
+    const page = targetInfos.find((t) => t.type === 'page');
+    if (page) {
+      const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.targetId });
+      await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+    }
+  } catch {
+    /* cosmetic only */
+  }
+  resolve();
+});
 const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
   const i = ++id; pending.set(i, { resolve, reject });
   ws.send(JSON.stringify(sessionId ? { id: i, method, params, sessionId } : { id: i, method, params }));
