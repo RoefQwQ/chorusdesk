@@ -204,6 +204,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 无法运行扩展的场景：用**一次性脚本**做单元冒烟（例如非扩展环境 `bgFetch` 的直连兜底、纯函数如 `parseProfileUrl`/`toSecureMediaUrl`/`interleaveChannelsByPlatform`），跑完即删，不留在仓库当测试。
 - 需要**真实浏览器**才能回答的行为（页面渲染、排版、滚动、真实平台报文），用 `e2e/` 下的 CDP 探针脚本，详见 [e2e/README.md](../e2e/README.md)：
   - **发布前门禁**：`npm run build && npm run e2e`（`e2e/release-gate.mjs`）。它自建独立 profile 加载构建产物，跑「备份导出/导入往返 + alarm 存活」三段，`release.yml` 在发布前会跑它；CI 无显示环境用 `xvfb-run -a`。产物版本与 `package.json` 不一致会直接失败，防止拿旧 `.output` 放行。
+  - **版本号语义与商店重提交**（第 4 位数字、什么时候加 MAJOR/MINOR/PATCH）写在 `docs/PUBLISHING.md` §5；上架相关的一切都集中在那一份文件里，不要在本文件重复。
   - 必须指向**独立 profile** 的调试端口，绝不接管用户日常浏览的实例；
   - 已固化的门禁脚本自己启动/收尾浏览器与临时 profile；手跑探针只读，不点击、不提交、不修改扩展数据；
   - 本机 Chrome 152 起 `--load-extension` 被忽略，不能用它加载未打包扩展；**但 CDP `Extensions.loadUnpacked` 可用**（需 `--enable-unsafe-extension-debugging`），可做扩展级验证；纯排版问题则把组件打包成单文件 HTML 在普通页面中量（见 `AGENTS.md` 规则 28/30）。

@@ -706,6 +706,20 @@ B22. ~~**规则 8 的台账出现漂移**~~ —— **已完成（2026-09-11）**
     第 9 处 `useDeletedPosts.ts:11`（回收站读路径直连 `postRepository`）**不在**。
     形态正是该规则禁止的（「优先加 service 方法而非新增直连 import」），却落在规则用来自我
     约束的清单之外——「已知债务、已枚举」这句话就是这样悄悄失效的。已记录未修。
+B28. **`enableR18Blur` 是死设置**（2026-09-11 核对商店政策时发现）：全仓 3 处出现——类型声明
+    （`types/index.ts`）、`DEFAULT_SETTINGS` 默认值、`useDashboardData` 的默认值——**没有任何组件
+    或逻辑读取它**；设置页的布尔开关只支持 `enableAutoSync` 与 `hideReposts`（`updateBooleanSetting`
+    的参数是这两个的联合类型）。一个「默认开启」的模糊开关存在但不起作用，比没有这个设置更糟：
+    它读起来像一项已实现的合规能力。修法二选一：接上真正的模糊/隐藏逻辑，或删掉它（含类型与默认值），
+    **不要留着当装饰**。与上架相关：商店对不适合全年龄的内容要求标记 Mature，而这条决定依据是
+    「产品实际会展示什么」，所以先定这个设置的去留，再定商店的 Mature 标记。
+B29. **上架的合规缺口（上架前必须补，已核对一手政策）**：见 `docs/PUBLISHING.md` §1.4，共 5 条——
+    其中第 1 条最硬：*Limited Use* 第 6 条要求扩展自有网站上有固定措辞的主动声明
+    （"The use of information received from Google APIs will adhere to the Chrome Web Store User Data
+    Policy, including the Limited Use requirements."），而 `docs/PRIVACY.md` 目前**没有**这句话。
+    其余为：隐私政策需要可填写的公开 URL；`optional_host_permissions: ['*://*/*']` 必须在文案里
+    点名解释（政策禁止为未实现功能预申请权限）；描述不能只是平台名清单（Keyword Spam）；
+    Mature 标记待定（依赖 B28）。
 B26. **`PLATFORMS.md` §2.2 的 Twitter 建议此前是空头支票**（随 B10 修复，**待真机复验**）：
     该节说「可先在浏览器中打开目标博主的推特主页标签页，扩展会优先复用当前活跃标签页的前端网络会话」
     ——在注入路径修好之前，这句话做不到（函数一进页面就 `ReferenceError`）。修复后逻辑上成立，
