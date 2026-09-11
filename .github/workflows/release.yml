@@ -79,7 +79,14 @@ jobs:
           "$chrome_bin" --version
 
       - name: Extension E2E gate
-        run: xvfb-run -a node e2e/release-gate.mjs
+        # `-s` matters: xvfb-run's default screen is 1280x1024, and the gate's
+        # window is 1440x900 — WIDER than the screen. Chrome then centres it at
+        # x = -80, so the left edge of the page (where the nav tabs are) is off the
+        # display and synthetic clicks there are dropped by the X server:
+        # `Input.dispatchMouseEvent` returns success, the page receives nothing
+        # (mousedown=0 mouseup=0 click=0). That produced weeks of intermittent CI
+        # failures that never reproduced locally, where the screen is wider.
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" node e2e/release-gate.mjs
 
       - name: Name the artifact for the download page
         run: |

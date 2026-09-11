@@ -849,6 +849,44 @@ try {
 
   const cdp = chrome?.cdp;
 
+  // The window must FIT the display, or every click near the window's edge is
+  // silently dropped.
+  //
+  // This is the actual cause of the intermittent CI failures that survived three
+  // wrong explanations (window off-screen from `--window-position`, a window not
+  // yet mapped, a retry budget too short). The gate's window is 1440x900 and
+  // `xvfb-run`'s default screen is 1280x1024 — 160px NARROWER — so Chrome centres
+  // the window at x = -80 and the left edge of the page, where the nav tabs are,
+  // is off the display. `Input.dispatchMouseEvent` then succeeds while the page
+  // receives nothing. It never reproduced locally because a developer screen is
+  // wider (measured here: 2560x1440), which is exactly why the failure read as
+  // mysterious.
+  //
+  // The workflows now pass `-s "-screen 0 1920x1080x24"`. This asserts the result,
+  // because the next time someone changes the window size or the runner image, the
+  // failure should name the geometry instead of manifesting as dropped clicks.
+  await step('host.display-fits-window', ['host.launch'], async () => {
+    const { targetInfos } = await cdp.send('Target.getTargets');
+    const page = targetInfos.find((t) => t.type === 'page');
+    assert(page, 'no page target to measure the display from');
+    const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+    const probeTarget = await new Target(cdp, sessionId, 'display').init({ page: false });
+    const probe = await probeTarget.eval(
+      `({ screen: [screen.width, screen.height], outer: [outerWidth, outerHeight], inner: [innerWidth, innerHeight] })`,
+    );
+    await cdp.send('Target.detachFromTarget', { sessionId }).catch(() => {});
+    const [[sw, sh], [ow, oh]] = [probe.screen, probe.outer];
+    assert(
+      ow <= sw && oh <= sh,
+      `the browser window is ${ow}x${oh} but the display is only ${sw}x${sh}. ` +
+        'A window larger than the screen is centred with its left edge off the display, and ' +
+        'clicks there are dropped by the X server without an error — the exact failure this gate ' +
+        'kept hitting. On CI, raise the Xvfb screen (`xvfb-run -s "-screen 0 1920x1080x24"`).',
+    );
+    detail(`display ${sw}x${sh} fits the window ${ow}x${oh}`);
+    return probe;
+  });
+
   const load = await step('host.load-extension', ['host.launch'], async () => {
     const { id } = await cdp.send('Extensions.loadUnpacked', { path: EXT_DIR });
     assert(id, 'Extensions.loadUnpacked returned no id');
