@@ -78,6 +78,12 @@ import {
   ChevronsUpDown,
 } from 'lucide-vue-next';
 import ChannelRow from './ChannelRow.vue';
+// This import and the `Trash2` icon above were once used in the template without
+// being imported, so they resolved to nothing and every 已绑平台账号 cell silently
+// rendered EMPTY in all three views, as did the delete icon. `vue-tsc` does not
+// flag an unresolved component unless `vueCompilerOptions.strictTemplates` is on
+// (it is now — 2026-09-11), which is how that shipped unnoticed through four
+// commits.
 import PlatformBadge from './PlatformBadge.vue';
 import { computed } from 'vue';
 

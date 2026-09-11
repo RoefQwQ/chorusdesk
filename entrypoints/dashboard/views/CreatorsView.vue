@@ -39,14 +39,14 @@ import {
   Edit3,
   AlertCircle,
   Users,
-  ChevronDown,
 } from 'lucide-vue-next';
 import ChannelRow from '../components/creator/ChannelRow.vue';
 import CreatorCardHeader from '../components/creator/CreatorCardHeader.vue';
 import CreatorListView, {
   type CreatorListViewContext,
 } from '../components/creator/CreatorListView.vue';
-import type { CreatorSyncSummary } from '../types/creatorDirectory';
+import CreatorGridView from '../components/creator/CreatorGridView.vue';
+import type { CreatorCardViewContext, CreatorSyncSummary } from '../types/creatorDirectory';
 import CreatorDirectoryToolbar, {
   type CreatorDirectoryToolbarContext,
 } from '../components/creator/CreatorDirectoryToolbar.vue';
@@ -54,12 +54,6 @@ import {
   useCreatorDirectoryFilters,
   type CreatorSortKey,
 } from '../composables/useCreatorDirectoryFilters';
-// Both of these were used in the template without being imported, so they
-// resolved to nothing and every 已绑平台账号 cell silently rendered EMPTY in all
-// three views, as did the delete icon. `vue-tsc` does not flag an unresolved
-// component unless `vueCompilerOptions.strictTemplates` is on (it is now —
-// 2026-09-11), which is how this shipped unnoticed through four commits.
-import PlatformBadge from '../components/creator/PlatformBadge.vue';
 
 const props = defineProps<{ context: CreatorsViewContext }>();
 
@@ -430,6 +424,56 @@ const listContext = computed<CreatorListViewContext>(() => ({
   onCycleRole: cycleChannelRole,
 }));
 
+/**
+ * The two card views' shared contract (grid and detailed both render masonry
+ * columns of `CreatorCardHeader` cards).
+ *
+ * Built once and spread into each view's context so the two cannot drift: adding
+ * a helper for one of them and forgetting the other is exactly the failure this
+ * shape prevents.
+ */
+const cardViewContext = computed(() => ({
+  channels: props.context.channels,
+  postCountMap: props.context.creatorPostCountMap,
+  syncingChannelIds: props.context.syncingChannelIds,
+
+  isBatchMode: isBatchMode.value,
+  selectedIds: selectedCreatorIds.value,
+  expandedIds: expandedCreatorIds.value,
+  dragOverId: dragOverCreatorId.value,
+  sortBy: creatorSortBy.value,
+
+  onToggleExpand: toggleExpandCreator,
+  onDragStart: onCreatorDragStart,
+  onDragOver: onCreatorDragOver,
+  onDragLeave,
+  onDrop: onCreatorDrop,
+  onDragEnd,
+  onToggleSelect: toggleSelectCreator,
+  onCycleTag: cycleTagFilter,
+
+  groupedChannels: getCreatorGroupedChannels,
+  syncSummary: getCreatorSyncSummary,
+  relativeTime: formatRelativeTime,
+  creatorAvatar: getCreatorAvatar,
+  onAvatarError: handleAvatarError,
+
+  onAddChannel: (creator: Creator) => openAddModal('channel', creator),
+  onAvatarPicker: openAvatarPicker,
+  onDeepSync: openDeepSyncModal,
+  onEditTags: openEditCreatorTags,
+  onRefreshCreator: handleRefreshCreator,
+  onRefreshChannel: handleRefreshChannel,
+  onDeleteCreator: deleteCreator,
+  onDeleteChannel: deleteChannel,
+  onCycleRole: cycleChannelRole,
+}));
+
+const gridContext = computed<CreatorCardViewContext>(() => ({
+  ...cardViewContext.value,
+  columns: gridColumns.value,
+}));
+
 // Account role labels/badge classes live in ChannelRow (single source).
 
 function getCreatorGroupedChannels(creatorId: string): Record<string, Channel[]> {
@@ -556,131 +600,10 @@ function loadDemoData() {
       </button>
     </div>
 
-    <!-- 1. Grid Tiles View (Default: 8-16 Creators per screen, compact cards with platform icons and collapsible account details) -->
-    <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 items-start">
-      <div
-        v-for="(colCreators, colIdx) in gridColumns"
-        :key="'grid-col-' + colIdx"
-        class="flex flex-col gap-3.5 min-w-0"
-      >
-        <div
-          v-for="c in colCreators"
-          :key="c.id"
-          :draggable="creatorSortBy === 'manual'"
-          @dragstart="onCreatorDragStart(c.id)"
-          @dragover="(e: DragEvent) => onCreatorDragOver(e, c.id)"
-          @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
-          @drop="onCreatorDrop(c.id)"
-          @dragend="dragCreatorId = null; dragOverCreatorId = null"
-          class="p-3 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-2xs space-y-2.5 relative flex flex-col"
-          :class="[
-            selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-xs',
-            dragOverCreatorId === c.id ? 'ring-2 ring-indigo-400 border-dashed' : '',
-          ]"
-        >
-        <div>
-          <!-- Header Row: Checkbox / Avatar / Name / Actions -->
-          <CreatorCardHeader
-            :creator="c"
-            variant="grid"
-            :post-count="context.creatorPostCountMap[c.id] || 0"
-            :avatar-url="getCreatorAvatar(c)"
-            :is-batch-mode="isBatchMode"
-            :is-selected="selectedCreatorIds.has(c.id)"
-            :is-updating="getCreatorSyncSummary(c.id).isUpdating"
-            :last-check-at="getCreatorSyncSummary(c.id).lastCheckAt"
-            @toggle-select="toggleSelectCreator"
-            @avatar-picker="openAvatarPicker"
-            @avatar-error="handleAvatarError"
-            @refresh="handleRefreshCreator"
-            @deep-sync="openDeepSyncModal"
-            @edit-tags="openEditCreatorTags"
-            @delete="deleteCreator"
-          />
-          <!-- Tags Preview (Compact) -->
-          <div v-if="c.tags?.length" class="flex flex-wrap items-center gap-1 mt-1.5">
-            <span
-              v-for="t in c.tags.slice(0, 3)"
-              :key="t"
-              class="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-              @click="cycleTagFilter(t)"
-              :title="'点击过滤标签 #' + t"
-            >
-              #{{ t }}
-            </span>
-            <span v-if="c.tags.length > 3" class="text-[10px] text-slate-400 font-mono">+{{ c.tags.length - 3 }}</span>
-          </div>
+    <!-- 1. Grid Tiles View — rendered by CreatorGridView: stateless, driven entirely
+         by `gridContext`. -->
+    <CreatorGridView v-else-if="viewMode === 'grid'" :context="gridContext" />
 
-          <!-- Attached Platform Badges & Health Indicator -->
-          <div class="flex items-center justify-between gap-1.5 pt-2 mt-2 border-t border-slate-100 dark:border-slate-800">
-            <!-- Platform Pills Row -->
-            <div class="flex items-center gap-1 flex-wrap min-w-0">
-              <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
-                <PlatformBadge :platform="platform as string" :count="chs.length" compact />
-              </template>
-              <span v-if="context.channels.filter(ch => ch.creatorId === c.id).length === 0" class="text-[10px] text-slate-400">
-                未绑定账号
-              </span>
-            </div>
-
-            <!-- Sync Error Badge or Collapsible Account Details Toggle -->
-            <div class="flex items-center gap-1 shrink-0">
-              <span
-                v-if="getCreatorSyncSummary(c.id).hasError"
-                @click.stop="toggleExpandCreator(c.id)"
-                class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 cursor-pointer flex items-center gap-0.5"
-                title="存在同步异常账号，点击展开查看"
-              >
-                <AlertCircle class="w-2.5 h-2.5" />
-                <span>{{ getCreatorSyncSummary(c.id).errorCount }}个异常</span>
-              </span>
-              <button
-                type="button"
-                @click="toggleExpandCreator(c.id)"
-                class="inline-flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-indigo-600 dark:text-slate-500 dark:hover:text-indigo-400 transition-colors cursor-pointer"
-                :title="expandedCreatorIds.has(c.id) ? '收起账号列表' : '展开账号列表'"
-              >
-                <span>{{ context.channels.filter(ch => ch.creatorId === c.id).length }} 个账号</span>
-                <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
-              </button>
-            </div>
-          </div>
-
-        <!-- Expanded Account Details in Grid Mode -->
-        <div
-          v-if="expandedCreatorIds.has(c.id)"
-          class="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 animate-fade-in"
-        >
-          <div class="flex items-center justify-between text-[10px] text-slate-500 pb-1">
-            <span class="font-semibold text-slate-700 dark:text-slate-300">绑定的账号列表</span>
-            <button
-              @click="openAddModal('channel', c)"
-              class="text-indigo-600 hover:underline font-semibold flex items-center gap-0.5 cursor-pointer"
-            >
-              <Plus class="w-2.5 h-2.5" />
-              <span>添加账号</span>
-            </button>
-          </div>
-
-          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
-            <ChannelRow
-              v-for="ch in context.channels.filter(ch => ch.creatorId === c.id)"
-              :key="ch.id"
-              :channel="ch"
-              :creator-id="c.id"
-              :is-syncing="ch.status === 'updating' || context.syncingChannelIds?.has(ch.id)"
-              compact
-              @deep-sync="() => openDeepSyncModal(c, ch.id)"
-              @refresh="payload => handleRefreshChannel(payload.channel, payload.force)"
-              @delete="deleteChannel"
-              @cycle-role="cycleChannelRole"
-            />
-          </div>
-        </div>
-        </div>
-      </div>
-    </div>
-    </div>
 
     <!-- 2. Compact Table List View — rendered by CreatorListView: stateless, driven
          entirely by `listContext`. -->

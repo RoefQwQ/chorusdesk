@@ -7,6 +7,7 @@ import {
   type Channel,
 } from '../../../src/types';
 import { compareManualEntries } from '../../../src/utils/order';
+import type { CreatorSortKey } from '../types/creatorDirectory';
 
 /**
  * One entry of the sort dropdown.
@@ -22,19 +23,11 @@ export interface CreatorSortOption {
 }
 
 /**
- * Sort key for the creators directory.
- *
- * `platform` and `manual` are not columns — they are orderings that only the
- * toolbar dropdown can express — so the union is wider than the sortable headers.
- * Clicking a header is a shortcut into this same state rather than a second,
- * parallel notion of "order", which is what keeps the dropdown and the header
- * indicators from ever disagreeing.
- *
- * `dir` exists because a one-way sort cannot answer the obvious question. "作品数"
- * is useful both as most-posts-first and fewest-first, and "创作者" both A→Z and
- * Z→A; without a direction the headers could only ever offer one of the two.
+ * Sort key for the creators directory — declared in `types/creatorDirectory.ts`
+ * alongside the view contracts that carry it, and re-exported here so existing
+ * importers keep one entry point for the composable's own vocabulary.
  */
-export type CreatorSortKey = 'updated' | 'posts' | 'channels' | 'name' | 'tags' | 'platform' | 'manual';
+export type { CreatorSortKey };
 
 export interface CreatorDirectoryDependencies {
   /** Live creator list (readers run inside computeds, so they must stay reactive). */
