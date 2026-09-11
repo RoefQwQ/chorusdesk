@@ -268,6 +268,34 @@ function subscribe(listener: (entries: DevLogEntry[]) => void): () => void {
   };
 }
 
+/**
+ * ISO 8601 in the *local* timezone, with the offset made explicit.
+ *
+ * The panel renders `toLocaleTimeString`, i.e. local time, but the copy action
+ * used `toISOString()` — which is UTC. So a copied line read
+ * `2026-09-10T23:57:10.474Z` for the entry the panel was showing as `07:57:10`,
+ * and the user reasonably asked which one was right. Both were; they were simply
+ * eight hours apart, which makes cross-referencing a pasted log against the panel
+ * an exercise in arithmetic.
+ *
+ * The offset is kept because dropping it would make the timestamp ambiguous, and
+ * the date is kept (unlike the panel, which shows only the time of day) because a
+ * log spanning midnight is otherwise unreadable. Still ISO 8601, so it stays
+ * parseable and sortable.
+ */
+export function toLocalIso(t: number): string {
+  const d = new Date(t);
+  const pad = (n: number, width = 2) => String(Math.abs(n)).padStart(width, '0');
+  // `getTimezoneOffset` is minutes *behind* UTC (UTC+8 => -480), hence the negation.
+  const offsetMinutes = -d.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMinutes);
+  const stamp =
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  return `${stamp}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
 export const devLog = {
   record,
   debug: (scope: string, message: string, detail?: string) => record('debug', scope, message, detail),
@@ -300,7 +328,9 @@ export const devLog = {
   toText(list: DevLogEntry[]): string {
     return list
       .map((e) => {
-        const time = new Date(e.t).toISOString();
+        // Local time with an explicit offset, so a pasted line reads as the same
+        // wall clock the panel showed. See `toLocalIso`.
+        const time = toLocalIso(e.t);
         const detail = e.detail ? ` | ${e.detail}` : '';
         return `${time} [${e.level.toUpperCase()}] ${e.source} ${e.scope}: ${e.message}${detail}`;
       })

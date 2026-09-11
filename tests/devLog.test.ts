@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevLogEntry } from '../src/utils/devLog';
+import { toLocalIso } from '../src/utils/devLog';
 
 /**
  * Developer-log behaviour.
@@ -339,5 +340,64 @@ describe('filtering and export', () => {
     const text = log.toText(entries);
     expect(text.split('\n')).toHaveLength(4);
     expect(text).toContain('[WARN] page channelSync: weibo failed | code=auth');
+  });
+});
+
+/**
+ * The copied timestamp must read as the same wall clock the panel showed.
+ *
+ * The panel formats with `toLocaleTimeString` (local), while the copy action used
+ * `toISOString()` (UTC). A copied line therefore said `2026-09-10T23:57:10.474Z`
+ * for the entry displayed as `07:57:10`, and the user asked which one was right.
+ * Both were correct and eight hours apart, which makes cross-referencing a pasted
+ * log against the panel needless arithmetic.
+ */
+describe('toLocalIso', () => {
+  it('renders local wall-clock time with an explicit offset', () => {
+    const d = new Date(2026, 8, 11, 7, 57, 10, 474);
+    const iso = toLocalIso(d.getTime());
+
+    // Same wall clock the panel shows.
+    expect(iso.startsWith('2026-09-11T07:57:10.474')).toBe(true);
+    // Offset present, so the instant is still unambiguous.
+    expect(iso).toMatch(/[+-]\d{2}:\d{2}$/);
+  });
+
+  it('agrees with what the panel renders for the same instant', () => {
+    // The property that was broken: display and copy disagreeing.
+    const t = new Date(2026, 8, 11, 7, 57, 10).getTime();
+    const panel = new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
+
+    expect(toLocalIso(t).slice(11, 19)).toBe(panel);
+  });
+
+  it('keeps the date, which the panel omits', () => {
+    // A log spanning midnight is unreadable without it.
+    expect(toLocalIso(new Date(2026, 0, 2, 3, 4, 5).getTime()).startsWith('2026-01-02T03:04:05')).toBe(true);
+  });
+
+  it('zero-pads every field so lines stay aligned and sortable', () => {
+    const iso = toLocalIso(new Date(2026, 0, 2, 3, 4, 5, 6).getTime());
+    expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/);
+  });
+
+  it('carries milliseconds, which separate bursts in the same second', () => {
+    expect(toLocalIso(new Date(2026, 0, 1, 0, 0, 0, 7).getTime())).toContain('.007');
+    expect(toLocalIso(new Date(2026, 0, 1, 0, 0, 0, 700).getTime())).toContain('.700');
+  });
+});
+
+describe('toText timestamps', () => {
+  it('emits a local-time stamp the user can match against the panel', async () => {
+    const log = await freshDevLog();
+    log.record('info', 'channelSync', '示例同步完成', '新增 0 条');
+    await log.flush();
+    const rows = await log.read();
+
+    const line = log.toText(rows).split('\n')[0];
+
+    // Local, with offset -- not a trailing `Z`.
+    expect(line).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2} /);
+    expect(line).not.toContain('Z ');
   });
 });
