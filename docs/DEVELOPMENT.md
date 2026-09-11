@@ -20,7 +20,7 @@
 仓库正处于兼容式重构中，额外三条铁律：
 - **Dashboard 四个页面 View 已完成接入**：`FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 承载各自 Tab 模板，通过 context/emits 与 `App.vue` 通信。App.vue 仍保留跨页面组合、全局弹窗和部分应用动作，不能宣称入口层已完全变薄。
 - `useDashboardData` 只承载数据加载、媒体修复和统计刷新；回收站刷新仍由 Dashboard 组合流程协调，避免 composable 循环依赖。
-生产调用方已直接依赖 `src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；`src/db/index.ts`、`src/adapters/index.ts` 仅保留兼容 re-export。新代码禁止从兼容桶导入，也禁止在兼容桶新增业务逻辑。
+生产调用方已直接依赖 `src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；三个迁移期兼容桶（`src/db/index.ts`、`src/adapters/index.ts`、`src/platform/index.ts`）已于 2026-09-11 删除。禁止重新引入兼容桶或在其位置新增业务逻辑。
 
 开始开发前按顺序阅读：`README.md`（产品与入口）→ `docs/ARCHITECTURE.md`（当前事实与契约）→ 本手册（改动流程）→ 涉及 Dashboard 时再读 `docs/DASHBOARD_MIGRATION.md`。冲突时以源码和 `ARCHITECTURE.md` 的当前状态为准。
 
@@ -74,7 +74,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 
 ## 4. 数据库变更
 
-入口：`src/infrastructure/db/database.ts`（schema）、`settingsRepository.ts`（默认值）、`postRepository.ts`（生命周期）。`src/db/index.ts` 是 re-export 桶。
+入口：`src/infrastructure/db/database.ts`（schema）、`settingsRepository.ts`（默认值）、`postRepository.ts`（生命周期）。
 
 必须遵守：
 - 不改库名 `CreatorFeedHubDB`；**不删除/不重排**已发布 version 1–3（v1 四表、v2 posts 复合索引 `[channelId+publishedAt]`、v3 `deletedPostIds`）。
@@ -106,10 +106,9 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 1. **一次只搬一个低耦合块**，顺序建议：纯状态 composable → 弹窗/面板组件 → 一个 Tab 的模板段（搬进对应 `views/<Name>View.vue`）→ 该 Tab 的 handlers/computed 随模板同迁 → 删除 `App.vue` 中残留。
 2. 抽 composable 用“依赖注入”而非“import App.vue”：`useDeletedPosts(actions)` 是样板——把需要的外部能力以回调参数传入，内部只持有自己的 ref/computed；绝不允许 composable 反向 import `App.vue`。
 3. 抽组件：props 收数据、emits 抛动作（参照 `PostCard` 的 `bookmark/delete/read/media/avatarError` 事件）；组件内不允许直接 import `App.vue`，业务动作继续上抛由父级（最终是 composable/App.vue）执行。
-4. `DashboardSection` 可作各 Tab section 的通用容器；页面 View 负责真实模板与本地展示状态，不直接操作基础设施。
-5. 拆分是纯搬迁：`git diff` 应表现为“代码位置移动 + import 调整”，不允许顺手改行为、改文案、改样式类（除非 bug 明确）。
-6. 每拆完一步立即 `npm run build` + 手动回归对应 Tab；commit 粒度按“一个边界一次提交”。
-7. 迁移收尾（独立提交）：全部调用方切到真实实现后，再删除 `src/adapters/index.ts` 与 `src/db/index.ts` 中的兼容 re-export（或降级为仅类型导出）。
+4. 拆分是纯搬迁：`git diff` 应表现为“代码位置移动 + import 调整”，不允许顺手改行为、改文案、改样式类（除非 bug 明确）。
+5. 每拆完一步立即 `npm run build` + 手动回归对应 Tab；commit 粒度按“一个边界一次提交”。
+6. 迁移收尾（已完成，2026-09-11）：兼容桶 `src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts` 已删除；若将来再出现迁移期重导出，收尾时同样以独立提交删除，不要长期维护两套导入路径。
 
 ## 6. 增量功能交付模板
 

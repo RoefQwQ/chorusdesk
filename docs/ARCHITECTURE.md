@@ -25,21 +25,18 @@ chorusdesk/
 │  ├─ types/index.ts                # Platform/Creator/Channel/Post/Settings 等共享类型
 │  ├─ platform/                     # Adapter 注册表（真实实现）
 │  │  ├─ registry.ts                # ADAPTER_MAP + getAdapter/registerAdapter
-│  │  └─ index.ts                   # 兼容导出（re-export registry）
-│  ├─ adapters/                     # 各平台实现 + 兼容桶
+│  ├─ adapters/                     # 各平台实现
 │  │  ├─ types.ts                   # FetchOptions/FetchResult/PlatformAdapter 契约
 │  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts
 │  │  ├─ withny.ts xiaohongshu.ts weibo.ts youtube.ts rss.ts
 │  │  ├─ douyin.ts                  # 抖音 adapter（快照 → Post 映射）
 │  │  ├─ douyin/contract.ts         # 抖音快照校验/归一化（唯一了解页面结构的地方）
 │  │  ├─ douyin/collector.ts        # 注入抖音页面的只读 DOM 采集脚本
-│  │  └─ index.ts                   # 兼容导出：registry + 同步编排（见 §9）
 │  ├─ sync/                         # 同步应用层（真实实现）
 │  │  ├─ channelSync.ts             # 单频道同步 updateChannel / clearStaleUpdatingStatus
 │  │  ├─ batchSync.ts               # 平台轮转交错批量同步
 │  │  ├─ historySync.ts             # 历史翻页 fetchChannelHistory / deepSyncChannel
 │  │  └─ index.ts                   # 兼容导出
-│  ├─ db/index.ts                   # 兼容桶：re-export infrastructure/db
 │  ├─ infrastructure/
 │  │  ├─ db/                        # Dexie 数据库 + 仓储（真实实现）
 │  │  │  ├─ database.ts             # FeedDatabase + 版本 1-5 schema
@@ -84,7 +81,7 @@ chorusdesk/
 
 **当前物理依赖与目标态的差异**（Dashboard 数据/回收站组合层已完成第一阶段收敛）：
 - Dashboard 与 Popup 的数据库、同步导入已直接依赖 `src/infrastructure/db/*`、`src/sync/*`；其余 UI 业务仍在 App.vue 内联。
-- `src/adapters/index.ts` 与 `src/db/index.ts` 已无任何调用方（全仓 grep 为零），属可删除的遗留重导出；内部真实模块本就不应依赖它们。
+- `src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts` 三个迁移期兼容桶已于 2026-09-11 删除（全仓 grep 为零引用后确认）；新代码直接依赖真实实现 `src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`。
 - `src/infrastructure/chrome/autoSync.ts` 已直接依赖 `../db/*` 与 `../../sync/channelSync`。
 - 新代码（以及后续清理）应直接依赖真实实现：`src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；不要在兼容桶里新增业务逻辑。
 ## 2.1 本轮重构验收记录
@@ -191,7 +188,7 @@ export interface PlatformAdapter {
 }
 ```
 
-`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 10 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。`src/platform/index.ts` 仅为 re-export 兼容层。
+`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 10 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。
 
 各平台能力现状（`fetchLatest` 为必实现）：
 
@@ -239,7 +236,7 @@ export interface PlatformAdapter {
 | 自动同步周期 | 30 分钟（Alarm `creator-feed-auto-sync`） | `infrastructure/chrome/autoSync.ts` |
 | 未读角标上限 / 颜色 | 999 / `#4f46e5` | `infrastructure/chrome/autoSync.ts` |
 
-### 4.4 数据基础设施 `src/infrastructure/db/`（`src/db/index.ts` 兼容桶）
+### 4.4 数据基础设施 `src/infrastructure/db/`
 
 `database.ts` —— `FeedDatabase extends Dexie`，库名固定 `'CreatorFeedHubDB'`：
 
@@ -250,6 +247,11 @@ version(1): creators 'id, name, *tags, createdAt, sortOrder'
             settings 'key'
 version(2): posts 追加复合索引 '[channelId+publishedAt]'（频道查询/水位检查）
 version(3): 新增 deletedPostIds 'id, channelId, creatorId, deletedAt'
+version(4): 数据迁移（无 schema 变更）——posts 与 deletedPostIds.postData 的
+            isRead / isBookmarked 由 boolean 改写为 0 | 1（索引不接受 boolean 键，
+            旧值从未进入 index，`where('isRead')` 恒空 → 未读角标与收藏统计恒为 0）
+version(5): 数据迁移（无 schema 变更）——清理存量推文正文尾部的 t.co 链接
+            （见 src/infrastructure/db/database.ts 的 migrateStoredTweetLinks）
 ```
 
 导出单例 `db`。表：`creators/channels/posts`（主键即业务 id）、`settings`（`{ key, value }` 行式存储）、`deletedPostIds`。
@@ -263,7 +265,6 @@ version(3): 新增 deletedPostIds 'id, channelId, creatorId, deletedAt'
   - `permanentlyDeletePost(id)`：仅删墓碑、不还原。
   - `getDeletedPostCount()` / `getDeletedPostRecords()`：回收站计数/列表（按 `deletedAt` 倒序）。
   - `healBrokenPostMedia()`：把小红书（等）动态媒体 URL 经 `toSecureMediaUrl` 重写自愈，返回修复条数。
-- `src/db/index.ts`：兼容桶，re-export 上述全部 + `FeedDatabase/db`。**新代码请直接 import `src/infrastructure/db/*`**。
 
 ### 4.5 Chrome 基础设施 `src/infrastructure/chrome/`
 
@@ -434,10 +435,10 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 
 **Dashboard 渐进拆分尚未完成，以下内容务必如实描述，勿按 README 的理想分层推断“已完成 View 重构”：**
 
-1. Dashboard 已完成四个真实页面 View 接入：`views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均由 `App.vue` 通过 context/emits 接线；`components/DashboardSection.vue` 零引用（确认未使用），是可删除的遗留脚手架。
+1. Dashboard 已完成四个真实页面 View 接入：`views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均由 `App.vue` 通过 context/emits 接线；`components/DashboardSection.vue` 曾为零引用脚手架，已于 2026-09-11 删除。
 2. 已抽离且正在被 App.vue 使用：`composables/useDarkMode.ts`、`composables/useDeletedPosts.ts`、`composables/useDashboardData.ts`，以及 `components/PostCard.vue`、`components/MediaLightbox.vue`、`components/ImageCacheSettings.vue`。
 3. App.vue 仍保留部分跨页面应用动作、全局弹窗、Chrome Storage 与数据库协调；这属于后续入口收敛边界，不代表 View 是空壳或重复实现。
-4. `src/adapters/index.ts` 与 `src/db/index.ts` **零引用**（曾作为迁移期兼容桶，迁移已结束）；新代码直接依赖真实模块，这两个文件可直接删除。
+4. `src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts` 三个迁移期兼容桶**已于 2026-09-11 删除**（删除前全仓 grep 确认零引用，非类型引用亦无）；新代码直接依赖真实模块。
 5. 消息 `OPEN_DASHBOARD` 保留 handler 但仓库内无发送方（Popup 直接开标签页）；删除/改造需先决定是否统一走消息。
 6. `Popup/App.vue` 仍为单体（composables 已抽离 `usePageDetection`/`useQuickFollow`/`usePopupNavigation`）；Popup 尚无 `views/` 拆分计划落地。
 7. 自动同步为串行单频道执行（无交错/无进度回传 UI），与 Dashboard 手动“全部刷新”的交错路径是两套实现；如需统一属功能变更，不在本次文档范围内。
