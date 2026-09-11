@@ -933,6 +933,9 @@ function loadDemoData() {
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-56 sm:w-64">创作者</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-40">标签</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300">已绑平台账号</th>
+              <!-- One header per cell, so the toggle column has somewhere to
+                   belong. A column with no heading reads as an accident. -->
+              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-28">明细</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-24 text-center">作品数</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-32">同步状态</th>
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-36 text-right">操作</th>
@@ -1004,29 +1007,31 @@ function loadDemoData() {
 
                 <!-- Attached Platform Badges -->
                 <td class="py-2.5 px-3">
-                  <!-- Badges and the expand toggle form ONE left-aligned group.
-                       Previously the toggle was pushed to the far edge of this
-                       cell with `justify-between`, and because this is the
-                       column that absorbs the table's spare width, the button
-                       ended up hundreds of pixels from the 已绑平台账号 heading
-                       it belongs to — reading as a separate, unlabelled column.
-                       Left-aligning puts the heading and the group on the same
-                       edge regardless of how the table distributes slack. -->
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <div class="flex items-center gap-1.5 flex-wrap min-w-0">
-                      <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
-                        <PlatformBadge :platform="platform as string" :count="chs.length" />
-                      </template>
-                    </div>
-                    <button
-                      @click="toggleExpandCreator(c.id)"
-                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer shrink-0"
-                    >
-                      <span>{{ expandedCreatorIds.has(c.id) ? '收起明细' : '查看全部' }}</span>
-                      <span class="text-[10px] text-slate-400 font-mono">({{ context.channels.filter(ch => ch.creatorId === c.id).length }})</span>
-                      <ChevronDown class="w-3 h-3 text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
-                    </button>
+                  <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                    <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
+                      <PlatformBadge :platform="platform as string" :count="chs.length" />
+                    </template>
                   </div>
+                </td>
+
+                <!-- Expander toggle — its own cell, deliberately.
+                     It used to live after the badges inside that cell, so its
+                     horizontal position depended on how many platforms the
+                     creator has: a four-platform row pushed it right, a
+                     one-platform row left it against the badges, and the edge
+                     came out ragged. Two earlier attempts only changed the
+                     alignment *within* that cell, which cannot fix a position
+                     that varies with the preceding content. In its own cell
+                     every row's toggle occupies the same column. -->
+                <td class="py-2.5 px-3">
+                  <button
+                    @click="toggleExpandCreator(c.id)"
+                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer shrink-0"
+                  >
+                    <span>{{ expandedCreatorIds.has(c.id) ? '收起明细' : '查看全部' }}</span>
+                    <span class="text-[10px] text-slate-400 font-mono">({{ context.channels.filter(ch => ch.creatorId === c.id).length }})</span>
+                    <ChevronDown class="w-3 h-3 text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
+                  </button>
                 </td>
 
                 <!-- Post Count -->
@@ -1108,7 +1113,7 @@ function loadDemoData() {
 
               <!-- Nested Table Row if Expanded -->
               <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-800/40">
-                <td :colspan="isBatchMode ? 7 : 6" class="p-3">
+                <td :colspan="isBatchMode ? 8 : 7" class="p-3">
                   <div class="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
                     <div class="flex items-center justify-between text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
                       <span class="font-bold text-slate-700 dark:text-slate-200">【{{ c.name }}】全部已绑定平台账号</span>
