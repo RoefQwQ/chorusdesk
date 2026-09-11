@@ -10,6 +10,19 @@ Commands: `npm run dev` / `build` / `zip` / `test` / `typecheck` / `lint`. CI ru
 
 ---
 
+## Non-goals (settled — do not re-open, do not propose)
+
+Decisions the user has already made. Re-raising one as a "found issue" or a "small
+follow-up" wastes their time; if new evidence genuinely contradicts a decision, say so
+once, with the evidence, and wait.
+
+- **RSS cards do not need images.** Card rendering for RSS is text-first by decision
+  (2026-09-11: 「rss不需要这个」). The article *reader* view still renders the article's
+  images — that part is in scope and works. Do not add a thumbnail, a count hint, or an
+  option for card images, and do not report their absence as a defect.
+
+---
+
 ## 1. Host identity: NEVER match a host with a substring
 
 `url.includes('rplay.live')` also matches `https://evil.example/?ref=rplay.live` and
