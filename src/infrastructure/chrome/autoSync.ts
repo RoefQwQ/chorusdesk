@@ -1,6 +1,8 @@
 import type { Channel } from '../../types';
 import { db } from '../db/database';
 import { getSettings } from '../db/settingsRepository';
+import { devLog } from '../../utils/devLog';
+import { errorMessage } from '../../utils/errorMessage';
 import { batchUpdateChannelsInterleaved } from '../../sync/batchSync';
 
 const AUTO_SYNC_ALARM = 'creator-feed-auto-sync';
@@ -52,8 +54,13 @@ async function syncAllChannels() {
       onlyOriginal: settings.hideReposts,
       minPlatformIntervalMs: Math.max(settings.requestDelayMs ?? 0, 800),
     });
+    // The alarm firing is already logged by the router (`devLog.info('alarm', ...)`),
+    // but its OUTCOME was recorded nowhere: a user reporting 「后台自动更新好像没生效」
+    // saw the trigger and then nothing, and the failure went to a console the panel
+    // cannot read. These two lines are the whole answer to that question.
+    devLog.info('autoSync', '后台自动同步完成', `渠道 ${channels.length} 个`);
   } catch (error) {
-    console.warn('[Background] Auto-sync failed:', error);
+    devLog.error('autoSync', '后台自动同步失败', errorMessage(error));
   }
 }
 
@@ -70,7 +77,7 @@ export async function updateUnreadBadge() {
     await chrome.action?.setBadgeText({ text: unreadCount > 0 ? String(Math.min(unreadCount, 999)) : '' });
     await chrome.action?.setBadgeBackgroundColor({ color: '#4f46e5' });
   } catch (error) {
-    console.warn('[Background] Badge update failed:', error);
+    devLog.warn('autoSync', '未读角标更新失败', errorMessage(error));
   }
 }
 

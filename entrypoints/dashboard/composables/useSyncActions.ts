@@ -4,6 +4,7 @@ import { updateChannel, updateCreator, batchUpdateChannelsInterleaved } from '..
 import { channelService } from '../../../src/application';
 import { originPattern, requestHostAccess } from '../../../src/infrastructure/chrome/optionalHostAccess';
 import { devLog } from '../../../src/utils/devLog';
+import { errorMessage } from '../../../src/utils/errorMessage';
 
 export interface SyncActionsDependencies {
   /** Live lists the refresh flows operate on and summarize. */
@@ -90,7 +91,16 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       );
       await deps.reloadData();
     } catch (err) {
-      console.error('Refresh all error', err);
+      // This catch used to do nothing but `console.error`, which the Developer Log
+      // panel cannot read. A per-channel failure already has a visible signal (the
+      // row's 同步失败 badge, written by channelSync), so the case that was silent is
+      // this one: the batch call ITSELF throwing — a harness-level fault, where the
+      // spinner simply stopped with no explanation anywhere.
+      //
+      // Recorded in the log rather than given new UI state: the per-channel badge
+      // already covers what the user can act on, and inventing a second error
+      // surface for a fault that means "reload the extension" would be noise.
+      devLog.error('sync', '刷新全部失败', errorMessage(err, '刷新全部失败'));
     } finally {
       isRefreshingAll.value = false;
       await channelService.clearStaleUpdatingStatus();

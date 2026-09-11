@@ -44,7 +44,7 @@ describe('extracted readers are single-source', () => {
     expect(src).toMatch(/from '\.\/bilibili\/spaceDynamic'/);
   });
 
-  it('no adapter writes diagnostics only to the console', () => {
+  it('no adapter or sync entry point writes diagnostics only to the console', () => {
     // `console` is invisible in the Developer Log panel — the surface users actually
     // screenshot into a bug report (rules 11 and 20). Three separate defects of this
     // shape were found on 2026-09-12 (a Twitter path log, bilibili's business codes,
@@ -61,6 +61,11 @@ describe('extracted readers are single-source', () => {
       '../src/adapters/youtube.ts',
       '../src/adapters/xiaohongshu/profileState.ts',
       '../src/adapters/bilibili/spaceDynamic.ts',
+      // Not adapters, but the same rule and fixed the same day: the auto-sync alarm
+      // logged that it FIRED and nothing about its outcome, and 「刷新全部」's catch
+      // reported only to the console.
+      '../src/infrastructure/chrome/autoSync.ts',
+      '../entrypoints/dashboard/composables/useSyncActions.ts',
     ]) {
       const src = read(f);
       // The injected Douyin collector is exempt by necessity: it is stringified into a
