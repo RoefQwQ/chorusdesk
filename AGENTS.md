@@ -865,6 +865,49 @@ one it is and say so.** Removing a `:loop="false"` from a list left the suite gr
 jsdom reports every height as 0, so the copy count is always 1 there. The fix was not a
 cleverer assertion — it was moving that check to the browser, where the copy count differs
 (1 vs 2) and the difference is directly observable.
+---
+
+## 31. A read-only audit must run against a frozen tree, with a bounded scope
+
+Four `scout` audits of the docs ran for a long time and were cancelled without delivering. The
+transcripts show they were **not** stuck and the model was fine:
+
+| agent | tool calls | identical calls repeated >2× | compaction |
+|---|---|---|---|
+| ReadmeFacts | 94 | 0 | — |
+| RepoHygiene | 15 visible | 0 | 1 |
+| DocStaleness | 12 visible | 0 | 1 |
+| DocLinks | 4 visible | 0 | 1 |
+
+Zero repeats means no loop. The low visible counts alongside a compaction marker mean the
+compaction had **already discarded their earlier work** — what was visible was only the tail.
+And RepoHygiene independently noticed its premises had gone stale ("the repo changed under me
+mid-audit") and re-verified instead of reporting garbage. That is good behaviour, not failure.
+
+The failure was the orchestration, in three parts:
+
+1. **The tree moved while they read it.** Four read-only audits were dispatched and then the
+   parent immediately began *editing the very files under audit* — README, ARCHITECTURE,
+   PRIVACY, AGENTS, package.json, .gitignore, and a deletion. Every edit invalidated a premise
+   and forced a re-verification pass. A read-only audit and a rewrite of the same files MUST
+   NOT run concurrently: point the audit at an immutable revision (`git show <sha>:path`), or
+   hold the edits until it delivers.
+2. **The scope was unbounded.** "Check EVERY factual claim", with an acceptance criterion
+   demanding exhaustive findings plus line numbers and no budget, is a task with no end. Bound
+   it: name the specific items, ask for "the top N by severity", or set a call budget.
+3. **The agent type did not match the size.** `scout` is fast reconnaissance returning
+   compressed context; a 140-claim fact-check is not that. ReadmeFacts alone made 94 calls.
+
+Two smaller fixes: three of the four re-read the same files (README/DEVELOPMENT/ARCHITECTURE),
+and asking for delivery **only at the end** means a stall produces nothing at all — request an
+interim report every N calls.
+
+Stated plainly: **audit then edit, never audit while editing.** If both are wanted in one pass,
+the audit is what waits.
+
+The one net finding was real — `AGENTS.md`'s title and `ARCHITECTURE.md`'s directory tree used the
+local directory name `creator-feed-hub` while the public repository is `chorusdesk` — but it did
+not require four agents to find.
 
 ---
 
