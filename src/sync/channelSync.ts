@@ -403,6 +403,15 @@ export async function updateChannel(
     if (result.authorMeta?.name) {
       const authName = result.authorMeta.name.trim();
       const currentName = channel.displayName || '';
+      // These prefixes must cover every placeholder `urlParser.ts` generates
+      // (14 of them). Two have been missing in production: `Withny_` until that
+      // platform was removed (2026-09-12), and `RSS_` / `YouTube视频_` until now.
+      //
+      // The trap is that `startsWith` is case-sensitive: `'YouTube视频_x'` does
+      // NOT start with the platform key `youtube`, and `'RSS_x'` does not start
+      // with `rss` — which is exactly why `Pixiv` and `Fantia` are spelled out
+      // here in their generated capitalisation. `startsWith(channel.platform)`
+      // below only ever helps platforms whose key is already lowercase.
       const isPlaceholderName =
         !currentName ||
         currentName === channel.accountId ||
@@ -410,6 +419,8 @@ export async function updateChannel(
         currentName === `@${channel.accountId.replace(/^@/, '')}` ||
         currentName.startsWith(channel.platform) ||
         currentName.startsWith('Channel_') ||
+        currentName.startsWith('RSS_') ||
+        currentName.startsWith('YouTube视频_') ||
         currentName.startsWith('B站') ||
         currentName.startsWith('小红书') ||
         currentName.startsWith('微博') ||
@@ -445,15 +456,28 @@ export async function updateChannel(
             creator.name === '未命名创作者' ||
             creator.name === channel.accountId ||
             creator.name === channel.accountId.replace(/^@/, '') ||
+            // Same rule as the channel list above, and the same trap: this is a
+            // SEPARATE hand-written list, so keeping it in step with
+            // `urlParser.ts` is manual. It had drifted further — it only ever
+            // covered the "creator page" placeholders (`Pixiv画师_`,
+            // `Fantia俱乐部_`, `小红书_`, `微博_`) and none of the
+            // "single work" ones, so following a creator from one artwork pinned
+            // `Pixiv作品_12345` as their name permanently.
             creator.name.startsWith('Channel_') ||
+            creator.name.startsWith('RSS_') ||
+            creator.name.startsWith('YouTube视频_') ||
             creator.name.startsWith('B站用户_') ||
             creator.name.startsWith('B站稿件_') ||
-            creator.name.startsWith('小红书_') ||
+            creator.name.startsWith('小红书用户_') ||
+            creator.name.startsWith('小红书笔记_') ||
+            creator.name.startsWith('微博用户_') ||
             creator.name.startsWith('微博_') ||
             creator.name.startsWith('抖音用户_') ||
             creator.name.startsWith('抖音作品_') ||
             creator.name.startsWith('Pixiv画师_') ||
-            creator.name.startsWith('Fantia俱乐部_');
+            creator.name.startsWith('Pixiv作品_') ||
+            creator.name.startsWith('Fantia俱乐部_') ||
+            creator.name.startsWith('Fantia投稿_');
 
           if (isDefaultCreatorName && authName) {
             creatorUpdates.name = authName;

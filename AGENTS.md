@@ -239,6 +239,24 @@ Two further invariants this exposed, both easy to miss:
   keeps its `平台用户_xxxx` placeholder forever, because the real nickname is only allowed to
   overwrite a name the sync layer recognizes as a placeholder.
 
+**Audited 2026-09-12: eight of `urlParser`'s sixteen generated prefixes were missing**, and every one
+of them was real — all nine adapters return `authorMeta.name`, so the authoritative nickname was
+always available and simply could not be written. Two causes, both worth knowing before editing:
+
+- `startsWith(channel.platform)` is **case-sensitive**. `'YouTube视频_x'.startsWith('youtube')` and
+  `'RSS_x'.startsWith('rss')` are both false. That is the whole reason `Pixiv` and `Fantia` appear
+  spelled out with a capital letter in that list — they were added for exactly this, one at a time.
+- The creator list is a **second, hand-written list**, and it only ever covered "creator page"
+  placeholders (`Pixiv画师_`, `Fantia俱乐部_`) — none of the "single work" ones. Following a creator
+  from one artwork therefore pinned `Pixiv作品_12345` as their name permanently.
+
+There is **no guard on this**: nothing fails when the two lists and `urlParser` disagree, so a missing
+prefix is a silent, permanent wrong name. Withny was the first instance and went unnoticed for as long
+as the platform existed; these eight are the second. Deriving the prefixes from the single place that
+generates them is the fix for the class; until then, both lists are manual and must be re-checked
+whenever `urlParser` gains a branch.
+
+
 ## 10. Probe the page's real scroll container before declaring "no pagination"
 
 Douyin's creator page does not scroll the window: the work grid lives inside
