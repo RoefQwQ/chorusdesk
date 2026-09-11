@@ -9,9 +9,9 @@
 - 定位：本地优先的多平台创作者动态聚合。无自建后端，业务数据落在浏览器 IndexedDB，设置与业务数据同库（Dexie 的 `settings` 表，键 `app_settings`）；`chrome.storage.local` 仅用于清理已卸载平台的遗留键。
 - 构建入口：`entrypoints/`（WXT 约定）；产物目录 `.output/chrome-mv3/`。
 - 开发/构建命令见 `package.json`：`npm run dev` / `npm run build` / `npm run zip`。
-- 权限（`wxt.config.ts`）：`storage`、`cookies`、`activeTab`、`tabs`、`scripting`、`declarativeNetRequest`、`alarms`，外加各平台域与 CDN 的 `host_permissions`。
+- 权限（`wxt.config.ts`，唯一来源）：`storage`、`cookies`、`activeTab`、`scripting`、`declarativeNetRequestWithHostAccess`、`alarms`；`host_permissions` 由 `PLATFORM_HOSTS` 经 `platformHostMatchPatterns()` **派生**，RSS 站点走 `optional_host_permissions`（安装时不授予任何站点）。**没有 `tabs`**（2026-09 移除）：平台标签页的 `url`/`title` 由 host 权限覆盖，Popup 当前页由 `activeTab` 覆盖（AGENTS.md 规则 7）。
 
-当前正处于“兼容式重构”过程：职责向 `src/sync`、`src/platform`、`src/infrastructure/*` 迁移，`src/db`、`src/adapters` 仅剩无人引用的兼容导出桶（已确认零调用方，见 §9.4）。**重构尚未结束**，具体边界见 §9“已知迁移边界”。
+当前正处于“兼容式重构”过程：职责向 `src/sync`、`src/platform`、`src/infrastructure/*` 迁移；三个迁移期兼容桶（`src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts`）**已于 2026-09-11 删除**，新代码直接依赖真实模块（见 §9.4）。**重构尚未结束**，具体边界见 §9“已知迁移边界”。
 
 ## 2. 目录结构与分层
 
@@ -73,7 +73,7 @@ chorusdesk/
 | UI 组合层 | `entrypoints/*/App.vue`、`composables/`、`components/`、`views/` | 界面状态与用户操作；不实现平台抓取/同步算法 |
 | 同步应用层 | `src/sync/` | 编排单频道/批量/历史同步与保护策略；不解析平台原始响应 |
 | 平台层 | `src/platform/`、`src/adapters/` | Adapter 注册、平台请求/解析、归一化 `FetchResult` |
-| 数据基础设施 | `src/infrastructure/db/`（`src/db/` 为兼容桶） | Dexie、仓储、数据生命周期 |
+| 数据基础设施 | `src/infrastructure/db/`（`src/db/` 兼容桶已于 2026-09-11 删除） | Dexie、仓储、数据生命周期 |
 | Chrome 基础设施 | `src/infrastructure/chrome/` | 消息 handler、Alarm、角标、DNR |
 | 通用工具 | `src/utils/` | URL/媒体/HTTP 辅助，无业务状态 |
 
@@ -84,14 +84,17 @@ chorusdesk/
 - `src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts` 三个迁移期兼容桶已于 2026-09-11 删除（全仓 grep 为零引用后确认）；新代码直接依赖真实实现 `src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`。
 - `src/infrastructure/chrome/autoSync.ts` 已直接依赖 `../db/*` 与 `../../sync/channelSync`。
 - 新代码（以及后续清理）应直接依赖真实实现：`src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；不要在兼容桶里新增业务逻辑。
-## 2.1 本轮重构验收记录
+## 2.1 本轮重构验收记录（2026-09-10 快照，其中两处结论已被 §9.4 与现状速览取代）
+
+> 下面是当时那一轮的验收口径，保留以记录过程；`npx tsc --noEmit` 与「兼容桶保留」两条此后均已被推翻。
 
 - 已验证：`npm run build` 成功生成 MV3 的 background、dashboard、popup 和 content script 产物。
-- 已验证：`npx tsc --noEmit` 通过；仓库已提供 Chrome ambient 类型与 Vue SFC 声明。
+- 已验证：类型检查通过——当时是 `npx tsc --noEmit`，现为 `npm run typecheck`（`tsc` + `vue-tsc`，后者才覆盖 `.vue`）。
 - 已验证：`git diff --check` 通过；换行符提示是 Windows 工作区的 LF/CRLF 转换提示，不是内容错误。
-- 已验证：数据库、同步、平台注册和 Runtime Message 的旧导出名称仍存在；兼容桶保留。
+- ~~已验证：数据库、同步、平台注册和 Runtime Message 的旧导出名称仍存在；兼容桶保留。~~ 兼容桶已于 2026-09-11 删除（§9.4）。
 - 已验证：关键纯函数冒烟覆盖 URL 识别、媒体 HTTPS 规范化和平台交错同步顺序。
 当前限制：尚未完成真实 Chromium 扩展的完整点击式回归。用户已明确要求不操作当前浏览器会话；后续验证必须使用独立测试浏览器配置，不得接管用户标签页。
+（2026-09-11 更新：CDP `Extensions.loadUnpacked` + `--enable-unsafe-extension-debugging` 已能在独立 profile 中加载构建产物并做扩展级验证——存储、alarm、消息、真实点击与文件导入；见 AGENTS.md 规则 28 与 `PROJECT_PROGRESS_2026-09.md` 四.P7 补记。仍不可验的是跨浏览器重启后的行为。）
 
 ## 3. 扩展入口
 

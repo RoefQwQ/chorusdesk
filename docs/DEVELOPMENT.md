@@ -178,7 +178,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 
 ## 9. 安全与隐私红线
 
-- 扩展申请了 `cookies/tabs/scripting/activeTab` 与大量 host permissions；新增平台/域必须先问“是否最小必要”，host permission 只加实际请求与 `<img>` 直连的域。
+- 扩展申请的权限以 `wxt.config.ts` 为唯一来源：`storage/cookies/activeTab/scripting/declarativeNetRequestWithHostAccess/alarms`；`host_permissions` 由 `PLATFORM_HOSTS` 派生，RSS 站点走 `optional_host_permissions`。**没有 `tabs`**（2026-09 移除），不要以「读标签页 URL」为理由加回来——平台标签页由 host 权限覆盖。新增平台/域必须先问“是否最小必要”，host permission 只加实际请求与 `<img>` 直连的域。
 - 不要在源码、备份 JSON、日志中夹带用户 Cookie/Token/密钥。x.com guest bearer token 是公开常量（已内联在 `twitterTimeline.ts`），不要把它误当密钥挪进配置。
 - `scripting.executeScript` 注入的函数体必须是**自包含纯函数**（序列化传参，如 twitterTimeline 的 tab func），不要从扩展作用域捕获敏感对象；执行前对目标 URL/平台做白名单判断，禁止对任意页面注入。
 - 对 `chrome://`、`edge://`、`about:`、`devtools:` 页面一律跳过 DOM 注入（Popup 已有该判断，新增注入点照做）。
@@ -204,7 +204,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 需要**真实浏览器**才能回答的行为（页面渲染、排版、滚动、真实平台报文），用 `e2e/` 下的 CDP 探针脚本，详见 [e2e/README.md](../e2e/README.md)：
   - 必须指向**独立 profile** 的调试端口，绝不接管用户日常浏览的实例；
   - 探针只读，不点击、不提交、不修改扩展数据；
-  - 本机 Chrome 152 起 `--load-extension` 被忽略，无法用命令行加载未打包扩展，需改为把组件打包成单文件 HTML 在普通页面中验证（见 `AGENTS.md` 规则 28/30）。
+  - 本机 Chrome 152 起 `--load-extension` 被忽略，不能用它加载未打包扩展；**但 CDP `Extensions.loadUnpacked` 可用**（需 `--enable-unsafe-extension-debugging`），可做扩展级验证；纯排版问题则把组件打包成单文件 HTML 在普通页面中量（见 `AGENTS.md` 规则 28/30）。
 - 性能改动自检：优先既有索引（`[channelId+publishedAt]`、`isBookmarked` 等），不新增全表扫描式展示查询；UI 不重复拉取同一批数据；批量写用 `bulkPut/bulkDelete`；存在性判断用 `primaryKeys()`；内存里复制大数组前先想清楚是否必要。
 - 新测试只为一个真正不确定的边界而写（例如新平台日期解析、水位/去重交互）；不要为了“有测试”而写。断言可观察契约与真实错误，不钉实现细节。
 
