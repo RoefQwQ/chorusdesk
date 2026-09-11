@@ -2,6 +2,8 @@
 
 Binding constraints for anyone (human or agent) editing this repo. Reusable rules only.
 One-off review output lives in `docs/REVIEW_2026-09.md` — do not copy it here.
+**Current work queue lives in `docs/PROJECT_PROGRESS_2026-09.md` §四.P8 (交接队列)** — read that
+before planning anything; the batch history above it is a record, not a to-do list.
 
 Stack: WXT 0.21 + Vue 3 + Dexie 4 + Tailwind 4, TypeScript strict, Chrome MV3.
 Commands: `npm run dev` / `build` / `zip` / `test` / `typecheck` / `lint`. CI runs typecheck + lint + vitest + build on every push/PR (fix queue #12); tagging `vX.Y.Z` runs `release.yml` (same gates + tag/version check + release asset).
