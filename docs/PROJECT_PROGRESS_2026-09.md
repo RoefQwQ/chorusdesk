@@ -633,6 +633,27 @@ B19. **`FeedView.vue` 的两块可拆**（审计里唯一「纯收益」的拆�
     `FeedView.vue:62-110`）与 masonry 分列 + 高度估算（约 `:162-197`），两者自包含、
     与 context 无共享状态。其余 7 个大文件**审计判定不该拆**（「一个东西的很多方面」，
     或受注入序列化/清理不变量约束），理由见评审文件。
+B20. **popup 会加载全部 10 个平台 adapter**（已核实，非分层违规）：`useQuickFollow.ts:9`
+    从 `src/sync` import `updateChannel`，经 `channelSync.ts:5` 触达 `platform/registry.ts`，
+    而该文件静态 import 全部 adapter（`:3-12`）。构建**确有**代码分割，但 `popup.html`
+    会 `modulepreload` 那个 256 KB 共享 chunk（已核实其中含 Bilibili/Xiaohongshu 的
+    adapter 字符串，而 popup 自己的 31 KB chunk 一个都没有）。后果只是体积与冷启动，
+    不是正确性；修法（registry 懒加载 / 给 popup 一条更窄的同步入口）是对同步取 adapter
+    方式的真改动，不是一行。
+B21. **`src/utils/http.ts` 应归位到 infrastructure/chrome/**（已核实为全仓唯一跨层环）：
+    它 import `bgFetch`（`:1`），`bgFetch` 又 import `utils/devLog`（闭合成环）。成因正当
+    （规则 6 要求 SW 直调 `performBgFetch`），但那只解释**这条边**、不解释**它该住在 utils**：
+    `http.ts` 是全部 adapter 取数经过的网络端口（fan-in 9）。把文件挪进
+    `infrastructure/chrome/` 即消环，且不需要加任何间接层。
+B22. **规则 8 的台账出现漂移**（已核实）：规则 8 记的 9 处直连里 8 处在它点名的四类内，
+    第 9 处 `useDeletedPosts.ts:11`（回收站读路径直连 `postRepository`）**不在**。
+    形态正是该规则禁止的（「优先加 service 方法而非新增直连 import」），却落在规则用来自我
+    约束的清单之外——「已知债务、已枚举」这句话就是这样悄悄失效的。已记录未修。
+B23. **分层总评（逐条验证通过）**：12 个 adapter 零 db import（规则 1 成立）；
+    `infrastructure/db/*` 零 `chrome.*`（规则 2 成立方向）；`douyin/collector.ts` 自包含
+    且是唯一 collector 文件（规则 9 成立）；无 2-节点环；最长依赖链 11 个模块且全程向下。
+    `urlParser.ts` 8 处子串判定判定为「可疑但不违规」——它们丢弃输入 host、在硬编码域名上
+    重建 `cleanUrl`，与抖音的注入决策不同源，见评审文件。
 
 #### 队列 C — 需要用户决定
 
