@@ -369,8 +369,17 @@ async function launchChrome({ chromePath, profileDir }) {
     // renderer dies with a SIGBUS that looks like a hang. Harmless elsewhere.
     '--disable-dev-shm-usage',
     '--window-size=1440,900',
-    // Off-screen: the user is not disturbed even though this is a real window.
-    '--window-position=-2400,-2400',
+    // Park the window out of the way ONLY when there is a user to disturb.
+    //
+    // This was unconditional, and on CI it was the actual cause of an
+    // intermittent failure: Xvfb's default virtual screen is 1280x1024, so a
+    // window at -2400,-2400 is entirely outside it, and synthetic input aimed at
+    // that window is dropped — `Input.dispatchMouseEvent` reported success while
+    // the page received nothing (mousedown=0 mouseup=0 click=0, run 34626248921).
+    // Measured: failing runs took ~3.7-6.9 s to reach the first click and passed
+    // or failed on the same commit; the runner has no user, so the negative
+    // position bought nothing and cost a race.
+    ...(process.env.CI ? [] : ['--window-position=-2400,-2400']),
     'about:blank',
   ];
   const child = spawn(chromePath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
