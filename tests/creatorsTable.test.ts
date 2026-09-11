@@ -334,3 +334,121 @@ describe('creators directory — sorting applies to every view', () => {
     }
   });
 });
+
+describe('creators compact list — the platform column', () => {
+  it('renders a badge per platform instead of an empty cell', async () => {
+    // Reported 2026-09-11: the 已绑平台账号 column was blank on every row, in all
+    // three views. `PlatformBadge` was used in the template but its import had been
+    // deleted, so the tag resolved to nothing and Vue rendered an empty placeholder
+    // without a word. `vue-tsc` cannot see that unless
+    // `vueCompilerOptions.strictTemplates` is on — it is now, and this test pins the
+    // rendering so the check is not the only guard.
+    const root = await mount();
+    const badges = [...root.querySelectorAll('tbody tr:first-child td:nth-child(2) span')].filter(
+      (el) => (el.textContent || '').trim().length > 0,
+    );
+
+    expect(badges.length).toBeGreaterThan(0);
+    // The label, not the raw platform key: 哔哩哔哩 (c1/c2/c3 all have bilibili).
+    expect(badges.map((b) => b.textContent?.trim()).join(' ')).toContain('哔哩哔哩');
+  });
+
+  it('renders the delete control in the action cell', async () => {
+    // `Trash2` was missing from the same import block, so the button rendered as an
+    // empty square — visible only as a gap between the remaining icons.
+    const root = await mount();
+    const remove = root.querySelector('tbody tr:first-child button[title="移除创作者"]');
+
+    expect(remove).not.toBeNull();
+    expect(remove!.querySelector('svg')).not.toBeNull();
+  });
+
+  it('puts 已绑平台账号 before 标签', async () => {
+    // Swapped on request: the platforms identify the creator across sites and read
+    // better against the name than the free-form tags do.
+    const root = await mount();
+    const labels = [...root.querySelectorAll('thead th')].map((th) => (th.textContent || '').trim());
+
+    expect(labels.indexOf('已绑平台账号')).toBeGreaterThan(-1);
+    expect(labels.indexOf('已绑平台账号')).toBeLessThan(labels.indexOf('标签'));
+  });
+});
+
+describe('creators compact list — row click', () => {
+  /** True when a detail row is rendered. */
+  function expanded(): boolean {
+    return host!.querySelector('td[colspan]') !== null;
+  }
+
+  it('toggles the detail row when the row itself is clicked', async () => {
+    await mount();
+    const row = host!.querySelector('tbody tr') as HTMLElement;
+
+    expect(expanded()).toBe(false);
+    row.click();
+    await nextTick();
+    expect(expanded()).toBe(true);
+    row.click();
+    await nextTick();
+    expect(expanded()).toBe(false);
+  });
+
+  it('toggles once when the chevron is clicked, not twice', async () => {
+    // The chevron is inside the row, so a bubbled click would toggle it a second
+    // time and cancel out. This caught exactly that.
+    await mount();
+    const chevron = host!.querySelector('tbody tr td button[aria-expanded]') as HTMLButtonElement;
+
+    chevron.click();
+    await nextTick();
+    expect(expanded()).toBe(true);
+    expect(chevron.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('leaves the row alone when a row control is used', async () => {
+    // Every control in the row stops propagation, so it does its own job without
+    // also opening the row underneath.
+    await mount();
+
+    const controls = [
+      'tbody tr:first-child button[title="同步最新动态"]',
+      'tbody tr:first-child button[title="回溯历史作品"]',
+      'tbody tr:first-child button[title="绑定新账号"]',
+      'tbody tr:first-child button[title="编辑标签"]',
+      // The avatar is a div, not a button.
+      'tbody tr:first-child [title="更换主头像"]',
+    ];
+    for (const selector of controls) {
+      const el = host!.querySelector(selector) as HTMLElement | null;
+      expect(el, selector).not.toBeNull();
+      el!.click();
+      await nextTick();
+      expect(expanded(), selector).toBe(false);
+    }
+  });
+
+  it('leaves the row alone when a tag chip is used', async () => {
+    // A tag chip filters the list; it must not also expand the row it sits in.
+    await mount();
+    const chip = host!.querySelector('tbody tr:first-child td:nth-child(3) span') as HTMLElement;
+
+    expect(chip).not.toBeNull();
+    chip.click();
+    await nextTick();
+    expect(expanded()).toBe(false);
+  });
+
+  it('leaves the row alone when the click finishes a text selection', async () => {
+    // Dragging across a creator's name to copy it ends with a click on the last
+    // word; without the guard that would collapse or expand the row under the
+    // cursor.
+    await mount();
+    const selection = { isCollapsed: false } as Selection;
+    vi.spyOn(window, 'getSelection').mockReturnValue(selection);
+
+    (host!.querySelector('tbody tr') as HTMLElement).click();
+    await nextTick();
+
+    expect(expanded()).toBe(false);
+  });
+});

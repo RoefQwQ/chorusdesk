@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { X, Trash2, Copy, Bug, Search, RefreshCw } from 'lucide-vue-next';
 import BaseModal from './BaseModal.vue';
-import AppSelect from './AppSelect.vue';
+import AppSelect, { type AppSelectOption } from './AppSelect.vue';
 import { useDevLog } from '../composables/useDevLog';
 import type { DevLogLevel } from '../../../src/utils/devLog';
 
@@ -47,13 +47,13 @@ const LEVEL_CLASS: Record<DevLogLevel, string> = {
   debug: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-900',
 };
 
-const levelOptions = computed(() => [
+const levelOptions = computed<AppSelectOption<DevLogLevel | 'all'>[]>(() => [
   { value: 'all', label: '全部级别' },
   ...levels.map((l) => ({ value: l, label: `${LEVEL_LABEL[l]}及以上` })),
 ]);
 
 /** Only scopes actually present, so the filter never offers an empty result. */
-const scopeOptions = computed(() => [
+const scopeOptions = computed<AppSelectOption<string>[]>(() => [
   { value: 'all', label: '全部模块' },
   ...scopes.value.map((s) => ({ value: s, label: s })),
 ]);

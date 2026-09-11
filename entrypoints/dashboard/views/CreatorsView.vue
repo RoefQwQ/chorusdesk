@@ -48,6 +48,7 @@ import {
   Square,
   Edit3,
   History,
+  Trash2,
   AlertCircle,
   Users,
   UserRound,
@@ -57,9 +58,15 @@ import {
   List,
   LayoutList,
 } from 'lucide-vue-next';
-import AppSelect from '../components/AppSelect.vue';
+import AppSelect, { type AppSelectOption } from '../components/AppSelect.vue';
 import ChannelRow from '../components/creator/ChannelRow.vue';
 import CreatorCardHeader from '../components/creator/CreatorCardHeader.vue';
+// Both of these were used in the template without being imported, so they
+// resolved to nothing and every 已绑平台账号 cell silently rendered EMPTY in all
+// three views, as did the delete icon. `vue-tsc` does not flag an unresolved
+// component unless `vueCompilerOptions.strictTemplates` is on (it is now —
+// 2026-09-11), which is how this shipped unnoticed through four commits.
+import PlatformBadge from '../components/creator/PlatformBadge.vue';
 
 const props = defineProps<{ context: CreatorsViewContext }>();
 
@@ -147,6 +154,31 @@ function toggleExpandCreator(id: string) {
   expandedCreatorIds.value = new Set(expandedCreatorIds.value);
 }
 
+/**
+ * Clicking anywhere on a row toggles its detail. Reported 2026-09-11: the
+ * chevron was the only target, so the row looked inert.
+ *
+ * The chevron stays a real `<button>` with `aria-expanded`, which is what keeps
+ * this keyboard- and screen-reader-accessible; widening the target for the mouse
+ * is all this is. Every control inside the row calls `@click.stop`, so anything
+ * that lands here is genuinely blank space.
+ *
+ * Two gestures that are *not* "open this row" have to be excluded, or they would
+ * fire by accident on the way to something else:
+ */
+function onRowClick(event: MouseEvent, creatorId: string) {
+  // 1. Selecting a name to copy it. A click on the last word of a drag-select
+  //    would otherwise collapse or expand the row under the cursor.
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed) return;
+
+  // 2. Finishing a manual drag-reorder. Chrome suppresses `click` after a real
+  //    drag, but a drag that ends where it started does produce one.
+  if (creatorSortBy.value === 'manual' && event.detail === 1 && dragCreatorId.value) return;
+
+  toggleExpandCreator(creatorId);
+}
+
 const creatorSearch = ref('');
 const creatorPlatformFilter = ref('all');
 const creatorTagFilter = ref('all');
@@ -167,7 +199,10 @@ const creatorRoleFilter = ref<'all' | AccountRole>('all');
  */
 type CreatorSortKey = 'updated' | 'posts' | 'channels' | 'name' | 'tags' | 'platform' | 'manual';
 
-const creatorSortOptions = [
+// Typed against `CreatorSortKey` so the generic `AppSelect` can prove the options
+// match the ref it is bound to: without the annotation Vue widens `value` to
+// `string`, and a typo here would be accepted silently.
+const creatorSortOptions: AppSelectOption<CreatorSortKey>[] = [
   { value: 'updated', label: '最近活跃' },
   { value: 'posts', label: '作品数量' },
   { value: 'channels', label: '账号数量' },
@@ -1019,18 +1054,6 @@ function loadDemoData() {
                   <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
                 </button>
               </th>
-              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-40" :aria-sort="ariaSortFor('tags')">
-                <button
-                  type="button"
-                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
-                  title="按标签排序"
-                  @click="toggleSort('tags')"
-                >
-                  <span>标签</span>
-                  <ChevronDown v-if="isSortedBy('tags')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
-                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
-                </button>
-              </th>
               <th class="p-0 font-semibold text-slate-700 dark:text-slate-300" :aria-sort="ariaSortFor('channels')">
                 <button
                   type="button"
@@ -1040,6 +1063,18 @@ function loadDemoData() {
                 >
                   <span>已绑平台账号</span>
                   <ChevronDown v-if="isSortedBy('channels')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
+                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
+                </button>
+              </th>
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-40" :aria-sort="ariaSortFor('tags')">
+                <button
+                  type="button"
+                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
+                  title="按标签排序"
+                  @click="toggleSort('tags')"
+                >
+                  <span>标签</span>
+                  <ChevronDown v-if="isSortedBy('tags')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
                   <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
                 </button>
               </th>
@@ -1081,7 +1116,8 @@ function loadDemoData() {
                 @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
                 @drop="onCreatorDrop(c.id)"
                 @dragend="dragCreatorId = null; dragOverCreatorId = null"
-                class="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group"
+                @click="onRowClick($event, c.id)"
+                class="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group cursor-pointer"
                 :class="[
                   { 'bg-indigo-50/20 dark:bg-indigo-950/20': selectedCreatorIds.has(c.id) },
                   dragOverCreatorId === c.id ? 'ring-2 ring-inset ring-indigo-400' : '',
@@ -1089,7 +1125,7 @@ function loadDemoData() {
               >
                 <!-- Batch Checkbox -->
                 <td v-if="isBatchMode" class="py-2.5 px-3 text-center">
-                  <button @click="toggleSelectCreator(c.id)" class="cursor-pointer text-indigo-600">
+                  <button @click.stop="toggleSelectCreator(c.id)" class="cursor-pointer text-indigo-600">
                     <CheckSquare v-if="selectedCreatorIds.has(c.id)" class="w-4 h-4 text-indigo-600" />
                     <Square v-else class="w-4 h-4 text-slate-400" />
                   </button>
@@ -1103,12 +1139,15 @@ function loadDemoData() {
                      badges, which made its position depend on that row's content. -->
                 <td class="py-2.5 px-3">
                   <div class="flex items-center gap-2 min-w-0">
+                    <!-- `.stop` is required: the row itself toggles on click, so
+                         without it this button and the row would each toggle once
+                         and cancel out. -->
                     <button
                       type="button"
                       class="shrink-0 p-0.5 -ml-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                       :aria-expanded="expandedCreatorIds.has(c.id)"
                       :title="expandedCreatorIds.has(c.id) ? '收起已绑定账号' : '展开已绑定账号'"
-                      @click="toggleExpandCreator(c.id)"
+                      @click.stop="toggleExpandCreator(c.id)"
                     >
                       <ChevronDown
                         class="w-3.5 h-3.5 transition-transform duration-200"
@@ -1119,7 +1158,7 @@ function loadDemoData() {
 
                     <div
                       class="relative w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer shadow-2xs"
-                      @click="openAvatarPicker(c)"
+                      @click.stop="openAvatarPicker(c)"
                       title="更换主头像"
                     >
                       <img
@@ -1138,6 +1177,18 @@ function loadDemoData() {
                   </div>
                 </td>
 
+                <!-- Attached Platform Badges (before 标签: these are what identify
+                     the creator across sites, and they read better against the
+                     name than the free-form tags do) -->
+                <td class="py-2.5 px-3">
+                  <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                    <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
+                      <PlatformBadge :platform="platform as string" :count="chs.length" />
+                    </template>
+                    <span v-if="!Object.keys(getCreatorGroupedChannels(c.id)).length" class="text-[11px] text-slate-300 dark:text-slate-600">无账号</span>
+                  </div>
+                </td>
+
                 <!-- Tags -->
                 <td class="py-2.5 px-3">
                   <div class="flex items-center gap-1 flex-wrap">
@@ -1145,21 +1196,12 @@ function loadDemoData() {
                       v-for="t in c.tags"
                       :key="t"
                       class="px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer border border-slate-200/50 dark:border-slate-700/50"
-                      @click="cycleTagFilter(t)"
+                      @click.stop="cycleTagFilter(t)"
                       :title="'点击过滤标签 #' + t"
                     >
                       #{{ t }}
                     </span>
                     <span v-if="!c.tags?.length" class="text-[11px] text-slate-300 dark:text-slate-600">未分类</span>
-                  </div>
-                </td>
-
-                <!-- Attached Platform Badges -->
-                <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-1.5 flex-wrap min-w-0">
-                    <template v-for="(chs, platform) in getCreatorGroupedChannels(c.id)" :key="platform">
-                      <PlatformBadge :platform="platform as string" :count="chs.length" />
-                    </template>
                   </div>
                 </td>
 
@@ -1182,7 +1224,7 @@ function loadDemoData() {
                     <span
                       v-else-if="getCreatorSyncSummary(c.id).hasError"
                       class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200/60 dark:border-rose-900/40 cursor-pointer hover:bg-rose-100 transition-colors"
-                      @click="toggleExpandCreator(c.id)"
+                      @click.stop="toggleExpandCreator(c.id)"
                       :title="getCreatorSyncSummary(c.id).firstErrorChannel?.errorMessage"
                     >
                       <AlertCircle class="w-2.5 h-2.5" />
@@ -1202,35 +1244,35 @@ function loadDemoData() {
                 <td class="py-2.5 px-3 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <button
-                      @click="handleRefreshCreator(c.id)"
+                      @click.stop="handleRefreshCreator(c.id)"
                       title="同步最新动态"
                       class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                     >
                       <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': getCreatorSyncSummary(c.id).isUpdating }" />
                     </button>
                     <button
-                      @click="openDeepSyncModal(c)"
+                      @click.stop="openDeepSyncModal(c)"
                       title="回溯历史作品"
                       class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                     >
                       <History class="w-3.5 h-3.5" />
                     </button>
                     <button
-                      @click="openAddModal('channel', c)"
+                      @click.stop="openAddModal('channel', c)"
                       title="绑定新账号"
                       class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                     >
                       <Plus class="w-3.5 h-3.5" />
                     </button>
                     <button
-                      @click="openEditCreatorTags(c)"
+                      @click.stop="openEditCreatorTags(c)"
                       title="编辑标签"
                       class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                     >
                       <Edit3 class="w-3.5 h-3.5" />
                     </button>
                     <button
-                      @click="deleteCreator(c.id)"
+                      @click.stop="deleteCreator(c.id)"
                       title="移除创作者"
                       class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
                     >

@@ -689,9 +689,18 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
       @save="saveCreatorTags"
     />
 
-    <!-- Floating Actions: Scroll to top, mark reading position, jump to mark -->
+    <!-- Floating Actions: Scroll to top, mark reading position, jump to mark.
+         Post-feed tabs only. This is a reading aid for a long list of posts, and it
+         was mounted unconditionally — so it also floated over 关注管理 and 设置,
+         where a lone bookmark icon with no context read as an unexplained artifact
+         (reported 2026-09-11). 收藏 renders the same kind of scrolling post list
+         (`PostCard` in masonry columns), so it keeps the toolbar; the two
+         management tabs do not. -->
     <!-- Aligns with the right-hand creator filter card column (lg:w-64 xl:w-68) -->
-    <div class="fixed bottom-6 inset-x-0 pointer-events-none z-40">
+    <div
+      v-if="activeTab === 'feed' || activeTab === 'bookmarks'"
+      class="fixed bottom-6 inset-x-0 pointer-events-none z-40"
+    >
       <div class="w-full max-w-[98%] 2xl:max-w-[96%] mx-auto px-3 sm:px-6 flex justify-end">
         <div class="w-auto lg:w-64 xl:w-68 flex justify-end lg:justify-center pointer-events-auto">
           <ScrollActionToolbar />

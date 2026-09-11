@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends string | number">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { ChevronDown, Check } from 'lucide-vue-next';
 
@@ -11,22 +11,36 @@ import { ChevronDown, Check } from 'lucide-vue-next';
  *
  * - 键盘可达：Enter/Space 展开，↑/↓ 移动，Enter 确认，Esc 关闭
  * - 点击外部关闭；浮层顶端对齐，向上展开（触发器都在卡片底部区域）
+ *
+ * 泛型 `T` 是必须的，不是装饰：此前 `modelValue` 声明为 `string | number`，
+ * 而调用方绑定的是窄类型 ref（`CreatorSortKey`、`DevLogLevel | 'all'`、`number`），
+ * 于是 `v-model` 可以把任意 string/number 写进一个更窄的 ref 而无人察觉。
+ * 现在 `T` 由 `modelValue` 推断，`options` 必须与它同型。
  */
-export interface AppSelectOption {
-  value: string | number;
+export interface AppSelectOption<V extends string | number = string | number> {
+  value: V;
   label: string;
 }
 
+// `aria-*` reaches the button through attribute fallthrough rather than a prop.
+// Declaring an `ariaLabel` prop looks equivalent but breaks tooling: `aria-label`
+// is a native HTML attribute name, so `vue-tsc` refuses to map it onto a declared
+// prop (`menu-placement` → `menuPlacement` maps fine by comparison), and the call
+// sites then fail typecheck for a label that works perfectly at runtime. Keeping
+// it an attribute means the call sites stay idiomatic AND strictTemplates can be
+// on. The root is a wrapper <div>, so `$attrs` is bound to the button explicitly —
+// an `aria-label` on the div would name nothing.
+defineOptions({ inheritAttrs: false });
+
 const props = withDefaults(
   defineProps<{
-    modelValue: string | number;
-    options: AppSelectOption[];
+    modelValue: T;
+    options: AppSelectOption<T>[];
     /** 触发按钮额外类（尺寸随调用方）。 */
     buttonClass?: string;
     disabled?: boolean;
     /** 左侧图标（lucide 组件）。 */
     icon?: unknown;
-    ariaLabel?: string;
     /**
      * 浮层展开方向。默认向上（`top`），因为大多数触发器位于卡片底部区域；
      * 位于面板顶部（如开发者日志的筛选行）时应改为 `bottom`，否则浮层会盖住标题。
@@ -37,7 +51,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string | number): void;
+  (e: 'update:modelValue', value: T): void;
 }>();
 
 const open = ref(false);
@@ -58,7 +72,7 @@ function toggle() {
   }
 }
 
-function select(option: AppSelectOption) {
+function select(option: AppSelectOption<T>) {
   emit('update:modelValue', option.value);
   open.value = false;
 }
@@ -101,8 +115,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick));
   <div ref="rootEl" class="relative inline-block text-left" @keydown="onKeydown">
     <button
       type="button"
+      v-bind="$attrs"
       :disabled="disabled"
-      :aria-label="ariaLabel"
       :aria-expanded="open"
       @click="toggle"
       class="inline-flex items-center justify-between gap-1.5 font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-colors"

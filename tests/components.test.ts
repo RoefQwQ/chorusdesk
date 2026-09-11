@@ -140,13 +140,16 @@ describe('BaseModal renders dialog semantics', () => {
 
 describe('AppSelect renders', () => {
   it('shows the selected label, not the raw value, and exposes the accessible name', async () => {
+    // `aria-label` is passed as an ATTRIBUTE (kebab), matching every real call
+    // site — it is not a declared prop, so it reaches the button via `$attrs`.
+    // The camelCase spelling would render as the lowercased `arialabel`.
     const html = await render(AppSelect, {
       modelValue: 10,
       options: [
         { value: 5, label: '5 条' },
         { value: 10, label: '10 条（推荐）' },
       ],
-      ariaLabel: '每次获取条数',
+      'aria-label': '每次获取条数',
     });
     expect(html).toContain('10 条（推荐）');
     expect(html).toContain('aria-label="每次获取条数"');
