@@ -7,6 +7,18 @@
 //   in:  { type: 'FETCH_TWITTER_TIMELINE', username, limit, onlyOriginal, cursor }
 //   out: { success: true, tweetData, userData, bottomCursor }
 //      | { success: false, error }
+//
+// **THE INJECTED FUNCTION MUST BE SELF-CONTAINED.** `chrome.scripting.executeScript`
+// serializes it with `Function.prototype.toString()`, so it carries no closure:
+// every identifier it references has to be a parameter, a local, or a page global.
+// A module-scope reference compiles, passes every test that calls the function
+// object, and then throws in the real page — which is exactly how `Bearer
+// ${TWITTER_BEARER_TOKEN}` broke this path silently: the failure is caught by the
+// injected function's own try/catch and reported as a plain error, so the timeline
+// just fell through to the direct fetch and nobody could tell the page path had
+// never run. Constants travel through `args`. `tests/twitterTimeline.injected.test.ts`
+// pins this by evaluating the function's SOURCE with no closure.
+import { errorMessage } from '../../../utils/errorMessage';
 interface TwitterTimelineMessage {
   type: 'FETCH_TWITTER_TIMELINE';
   username?: unknown;
@@ -20,6 +32,81 @@ type SendResponse = (response?: unknown) => void;
 // Public guest bearer token used by x.com's web GraphQL client.
 const TWITTER_BEARER_TOKEN =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+
+// The GraphQL feature/field-toggle sets x.com's web client sends. Defined ONCE:
+// both the direct fetch and the injected page script must send the same
+// configuration to the same endpoint, and they used to carry a hand-maintained
+// copy each, ~200 lines apart in this file. The injected script cannot read
+// module scope (see the header), so these travel through `executeScript` args.
+const USER_FEATURES: Record<string, boolean> = {
+      hidden_profile_subscriptions_enabled: true,
+      rweb_tipjar_consumption_enabled: true,
+      responsive_web_graphql_exclude_directive_enabled: true,
+      verified_phone_label_enabled: false,
+      subscriptions_verification_info_is_identity_verified_enabled: true,
+      subscriptions_verification_info_verified_since_enabled: true,
+      highlights_tweets_tab_ui_enabled: true,
+      responsive_web_twitter_article_notes_tab_enabled: true,
+      subscriptions_feature_can_gift_premium: true,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+};
+
+const USER_FIELD_TOGGLES: Record<string, boolean> = {
+withPayments: false, withAuxiliaryUserLabels: false
+};
+
+const TWEET_FEATURES: Record<string, boolean> = {
+      rweb_video_screen_enabled: true,
+      rweb_cashtags_enabled: true,
+      profile_label_improvements_pcf_label_in_post_enabled: true,
+      responsive_web_profile_redirect_enabled: true,
+      rweb_tipjar_consumption_enabled: true,
+      verified_phone_label_enabled: false,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+      premium_content_api_read_enabled: false,
+      communities_web_enable_tweet_community_results_fetch: true,
+      c9s_tweet_anatomy_moderator_badge_enabled: true,
+      responsive_web_grok_analyze_button_fetch_trends_enabled: false,
+      responsive_web_grok_analyze_post_followups_enabled: false,
+      rweb_cashtags_composer_attachment_enabled: true,
+      responsive_web_jetfuel_frame: false,
+      responsive_web_grok_share_attachment_enabled: true,
+      responsive_web_grok_annotations_enabled: false,
+      articles_preview_enabled: true,
+      responsive_web_edit_tweet_api_enabled: true,
+      rweb_conversational_replies_downvote_enabled: true,
+      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+      view_counts_everywhere_api_enabled: true,
+      longform_notetweets_consumption_enabled: true,
+      responsive_web_twitter_article_tweet_consumption_enabled: true,
+      content_disclosure_indicator_enabled: true,
+      content_disclosure_ai_generated_indicator_enabled: true,
+      responsive_web_grok_show_grok_translated_post: false,
+      responsive_web_grok_analysis_button_from_backend: false,
+      post_ctas_fetch_enabled: true,
+      freedom_of_speech_not_reach_fetch_enabled: true,
+      standardized_nudges_misinfo: true,
+      tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+      longform_notetweets_rich_text_read_enabled: true,
+      longform_notetweets_inline_media_enabled: true,
+      responsive_web_grok_image_annotation_enabled: false,
+      responsive_web_grok_imagine_annotation_enabled: false,
+      responsive_web_grok_community_note_auto_translation_is_enabled: false,
+      responsive_web_enhance_cards_enabled: false,
+};
+
+const TWEET_FIELD_TOGGLES: Record<string, boolean> = {
+      withPayments: false,
+      withAuxiliaryUserLabels: false,
+      withArticleRichContentState: false,
+      withArticlePlainText: false,
+      withArticleSummaryText: false,
+      withArticleVoiceOver: false,
+      withGrokAnalyze: false,
+      withDisallowedReplyControls: false,
+};
 
 /**
  * Handles FETCH_TWITTER_TIMELINE messages.
@@ -73,70 +160,6 @@ async function fetchTwitterTimelineDirect(username: string, limit: number, onlyO
     const endpoint = (operation: string, variables: Record<string, unknown>, features: Record<string, unknown>, fieldToggles: Record<string, unknown>) => {
       return `https://x.com/i/api/graphql/${operation}?variables=${encodeURIComponent(JSON.stringify(variables))}&features=${encodeURIComponent(JSON.stringify(features))}&fieldToggles=${encodeURIComponent(JSON.stringify(fieldToggles))}`;
     };
-    const userFeatures = {
-      hidden_profile_subscriptions_enabled: true,
-      rweb_tipjar_consumption_enabled: true,
-      responsive_web_graphql_exclude_directive_enabled: true,
-      verified_phone_label_enabled: false,
-      subscriptions_verification_info_is_identity_verified_enabled: true,
-      subscriptions_verification_info_verified_since_enabled: true,
-      highlights_tweets_tab_ui_enabled: true,
-      responsive_web_twitter_article_notes_tab_enabled: true,
-      subscriptions_feature_can_gift_premium: true,
-      creator_subscriptions_tweet_preview_api_enabled: true,
-      responsive_web_graphql_timeline_navigation_enabled: true,
-    };
-    const userFieldToggles = { withPayments: false, withAuxiliaryUserLabels: false };
-    const tweetFeatures = {
-      rweb_video_screen_enabled: true,
-      rweb_cashtags_enabled: true,
-      profile_label_improvements_pcf_label_in_post_enabled: true,
-      responsive_web_profile_redirect_enabled: true,
-      rweb_tipjar_consumption_enabled: true,
-      verified_phone_label_enabled: false,
-      creator_subscriptions_tweet_preview_api_enabled: true,
-      responsive_web_graphql_timeline_navigation_enabled: true,
-      premium_content_api_read_enabled: false,
-      communities_web_enable_tweet_community_results_fetch: true,
-      c9s_tweet_anatomy_moderator_badge_enabled: true,
-      responsive_web_grok_analyze_button_fetch_trends_enabled: false,
-      responsive_web_grok_analyze_post_followups_enabled: false,
-      rweb_cashtags_composer_attachment_enabled: true,
-      responsive_web_jetfuel_frame: false,
-      responsive_web_grok_share_attachment_enabled: true,
-      responsive_web_grok_annotations_enabled: false,
-      articles_preview_enabled: true,
-      responsive_web_edit_tweet_api_enabled: true,
-      rweb_conversational_replies_downvote_enabled: true,
-      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
-      view_counts_everywhere_api_enabled: true,
-      longform_notetweets_consumption_enabled: true,
-      responsive_web_twitter_article_tweet_consumption_enabled: true,
-      content_disclosure_indicator_enabled: true,
-      content_disclosure_ai_generated_indicator_enabled: true,
-      responsive_web_grok_show_grok_translated_post: false,
-      responsive_web_grok_analysis_button_from_backend: false,
-      post_ctas_fetch_enabled: true,
-      freedom_of_speech_not_reach_fetch_enabled: true,
-      standardized_nudges_misinfo: true,
-      tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
-      longform_notetweets_rich_text_read_enabled: true,
-      longform_notetweets_inline_media_enabled: true,
-      responsive_web_grok_image_annotation_enabled: false,
-      responsive_web_grok_imagine_annotation_enabled: false,
-      responsive_web_grok_community_note_auto_translation_is_enabled: false,
-      responsive_web_enhance_cards_enabled: false,
-    };
-    const tweetFieldToggles = {
-      withPayments: false,
-      withAuxiliaryUserLabels: false,
-      withArticleRichContentState: false,
-      withArticlePlainText: false,
-      withArticleSummaryText: false,
-      withArticleVoiceOver: false,
-      withGrokAnalyze: false,
-      withDisallowedReplyControls: false,
-    };
     const userController = new AbortController();
     const userTimer = setTimeout(() => userController.abort(), 8_000);
     let userResponse: Response;
@@ -144,7 +167,7 @@ async function fetchTwitterTimelineDirect(username: string, limit: number, onlyO
       userResponse = await fetch(endpoint('Gb-d6r0vxPOADdG62OEBpQ/UserByScreenName', {
         screen_name: username,
         withSafetyModeUserFields: true,
-      }, userFeatures, userFieldToggles), { headers, credentials: 'include', signal: userController.signal });
+      }, USER_FEATURES, USER_FIELD_TOGGLES), { headers, credentials: 'include', signal: userController.signal });
     } finally {
       clearTimeout(userTimer);
     }
@@ -170,7 +193,7 @@ async function fetchTwitterTimelineDirect(username: string, limit: number, onlyO
     const tweetTimer = setTimeout(() => tweetController.abort(), 8_000);
     let tweetResponse: Response;
     try {
-      tweetResponse = await fetch(endpoint('eviprbEPLvNG88V3smUngQ/UserTweets', variables, tweetFeatures, tweetFieldToggles), { headers, credentials: 'include', signal: tweetController.signal });
+      tweetResponse = await fetch(endpoint('eviprbEPLvNG88V3smUngQ/UserTweets', variables, TWEET_FEATURES, TWEET_FIELD_TOGGLES), { headers, credentials: 'include', signal: tweetController.signal });
     } finally {
       clearTimeout(tweetTimer);
     }
@@ -250,7 +273,20 @@ async function fetchTwitterTimelineViaTabOrSession(
 
     const tabResult = await chrome.scripting.executeScript({
       target: { tabId: targetTabId },
-      func: async (user: string, count: number, onlyOrig: boolean, cur: string) => {
+      func: async (
+        user: string,
+        count: number,
+        onlyOrig: boolean,
+        cur: string,
+        config: {
+          /** x.com's public guest bearer — passed in because this function has no closure. */
+          bearer: string;
+          userFeatures: Record<string, boolean>;
+          userFieldToggles: Record<string, boolean>;
+          tweetFeatures: Record<string, boolean>;
+          tweetFieldToggles: Record<string, boolean>;
+        },
+      ) => {
         try {
           // Read ct0 from document.cookie
           const ct0Match = document.cookie.match(/(?:^|;\s*)ct0=([a-zA-Z0-9_-]+)/);
@@ -262,8 +298,17 @@ async function fetchTwitterTimelineViaTabOrSession(
             };
           }
 
+          // The GraphQL feature sets arrive as arguments, not from module scope:
+          // chrome.scripting serializes this function, so it has no closure (see the
+          // file header). Stringified here so the request is byte-identical to the
+          // direct path's — `tests/twitterTimeline.injected.test.ts` asserts that.
+          const userFt = JSON.stringify(config.userFeatures);
+          const userFieldToggles = JSON.stringify(config.userFieldToggles);
+          const tweetFt = JSON.stringify(config.tweetFeatures);
+          const tweetFieldToggles = JSON.stringify(config.tweetFieldToggles);
+
           const headers: Record<string, string> = {
-            Authorization: `Bearer ${TWITTER_BEARER_TOKEN}`,
+            Authorization: `Bearer ${config.bearer}`,
             'x-csrf-token': ct0,
             'x-twitter-active-user': 'yes',
             'x-twitter-auth-type': 'OAuth2Session',
@@ -274,23 +319,6 @@ async function fetchTwitterTimelineViaTabOrSession(
           // 1. UserByScreenName
           const userOp = 'Gb-d6r0vxPOADdG62OEBpQ/UserByScreenName';
           const userVars = JSON.stringify({ screen_name: user, withSafetyModeUserFields: true });
-          const userFt = JSON.stringify({
-            hidden_profile_subscriptions_enabled: true,
-            rweb_tipjar_consumption_enabled: true,
-            responsive_web_graphql_exclude_directive_enabled: true,
-            verified_phone_label_enabled: false,
-            subscriptions_verification_info_is_identity_verified_enabled: true,
-            subscriptions_verification_info_verified_since_enabled: true,
-            highlights_tweets_tab_ui_enabled: true,
-            responsive_web_twitter_article_notes_tab_enabled: true,
-            subscriptions_feature_can_gift_premium: true,
-            creator_subscriptions_tweet_preview_api_enabled: true,
-            responsive_web_graphql_timeline_navigation_enabled: true,
-          });
-          const userFieldToggles = JSON.stringify({
-            withPayments: false,
-            withAuxiliaryUserLabels: false,
-          });
 
           const userResp = await fetch(
             `/i/api/graphql/${userOp}?variables=${encodeURIComponent(userVars)}&features=${encodeURIComponent(userFt)}&fieldToggles=${encodeURIComponent(userFieldToggles)}`,
@@ -326,56 +354,6 @@ async function fetchTwitterTimelineViaTabOrSession(
             tweetVarsObj.cursor = cur.trim();
           }
           const tweetVars = JSON.stringify(tweetVarsObj);
-          const tweetFt = JSON.stringify({
-            rweb_video_screen_enabled: true,
-            rweb_cashtags_enabled: true,
-            profile_label_improvements_pcf_label_in_post_enabled: true,
-            responsive_web_profile_redirect_enabled: true,
-            rweb_tipjar_consumption_enabled: true,
-            verified_phone_label_enabled: false,
-            creator_subscriptions_tweet_preview_api_enabled: true,
-            responsive_web_graphql_timeline_navigation_enabled: true,
-            premium_content_api_read_enabled: false,
-            communities_web_enable_tweet_community_results_fetch: true,
-            c9s_tweet_anatomy_moderator_badge_enabled: true,
-            responsive_web_grok_analyze_button_fetch_trends_enabled: false,
-            responsive_web_grok_analyze_post_followups_enabled: false,
-            rweb_cashtags_composer_attachment_enabled: true,
-            responsive_web_jetfuel_frame: false,
-            responsive_web_grok_share_attachment_enabled: true,
-            responsive_web_grok_annotations_enabled: false,
-            articles_preview_enabled: true,
-            responsive_web_edit_tweet_api_enabled: true,
-            rweb_conversational_replies_downvote_enabled: true,
-            graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
-            view_counts_everywhere_api_enabled: true,
-            longform_notetweets_consumption_enabled: true,
-            responsive_web_twitter_article_tweet_consumption_enabled: true,
-            content_disclosure_indicator_enabled: true,
-            content_disclosure_ai_generated_indicator_enabled: true,
-            responsive_web_grok_show_grok_translated_post: false,
-            responsive_web_grok_analysis_button_from_backend: false,
-            post_ctas_fetch_enabled: true,
-            freedom_of_speech_not_reach_fetch_enabled: true,
-            standardized_nudges_misinfo: true,
-            tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
-            longform_notetweets_rich_text_read_enabled: true,
-            longform_notetweets_inline_media_enabled: true,
-            responsive_web_grok_image_annotation_enabled: false,
-            responsive_web_grok_imagine_annotation_enabled: false,
-            responsive_web_grok_community_note_auto_translation_is_enabled: false,
-            responsive_web_enhance_cards_enabled: false,
-          });
-          const tweetFieldToggles = JSON.stringify({
-            withPayments: false,
-            withAuxiliaryUserLabels: false,
-            withArticleRichContentState: false,
-            withArticlePlainText: false,
-            withArticleSummaryText: false,
-            withArticleVoiceOver: false,
-            withGrokAnalyze: false,
-            withDisallowedReplyControls: false,
-          });
 
           const tweetResp = await fetch(
             `/i/api/graphql/${tweetOp}?variables=${encodeURIComponent(tweetVars)}&features=${encodeURIComponent(tweetFt)}&fieldToggles=${encodeURIComponent(tweetFieldToggles)}`,
@@ -468,11 +446,34 @@ async function fetchTwitterTimelineViaTabOrSession(
           return { success: false, error: scriptErr instanceof Error ? scriptErr.message : '推特标签页执行脚本异常' };
         }
       },
-      args: [username, limit, Boolean(onlyOriginal), cursor || ''],
+      args: [
+        username,
+        limit,
+        Boolean(onlyOriginal),
+        cursor || '',
+        {
+          bearer: TWITTER_BEARER_TOKEN,
+          userFeatures: USER_FEATURES,
+          userFieldToggles: USER_FIELD_TOGGLES,
+          tweetFeatures: TWEET_FEATURES,
+          tweetFieldToggles: TWEET_FIELD_TOGGLES,
+        },
+      ],
     });
 
     const res = tabResult?.[0]?.result;
     return res || { success: false, error: '推特标签页未返回有效数据' };
+  } catch (err: unknown) {
+    // MUST catch rather than let this propagate. `chrome.scripting.executeScript`
+    // REJECTS when the frame it was injected into is gone — the tab navigated or
+    // was closed, or the permission was revoked — which is precisely the situation
+    // this function's caller keeps a direct cookie-based fetch as a fallback for.
+    // With only `try/finally`, the rejection skipped that fallback entirely and the
+    // user got an error for a request the service worker could have served.
+    // Returning a failed result (instead of throwing) is what makes the caller's
+    // `pageResult?.success ? … : await fetchTwitterTimelineDirect(…)` reachable.
+    // See AGENTS rule 23: an injection that resolved is not an injection that ran.
+    return { success: false, error: errorMessage(err, '推特标签页采集失败') };
   } finally {
     // Clean up temporary tab if created
     if (isTempTab && targetTabId) {
