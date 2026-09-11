@@ -110,24 +110,6 @@ ws.addEventListener('message', (ev) => {
 });
 await new Promise((r) => ws.addEventListener('open', r));
 
-// Keep the window out of the user's way. `--window-position=-2400,-2400` alone is
-// not enough: an off-screen window still appears in the taskbar and can be
-// alt-tabbed to, and on a virtual desktop that extends to negative coordinates it
-// is visibly on a monitor. Minimizing is what actually hides it (measured on
-// Windows with Browser.getWindowBounds).
-await new Promise(async (resolve) => {
-  try {
-    const { targetInfos } = await send('Target.getTargets');
-    const page = targetInfos.find((t) => t.type === 'page');
-    if (page) {
-      const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.targetId });
-      await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-    }
-  } catch {
-    /* cosmetic only */
-  }
-  resolve();
-});
 const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
   const i = ++id; pending.set(i, { resolve, reject });
   ws.send(JSON.stringify(sessionId ? { id: i, method, params, sessionId } : { id: i, method, params }));
@@ -148,6 +130,27 @@ await send('Page.enable', {}, sessionId);
 // `window.innerWidth` (768/1280 breakpoints) and the sidebar from `innerHeight`,
 // so both dimensions are part of the fixture.
 await send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
+
+// Keep the window out of the user's way. `--window-position=-2400,-2400` alone is
+// not enough: an off-screen window still appears in the taskbar and can be
+// alt-tabbed to, and on a virtual desktop that extends to negative coordinates it
+// is visibly on a monitor. Minimizing is what actually hides it (measured on
+// Windows with Browser.getWindowBounds).
+// Runs AFTER the target exists: creating a target restores the window, so
+// minimizing before it would be undone immediately (measured in the gate).
+await new Promise(async (resolve) => {
+  try {
+    const { targetInfos } = await send('Target.getTargets');
+    const page = targetInfos.find((t) => t.type === 'page');
+    if (page) {
+      const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.targetId });
+      await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+    }
+  } catch {
+    /* cosmetic only */
+  }
+  resolve();
+});
 await send('Page.navigate', { url: `chrome-extension://${extId}/dashboard.html` }, sessionId);
 for (let i = 0; i < 100; i++) {
   const ready = await send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true }, sessionId);
@@ -376,6 +379,15 @@ if (!/"bilibili"/.test(persisted)) {
 
 fs.writeFileSync(OUT, JSON.stringify(shots, null, 2));
 console.log('captured', Object.keys(shots).length, 'shots →', OUT);
+
+// The window must still be out of the user's way. Creating a target restores it,
+// so "we minimized at startup" is not the property that matters — this is.
+{
+  const { windowId } = await send('Browser.getWindowForTarget', { targetId });
+  const { bounds } = await send('Browser.getWindowBounds', { windowId });
+  const hidden = bounds.windowState === 'minimized';
+  console.log(`window at the end of the run: ${bounds.windowState}${hidden ? ' (stayed out of the way)' : ' — IT WAS VISIBLE ON THE USER\'S SCREEN'}`);
+}
 
 await send('Browser.close').catch(() => {});
 await sleep(500);

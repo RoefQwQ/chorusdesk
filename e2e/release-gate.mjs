@@ -69,6 +69,22 @@ if (flag('help')) {
 }
 
 const EXT_DIR = path.resolve(REPO, String(flag('extension') ?? '.output/chrome-mv3'));
+
+/**
+ * Is this a hosted CI runner? Asked precisely, because the loose signal is wrong.
+ *
+ * The window handling below keyed off `process.env.CI`, and that was a real bug:
+ * `CI=true` is set in ordinary developer environments too (this one included), so
+ * "skip the off-screen position and the minimize when CI is set" meant the window
+ * was never minimized and was placed at the DEFAULT position — i.e. opened in the
+ * middle of the user's screen. The user reported seeing it twice; the second time
+ * was caused by that guard.
+ *
+ * `GITHUB_ACTIONS` is set only on GitHub's runners, which is the actual question:
+ * there is no user, and the window must stay on the (small) X screen because an
+ * off-screen window under Xvfb receives no synthetic input.
+ */
+const ON_CI_RUNNER = Boolean(process.env.GITHUB_ACTIONS);
 const RUN_TIMEOUT_MS = Number(flag('timeout') ?? 240_000);
 const KEEP_PROFILE = flag('keep-profile') === true;
 const VERBOSE = flag('verbose') === true;
@@ -379,7 +395,7 @@ async function launchChrome({ chromePath, profileDir }) {
     // Measured: failing runs took ~3.7-6.9 s to reach the first click and passed
     // or failed on the same commit; the runner has no user, so the negative
     // position bought nothing and cost a race.
-    ...(process.env.CI ? [] : ['--window-position=-2400,-2400']),
+    ...(ON_CI_RUNNER ? [] : ['--window-position=-2400,-2400']),
     'about:blank',
   ];
   const child = spawn(chromePath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -408,27 +424,10 @@ async function launchChrome({ chromePath, profileDir }) {
   // window is still on screen in every way that matters to the user: it shows in
   // the taskbar, it can be alt-tabbed to, and if the virtual desktop extends to
   // negative coordinates (a monitor placed left of the primary) it is simply ON a
-  // real display. Measured on Windows: the position is honoured exactly, and
-  // `Browser.setWindowBounds … { windowState: 'minimized' }` is honoured too. So
-  // minimize — that is what actually keeps it out of the way — and keep the
-  // negative position as well, since a minimized window can still flash on show.
+  // real display. Minimizing is what actually keeps it out of the way.
   //
-  // Skipped on CI, where there is no user and the window must stay on the X
-  // screen: an off-screen window there receives no synthetic input at all (that
-  // was a real, intermittent failure — see the CI history for 2026-09-11).
-  if (!process.env.CI) {
-    try {
-      const { targetInfos } = await cdp.send('Target.getTargets');
-      const page = targetInfos.find((t) => t.type === 'page');
-      if (page) {
-        const { windowId } = await cdp.send('Browser.getWindowForTarget', { targetId: page.targetId });
-        await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-      }
-    } catch (e) {
-      // Cosmetic only: never fail the gate because the window could not be hidden.
-      detail(`could not minimize the browser window: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  // `hideWindow` is also called again later, because opening a target restores it.
+  await hideWindow(cdp);
   return { child, cdp, chromeVersion: await versionOf(cdp) };
 }
 
@@ -497,10 +496,50 @@ async function clickLocated(target, locator, label) {
   const quad = quads[0];
   const x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
   const y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
-  await target.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
-  await target.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-  await target.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
-  const delivered = await target.eval(`window.__gateClick || { down: 0, up: 0, click: 0 }`);
+  // Make delivery a PRE-CONDITION rather than an assumption.
+  //
+  // Synthetic input was intermittently dropped on CI with the losing runs being
+  // the FAST ones (5.2 s total vs ~16 s): the page was mounted and its DOM was
+  // queryable, but the window had not been mapped by the X server yet, so
+  // `Input.dispatchMouseEvent` succeeded and the page received nothing
+  // (mousedown=0 mouseup=0 click=0). `--window-position` was NOT the cause of that
+  // recurrence — by then it was already skipped on CI.
+  //
+  // `Page.bringToFront` fixes that by raising the window, which is why it is
+  // CI-ONLY: on a developer machine this window is deliberately minimized, and
+  // bringing it to the front puts it back in front of the user. That mistake was
+  // made once already — the run after adding it un-minimized the browser on the
+  // user's screen on every click. On CI there is no user, and the window must be
+  // on the X screen anyway.
+  //
+  // The retry loop below is safe on both: the delivery counter says whether
+  // anything arrived, the listeners are one-shot, and a retry is guarded on
+  // `click === 0`, so a second dispatch only happens when the first provably did
+  // not reach the element. A click that arrives and is ignored by the app is
+  // unaffected — that still fails the step's own post-condition, which is the
+  // right place for it.
+  if (ON_CI_RUNNER) {
+    await target.send('Page.bringToFront').catch(() => {});
+    for (let i = 0; i < 40; i++) {
+      if (await target.eval('document.hasFocus()')) break;
+      await sleep(100);
+    }
+  }
+
+  let delivered = { down: 0, up: 0, click: 0 };
+  let attempts = 0;
+  for (; attempts < 4; attempts++) {
+    await target.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
+    await target.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+    await target.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    await sleep(120);
+    delivered = await target.eval(`window.__gateClick || { down: 0, up: 0, click: 0 }`);
+    if (delivered.click) break;
+    // Nothing arrived — the element was not reachable by input yet. Wait for the
+    // window to finish mapping and try again.
+    await sleep(250);
+  }
+  if (attempts > 0) detail(`${label}: input needed ${attempts + 1} attempt(s)`);
   await target.eval(`document.querySelector('[${MARK}]')?.removeAttribute('${MARK}')`);
   if (!delivered.click) {
     // Deliberately a different message from "the control was not found" and
@@ -513,6 +552,31 @@ async function clickLocated(target, locator, label) {
     );
   }
   detail(`${label}: click delivered (down=${delivered.down} up=${delivered.up} click=${delivered.click})`);
+}
+
+/**
+ * Put the browser window back out of the user's way.
+ *
+ * Needed more than once because opening a target restores the window: measured,
+ * the window is `minimized` after launch and `normal` by the end of a run — the
+ * popup targets created for the alarm check are what raise it (a new tab
+ * activates). Until this existed the gate un-minimized itself halfway through,
+ * which is exactly what the user saw.
+ *
+ * No-op on a hosted runner, where there is no user and the window must stay on
+ * the X screen (an off-screen window under Xvfb receives no synthetic input).
+ */
+async function hideWindow(cdp) {
+  if (ON_CI_RUNNER) return;
+  try {
+    const { targetInfos } = await cdp.send('Target.getTargets');
+    const page = targetInfos.find((t) => t.type === 'page');
+    if (!page) return;
+    const { windowId } = await cdp.send('Browser.getWindowForTarget', { targetId: page.targetId });
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+  } catch (e) {
+    detail(`could not hide the browser window: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Locator bodies: each returns one element or null. */
@@ -1025,6 +1089,7 @@ try {
       const { targetId } = await cdp.send('Target.createTarget', {
         url: `chrome-extension://${load}/popup.html`,
       });
+      await hideWindow(cdp); // opening a target restores the window
       const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
       const popup = await new Target(cdp, sessionId, `popup#${i + 1}`).init({ page: true });
       await popup.wait('popup.html to report its extension id', () =>
@@ -1134,6 +1199,34 @@ try {
     assert(cleared, `the ${ALARM_NAME} alarm is still present after switching auto-sync off`);
     detail('alarm cleared after switching auto-sync off');
   });
+  // The window must still be out of the user's way at the END of the run.
+  //
+  // This is not decoration: the run un-minimized itself once, because a
+  // `Page.bringToFront` added for CI's focus problem was applied everywhere, and
+  // every click raised the browser onto the user's screen. Asserting the state at
+  // the end is what turns "we minimize it at startup" into "nothing raises it
+  // again", which is the property that actually matters.
+  if (!ON_CI_RUNNER) {
+    try {
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      const page = targetInfos.find((t) => t.type === 'page');
+      const { windowId } = await cdp.send('Browser.getWindowForTarget', { targetId: page.targetId });
+      const { bounds } = await cdp.send('Browser.getWindowBounds', { windowId });
+      assert(
+        bounds.windowState === 'minimized',
+        `the browser window is ${JSON.stringify(bounds.windowState)} at the end of the run — ` +
+          'something un-minimized it, i.e. it was on the user\'s screen. On CI the window stays ' +
+          'on screen deliberately; locally it must stay minimized.',
+      );
+      out('  window stayed minimized for the whole run (never raised in front of the user)');
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('un-minimized')) throw e;
+      // Best-effort: a CDP hiccup must not fail the gate — but it MUST say so.
+      // A silently-skipped check is indistinguishable from a passing one, which
+      // is the failure mode this whole area keeps producing.
+      out(`  (could not verify the window state at the end: ${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
 } catch (err) {
   // A harness error (no Chrome, bad path) is not a product failure, but it
   // still has to fail the run loudly — with the message first, the stack only
