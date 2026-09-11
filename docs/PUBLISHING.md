@@ -107,7 +107,7 @@ non-functioning features—are not allowed."**——对一个会被平台改版�
    明确禁止「为尚未实现的功能预先申请权限」；审查员看到的是一条全站通配。理由（RSS 源域名用户自填、
    运行时按站点逐个授权）必须写在描述与隐私字段里，且 RSS 必须确实是**已实现**功能。
 4. **描述不能只是平台名清单。** *Listing Requirements* 第 4 条把「Lists of sites/brands/keywords
-   without substantial added value」列为 Keyword Spam。十个平台名排一排正落在这个形状上，
+   without substantial added value」列为 Keyword Spam。九个平台名排一排正落在这个形状上，
    必须有实质说明段。
 5. **是否要标记为 Mature，需要按实际内容判断。** *Mature & Sexually Explicit Material* 第 5 条：
    内容不适合全年龄的产品应标记 Mature，且仅对已登录的成年账号可见；被标 Mature 会影响曝光
