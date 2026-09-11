@@ -44,7 +44,6 @@ export function useDashboardData(deps: DashboardDataDependencies): DashboardData
     theme: 'system',
     itemsPerFetch: 10,
     requestDelayMs: 600,
-    enableR18Blur: true,
     autoOpenOriginalUrl: false,
   });
 

@@ -249,7 +249,6 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   itemsPerFetch: number;
   requestDelayMs: number;
-  enableR18Blur: boolean;
   autoOpenOriginalUrl: boolean;
   enableAutoSync?: boolean; // 是否启用后台定时自动同步（默认关闭，完全依靠手动更新）
   hideReposts?: boolean; // 默认是否隐藏转发/转自动态

@@ -141,7 +141,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
       `src/utils/sanitizeHtml.ts` 处理（元素与属性白名单 + 协议校验），
       渲染端（阅读视图）可直接交给 `v-html`。纯文本正文不设置该字段，
       以保留源自身的换行。
-  - `AppSettings`：`theme / itemsPerFetch / requestDelayMs / enableR18Blur / autoOpenOriginalUrl / enableAutoSync? / hideReposts? / hideTextOnly? / enableImageCache? / imageCacheDirectoryName? / imageCacheStrategy? / platformOrder?`（`platformOrder` 为侧边栏平台的自定义拖拽顺序，未列出的平台按 `PLATFORM_REGISTRY` 顺序）。
+  - `AppSettings`：`theme / itemsPerFetch / requestDelayMs / autoOpenOriginalUrl / enableAutoSync? / hideReposts? / hideTextOnly? / enableImageCache? / imageCacheDirectoryName? / imageCacheStrategy? / platformOrder?`（`platformOrder` 为侧边栏平台的自定义拖拽顺序，未列出的平台按 `PLATFORM_REGISTRY` 顺序）。
   - `DeletedPostRecord { id, channelId?, creatorId?, platform?, title?, deletedAt, postData?: Post }`。
 
 动态 `Post.id` 的生成前缀规则（分布在各自 adapter 内，**不得随意改变**，收藏/回收站/墓碑都依赖它）：

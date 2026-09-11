@@ -1,6 +1,45 @@
 import { defineConfig } from 'wxt';
+import { readFileSync } from 'node:fs';
 import tailwindcss from '@tailwindcss/vite';
 import { platformHostMatchPatterns } from './src/infrastructure/chrome/messages/hosts';
+
+/**
+ * The manifest version: three-part `package.json` semver, optionally with a
+ * fourth component for a **store resubmission**.
+ *
+ * Chrome requires an uploaded version to be strictly greater than the last
+ * published one, and a REJECTED upload still consumes its number — so fixing a
+ * listing rejected for its wording, with no code change at all, still needs a
+ * higher version. `npm version` cannot express that, and burning a PATCH for it
+ * would move the product version for a reason with no meaning in the code.
+ *
+ * So: `package.json` stays the single source of the product version, and the
+ * fourth component is supplied only when uploading to a store:
+ *
+ *   npm run zip                                  → 1.0.0    (identical to before)
+ *   CHORUS_STORE_REVISION=3 npm run zip          → 1.0.0.3
+ *
+ * Version 1–4 dot-separated integers, each 0–65535, is what Chrome accepts.
+ * The GitHub release is unaffected either way — same commit, same tag.
+ *
+ * `e2e/release-gate.mjs` asserts the manifest's first three components match
+ * `package.json` (and that any fourth is a valid integer), which is the part
+ * that actually protects against a stale `.output/`.
+ */
+function manifestVersion(): string {
+  const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  };
+  const raw = process.env.CHORUS_STORE_REVISION;
+  if (!raw) return pkg.version;
+  const revision = Number(raw);
+  if (!Number.isInteger(revision) || revision < 0 || revision > 65535) {
+    throw new Error(
+      `CHORUS_STORE_REVISION must be an integer 0-65535 (Chrome's limit per component); got ${JSON.stringify(raw)}`,
+    );
+  }
+  return `${pkg.version}.${revision}`;
+}
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
@@ -13,8 +52,9 @@ export default defineConfig({
   manifest: {
     name: 'Chorus - 跨平台创作者聚合展台',
     description: '聚合追踪B站、Twitter、Fantia、Pixiv、YouTube等选定创作者动态，支持多平台博主归集与被动更新。',
-    // `version` intentionally unset: WXT reads package.json, so a release is
-    // one `npm version` away and the two can never disagree.
+    // Reads package.json (see `manifestVersion`), so a release is one
+    // `npm version` away and the two can never disagree.
+    version: manifestVersion(),
     permissions: [
       'storage',
       'cookies',

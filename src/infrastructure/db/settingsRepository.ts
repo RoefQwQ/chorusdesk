@@ -6,7 +6,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
   itemsPerFetch: 10,
   requestDelayMs: 600,
-  enableR18Blur: true,
   autoOpenOriginalUrl: false,
   enableAutoSync: false, // 默认关闭后台自动更新，完全依靠手动更新
   hideReposts: false,

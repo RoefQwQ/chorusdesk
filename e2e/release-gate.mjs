@@ -653,10 +653,22 @@ try {
     const manifestPath = path.join(EXT_DIR, 'manifest.json');
     assert(fs.existsSync(manifestPath), `no manifest.json in ${EXT_DIR}`);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    // First three components must match `package.json`, which is what catches a
+    // stale `.output/` being shipped as a new build. A fourth component is
+    // allowed and only used for a store resubmission — same code, same tag, a
+    // version the store will accept (see `manifestVersion` in wxt.config.ts).
+    const [want, got] = [pkgVersion, manifest.version];
     assert(
-      manifest.version === pkgVersion,
-      `built manifest version ${manifest.version} != package.json ${pkgVersion} — stale .output/`,
+      got === want || got.startsWith(`${want}.`),
+      `built manifest version ${got} is not ${want} (or ${want}.<store revision>) — stale .output/?`,
     );
+    if (got !== want) {
+      const revision = got.slice(want.length + 1);
+      assert(
+        /^\d+$/.test(revision) && Number(revision) <= 65535,
+        `manifest version ${got}: the store-revision component must be an integer 0-65535, got ${JSON.stringify(revision)}`,
+      );
+    }
     detail(`manifest v${manifest.version} (${manifest.permissions.join(', ')})`);
     return manifest;
   });
