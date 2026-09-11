@@ -489,54 +489,55 @@ async function clickLocated(target, locator, label) {
     selector: `[${MARK}]`,
   });
   assert(nodeId, `element for ${label} was not addressable via the DOM domain`);
-  await target.send('DOM.scrollIntoViewIfNeeded', { nodeId });
-  await sleep(120);
-  const { quads } = await target.send('DOM.getContentQuads', { nodeId });
-  assert(quads?.length, `no layout box for ${label} (element is not rendered)`);
-  const quad = quads[0];
-  const x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
-  const y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
-  // Make delivery a PRE-CONDITION rather than an assumption.
-  //
-  // Synthetic input was intermittently dropped on CI with the losing runs being
-  // the FAST ones (5.2 s total vs ~16 s): the page was mounted and its DOM was
-  // queryable, but the window had not been mapped by the X server yet, so
-  // `Input.dispatchMouseEvent` succeeded and the page received nothing
-  // (mousedown=0 mouseup=0 click=0). `--window-position` was NOT the cause of that
-  // recurrence — by then it was already skipped on CI.
-  //
-  // `Page.bringToFront` fixes that by raising the window, which is why it is
-  // CI-ONLY: on a developer machine this window is deliberately minimized, and
-  // bringing it to the front puts it back in front of the user. That mistake was
-  // made once already — the run after adding it un-minimized the browser on the
-  // user's screen on every click. On CI there is no user, and the window must be
-  // on the X screen anyway.
-  //
-  // The retry loop below is safe on both: the delivery counter says whether
-  // anything arrived, the listeners are one-shot, and a retry is guarded on
-  // `click === 0`, so a second dispatch only happens when the first provably did
-  // not reach the element. A click that arrives and is ignored by the app is
-  // unaffected — that still fails the step's own post-condition, which is the
-  // right place for it.
-  if (ON_CI_RUNNER) {
-    await target.send('Page.bringToFront').catch(() => {});
-    for (let i = 0; i < 40; i++) {
-      if (await target.eval('document.hasFocus()')) break;
-      await sleep(100);
-    }
-  }
+  /**
+   * Where the element is RIGHT NOW.
+   *
+   * Re-measured before every dispatch, and that is the fix for the intermittent
+   * CI failure rather than a defensive habit. The evidence, from the diagnostics
+   * the run now prints when a click is lost:
+   *
+   *   display 1920x1080 fits the window 1440x900        ← the display is fine
+   *   screenX:10 screenY:10 outer 1440x900              ← the window is fully on it
+   *   hasFocus: true  visibility: visible               ← and it has focus
+   *   mousedown=0 mouseup=0 click=0                     ← yet nothing arrived
+   *
+   * With the environment cleared, what is left is aiming: the coordinates were
+   * computed ONCE, before `Page.bringToFront` and the focus wait — which on CI can
+   * take seconds, while the dashboard is still mounting and re-laying out. Every
+   * retry then dispatched at that same stale point, so a button that moved by a few
+   * pixels was missed by all five attempts. On a fast run the app happens to settle
+   * before the measurement, which is why the failure correlated with timing and
+   * never reproduced on a machine that starts the app quicker.
+   */
+  const measure = async () => {
+    await target.send('DOM.scrollIntoViewIfNeeded', { nodeId });
+    await sleep(120);
+    const { quads } = await target.send('DOM.getContentQuads', { nodeId });
+    if (!quads?.length) return null; // not laid out (yet); the caller retries
+    const quad = quads[0];
+    return {
+      x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
+      y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4,
+    };
+  };
 
   let delivered = { down: 0, up: 0, click: 0 };
   let attempts = 0;
+  let point = await measure();
   for (; attempts < 4; attempts++) {
-    await target.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
-    await target.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-    await target.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    point = (await measure()) ?? point;
+    if (!point) {
+      await sleep(250);
+      continue;
+    }
+    await target.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' });
+    await target.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    await target.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
     await sleep(120);
     delivered = await target.eval(`window.__gateClick || { down: 0, up: 0, click: 0 }`);
     if (delivered.click) break;
-    // Nothing arrived — the element was not reachable by input yet. Wait for the
-    // window to finish mapping and try again.
+    // Nothing arrived. The element may have moved since the measurement; the next
+    // iteration measures again before dispatching.
     await sleep(250);
   }
   if (attempts > 0) detail(`${label}: input needed ${attempts + 1} attempt(s)`);
@@ -572,7 +573,7 @@ async function clickLocated(target, locator, label) {
     // Deliberately a different message from "the control was not found" and
     // from "the app ignored the click": this is the environment, not the code.
     throw new Error(
-      `the click at (${Math.round(x)},${Math.round(y)}) for ${label} was never delivered to the page ` +
+      `the click at (${Math.round(point.x)},${Math.round(point.y)}) for ${label} was never delivered to the page ` +
         `(mousedown=${delivered.down} mouseup=${delivered.up} click=${delivered.click}) after ${attempts + 1} attempts. ` +
         `geometry=${JSON.stringify(geo)} window=${JSON.stringify(bounds)}. ` +
         'Synthetic input reached nothing — this is the environment, not the view under test.',
