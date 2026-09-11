@@ -830,6 +830,26 @@ content rendered twice. jsdom proves the arithmetic; only this proves the *seam*
 advances continuously (offset within a row going `33 → row ends → 0 of the next row`, never
 jumping). Measure and print the trace; do not eyeball it.
 
+### Pitfalls of driving an occluded browser
+
+Three failures that all trace to the same cause — **a window that is not composited produces no
+frames**, and a lot of the platform quietly depends on frames:
+
+- **No `rAF`.** `await new Promise(r => requestAnimationFrame(r))` never settles, so a cell
+  using it as a step barrier hangs and is killed at the timeout. Use `setTimeout`.
+- **No `scroll` event.** `window.scrollTo(...)` moves `scrollY` but never fires the event, so
+  anything gated on scroll (`showBackToTop`, lazy loaders) silently stays in its initial state.
+  This looks exactly like a product bug and is not one — dispatch `new Event('scroll')` manually,
+  and treat "the control did not appear" as unverified until you have. Do not report it as a
+  defect without checking `scrollY` and the listener.
+- **No screenshot.** The capture API returns "the tab is not visible". Bringing the tab to the
+  front may work; raising the user's window over their other work will not, so after one attempt
+  stop and verify numerically instead. Say plainly which parts you could not see.
+
+And one about reading Vue state across the bridge: **every read of the DOM must follow an
+`await`.** Vue flushes on a microtask, so dispatching an event and reading the DOM on the same
+line observes the *previous* render — a working handler then looks like a dead one.
+
 Corollary worth stating: **when a test cannot distinguish two configurations, find out which
 one it is and say so.** Removing a `:loop="false"` from a list left the suite green because
 jsdom reports every height as 0, so the copy count is always 1 there. The fix was not a
@@ -855,4 +875,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 475 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 488 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
