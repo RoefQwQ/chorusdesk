@@ -69,6 +69,13 @@ let captured: CapturedInjection | null = null;
 let fetchedUrls: string[] = [];
 let respondWith: (url: string) => { ok: boolean; status: number; json: () => Promise<unknown> };
 
+/**
+ * The default stub answers with an EMPTY timeline — HTTP 200 and well-formed JSON
+ * carrying no tweet entries. That is the shape a protected account produces, and it
+ * is deliberately the default here because the two facts it separates are the ones
+ * the log used to conflate: the request succeeded, the account yielded nothing.
+ */
+
 /** Runs the handler with the page path forced (no cookies → direct path yields null). */
 async function runHandler(
   message: Record<string, unknown> = { username: 'artist', limit: 10 },
@@ -111,7 +118,14 @@ beforeEach(() => {
         data: {
           user: {
             result: {
-              timeline_v2: { timeline: { instructions: [], metadata: { cursor: 'BOTTOM' } } },
+              timeline_v2: {
+                timeline: {
+                  // Empty by default — see `EMPTY_TIMELINE_NOTE`. A case that needs
+                  // entries assigns `respondWith` itself.
+                  instructions: [],
+                  metadata: { cursor: 'BOTTOM' },
+                },
+              },
             },
           },
         },
@@ -301,11 +315,50 @@ describe('twitter timeline — the path taken is logged, in priority order', () 
   it('uses the page path first, and never touches the fallback when it succeeds', async () => {
     await runHandler();
 
-    expect(logLines.some((l) => l.includes('标签页路径采集成功'))).toBe(true);
+    // The default stub returns no tweet entries, so the honest line is the
+    // empty-timeline one — NOT a success claim. (Asserting 采集成功 here is what the
+    // old wording let pass, and it printed that immediately before the parser
+    // reported 同步失败 for exactly this payload.)
+    expect(logLines.some((l) => l.includes('请求成功，但响应中没有推文条目'))).toBe(true);
+    expect(logLines.some((l) => l.includes('标签页路径采集成功'))).toBe(false);
     // The decisive half: reaching the direct path at all would mean the page path
-    // failed. Asserting only the success line would pass even if the fallback had
+    // failed. Asserting only the path line would pass even if the fallback had
     // silently taken over.
     expect(logLines.some((l) => l.includes('直连'))).toBe(false);
+  });
+
+  it('says 「采集成功」 only when the payload actually carries tweets', async () => {
+    // Same page path, same request outcome — the difference is the payload. This is
+    // the pair the log must be able to tell apart.
+    respondWith = (url) => {
+      if (url.includes('UserByScreenName')) {
+        return { ok: true, status: 200, json: async () => ({ data: { user: { result: { rest_id: '12345' } } } }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            user: {
+              result: {
+                timeline_v2: {
+                  timeline: {
+                    instructions: [
+                      { type: 'TimelineAddEntries', entries: [{ entryId: 'tweet-1' }] },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        }),
+      };
+    };
+
+    await runHandler();
+
+    expect(logLines.some((l) => l.includes('标签页路径采集成功'))).toBe(true);
+    expect(logLines.some((l) => l.includes('响应中没有推文条目'))).toBe(false);
   });
 
   it('falls back to the direct request, and says so, when the page path fails', async () => {

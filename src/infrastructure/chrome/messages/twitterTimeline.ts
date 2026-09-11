@@ -405,19 +405,20 @@ async function fetchTwitterTimelineViaTabOrSession(
             const inst = v2Timeline?.instructions ?? tlTimeline?.instructions;
             return Array.isArray(inst) ? inst : [];
           };
-          const instructions = readInstructions(tweetData);
-          const hasTweetEntries = instructions.some(
-            (inst) =>
-              (typeof inst === 'object' && inst !== null &&
-                ((inst as Record<string, unknown>).type === 'TimelineAddEntries' &&
-                  Array.isArray((inst as Record<string, unknown>).entries) &&
-                  ((inst as Record<string, unknown>).entries as Record<string, unknown>[]).some((e) =>
-                    typeof e.entryId === 'string' && e.entryId.startsWith('tweet-')
-                  ))) ||
-              (typeof inst === 'object' && inst !== null && (inst as Record<string, unknown>).type === 'TimelinePinEntry')
-          );
+          /** True when a timeline payload actually carries tweet entries. */
+          const timelineHasTweets = (data: unknown): boolean =>
+            readInstructions(data).some(
+              (inst) =>
+                (typeof inst === 'object' && inst !== null &&
+                  ((inst as Record<string, unknown>).type === 'TimelineAddEntries' &&
+                    Array.isArray((inst as Record<string, unknown>).entries) &&
+                    ((inst as Record<string, unknown>).entries as Record<string, unknown>[]).some((e) =>
+                      typeof e.entryId === 'string' && e.entryId.startsWith('tweet-')
+                    ))) ||
+                (typeof inst === 'object' && inst !== null && (inst as Record<string, unknown>).type === 'TimelinePinEntry')
+            );
 
-          if (!hasTweetEntries) {
+          if (!timelineHasTweets(tweetData)) {
             try {
               const replyOp = 'qUpkZU6eN8MbtQb7rC_pYg/UserTweetsAndReplies';
               const replyResp = await fetch(
@@ -466,7 +467,19 @@ async function fetchTwitterTimelineViaTabOrSession(
             }
           }
 
-          return { success: true, tweetData, userData, bottomCursor };
+          // `hasTweetEntries` is reported because the request succeeding and the
+          // account yielding something visible are different facts, and the caller's
+          // log used to conflate them: it printed 「标签页路径采集成功」 immediately
+          // before the parser's 「同步失败（parse）· 未返回任何推文条目」 for a
+          // protected account. The parser still owns the verdict; this only lets the
+          // path log stop contradicting it one line later.
+          return {
+            success: true,
+            tweetData,
+            userData,
+            bottomCursor,
+            hasTweetEntries: timelineHasTweets(tweetData),
+          };
         } catch (scriptErr: unknown) {
           return { success: false, error: scriptErr instanceof Error ? scriptErr.message : '推特标签页执行脚本异常' };
         }
@@ -493,8 +506,20 @@ async function fetchTwitterTimelineViaTabOrSession(
       devLog.warn('twitter', '标签页注入未返回结果（页面可能发生跳转或重新渲染）', `tab ${targetTabId}`);
       return { success: false, error: '推特标签页未返回有效数据' };
     }
-    if (res.success) devLog.debug('twitter', '标签页路径采集成功', `tab ${targetTabId}`);
-    else devLog.warn('twitter', '标签页路径采集失败', String(res.error ?? '未知原因'));
+    if (!res.success) {
+      devLog.warn('twitter', '标签页路径采集失败', String(res.error ?? '未知原因'));
+    } else if ((res as { hasTweetEntries?: boolean }).hasTweetEntries === false) {
+      // The request worked; the account simply yielded nothing visible. Reported at
+      // `warn` because the adapter will fail this channel's sync one line later, and
+      // the log should say why before it does.
+      devLog.warn(
+        'twitter',
+        '标签页路径：请求成功，但响应中没有推文条目',
+        `tab ${targetTabId}（受保护账号或接口变更；解析器将据此报错）`,
+      );
+    } else {
+      devLog.debug('twitter', '标签页路径采集成功', `tab ${targetTabId}`);
+    }
     return res;
   } catch (err: unknown) {
     // MUST catch rather than let this propagate. `chrome.scripting.executeScript`
