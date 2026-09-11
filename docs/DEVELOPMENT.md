@@ -49,8 +49,10 @@
 ## 3. 新增平台接入
 
 1. 在 `src/adapters/` 新建 `<platform>.ts`，实现 `PlatformAdapter` 契约（`src/adapters/types.ts`）：
-   - 必实现 `fetchLatest(channel, limit, options)` → 归一化 `FetchResult`（`posts[]`、`authorMeta?`、`nextCursor?`、`hasMore?`、`error?`、`totalFetched?`）。
-   - 需要历史翻页 → `fetchHistory?`；需要第二请求通道 → `fetchAjaxFallback?`；需要页内 GraphQL/JSON 归一化 → `parseGraphQLResult?`；需要登录探测 → `checkAuthStatus?`（返回 `{ loggedIn, username? }`）。
+   - 必实现 `fetchLatest(channel, limit, options)` → 归一化 `FetchResult`（`posts[]`、`authorMeta?`、`nextCursor?`、`hasMore?`、`error?: FetchError`（`{ code, message }`，不是字符串）、`totalFetched?`）。
+   - 需要历史翻页 → `fetchHistory?`；需要第二请求通道 → `fetchAjaxFallback?`；需要页内 GraphQL/JSON 归一化 → `parseGraphQLResult?`。
+   - **不要在 adapter 里写登录探测**（`checkAuthStatus`）：该模式已于 2026-09-12 删除三处实现——它们零调用，而 Cookie 本来由 `credentials: 'include'` + host_permissions 自动携带，探测既没被调用也改变不了结果。登录状态灯由 `platformAuth.ts` 的 Cookie 表统一负责（见第 7 步）。
+   - 平台特有的行为参数放**本 adapter 上**，不要塞进 `sync` 层分支：`minRequestIntervalMs`（请求最小间隔，覆盖只能抬高下限）、`archivesMedia: false`（声明不参与本地图片归档）。理由与形状见 `ARCHITECTURE.md` §4.2。
 2. 请求统一走 `src/infrastructure/chrome/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
 3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base64(guid) 32位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。
 4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册；不要改 `getAdapter` 的 rss 回退语义。
@@ -78,8 +80,8 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 入口：`src/infrastructure/db/database.ts`（schema）、`settingsRepository.ts`（默认值）、`postRepository.ts`（生命周期）。
 
 必须遵守：
-- 不改库名 `CreatorFeedHubDB`；**不删除/不重排**已发布 version 1–3（v1 四表、v2 posts 复合索引 `[channelId+publishedAt]`、v3 `deletedPostIds`）。
-- 新 schema 只 `version(4).stores({ ... })` 追加，且 stores 里要包含全部受影响表的**完整**索引声明（Dexie 按版本全量替换索引定义）。
+- 不改库名 `CreatorFeedHubDB`；**不删除/不重排**任何已发布的 version。当前已到 **v5**：v1 四表、v2 posts 复合索引 `[channelId+publishedAt]`、v3 `deletedPostIds`、v4 把 `isRead`/`isBookmarked` 由 boolean 改写为 `0 | 1`、v5 清理存量推文正文尾部的 t.co 链接（后两者均为纯数据迁移，无 schema 变更）。完整声明见 `ARCHITECTURE.md` §4.4。
+- 新 schema 只 `version(6).stores({ ... })` 追加，且 stores 里要包含全部受影响表的**完整**索引声明（Dexie 按版本全量替换索引定义）。
 - 新增字段一律给旧数据默认兜底：对象型默认值在读取端合并（仿 `getSettings` 的 `{ ...DEFAULT_SETTINGS, ...item.value }`）；布尔/可选字段用 `?.` 与 `Boolean()` 收窄。
 - 导入旧 JSON 时允许缺新字段（现有 `handleImportFile` 逐表 `bulkPut`，天然容忍）。
 - `Post.id`、`Channel.id` 生成规则不可变；迁移旧数据只允许“同 id 改写字段”，不允许改名。
@@ -159,6 +161,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 入库前：`toSecureMediaUrl()` 归一化（协议补全、小红书 avatar → `sns-avatar-qc.xhscdn.com`、XHS 永久 fileId 直链等已在 `utils/media.ts` 处理，改动先读该文件与 `postRepository.healBrokenPostMedia`）。
 - 渲染失败：先 `markImageFailed`，再 `proxyImage()`（`PROXY_IMAGE` 消息、候选 URL 列表、data URL）；不要在组件里重复实现 base64 转换（`handleProxyImage` 已有，含 8192 分块避免栈溢出）。
 - 离线缓存：`src/services/imageCache/`（File System Access）。写盘只在用户绑定目录后；目录选择必须由用户手势触发；路径分段由 `resolvePostDirSegments` 决定（`[创作者名, 平台中文名, YYYYMMDD_短id]`），文件名经 `sanitizePathSegment` 净化。
+  - **新平台默认参与归档**；只有在「这个平台的图片存下来没有意义（源可随时重取，或托管方一律拒绝外站引用）」时才在 adapter 上声明 `archivesMedia: false`（见 `rss.ts`）。门在 `cacheMediaItem`/`cachePost` 的入口，卡片的自动保存与批量归档共用，不要在 UI 侧另加判断——两处条件必然分叉（AGENTS 规则 1 的同类失败模式）。**读取侧不加门**：已归档的文件必须继续可读。
 - DNR 规则 id 空间：1001–1006 已占用，新规则从 1007 起；`removeRuleIds` 列表与 `addRules` 必须同步更新，保持幂等。
 
 ### 8.3 同步保护速查（改动冷却/间隔前先看）
@@ -214,9 +217,9 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
   - 至少要有一份**逐字抓取**的真实载荷（`tests/fixtures/` 下已有 `douyin/`、`rss/` 两个目录，照此放）。
   - fixture **必须包含修复所依赖的字段**。曾有一次修复之所以长期无法被测试发现，是因为 fixture 里恰好缺了那个字段（media entity 的 `url`），于是测试与实现互相点头、与真实报文无关。
   - 注释里断言上游行为（“某字段的含义是…”）而没有真实载荷支撑，就是**披着引用外衣的猜测**；要么附上 fixture，要么删掉断言。
-  - 本仓现状：**RSS 是唯一直接用真实报文测 adapter 的平台**，应作为模板；Twitter 的 fixture 是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
+  - 本仓现状：已有逐字真实载荷的平台是 **RSS、抖音、bilibili、小红书**（`tests/fixtures/` 下各自一目录），应作为模板；Twitter 的 fixture 仍是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
 - **有意不补测试的模块要写下来，否则下次会被当成疏漏**：
-  - `youtube.ts`（**111 行**）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
+  - `youtube.ts`（**121 行**）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
   - **但同一文件里真正脆弱的一段没有被测试**，这条例外不覆盖它：`@handle → channelId` 的解析是**三个正则依次兜底**（`feeds/videos.xml?channel_id=` / `<link rel=canonical>` / 内联 `"channelId":"UC…"`），跑在 YouTube 页面 HTML 上。三个全 miss 时 `channelId` 保持 `@handle` 原样，接着就用它去请求 RSS。
 **2026-09-12 已实测，结论是好的那一种**：`feeds/videos.xml?channel_id=@nonexistent_handle_zzz`
 返回 **HTTP 404**（`UCabcdefghijklmnopqrstuv` 同样 404），所以适配器抛出并返回 `network` 错误——
@@ -224,7 +227,10 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 `tests/youtube.handle.test.ts`（5 例，jsdom，因为适配器用 `DOMParser`）逐条钉住三个正则分支＋这条 404 行为，
 并记录了一个实测细节：`og:title` 优先于 `<title>`，且**只有** `<title>` 分支会剥掉「 - YouTube」后缀。
   - `withny.ts` 曾在此名单内，**2026-09-12 随平台整体移除**（队列 B30）。
-- **真实缺口（不是有意例外）**：`bilibili.ts`（**435 行**）与 `xiaohongshu.ts`（**390 行**），分支密集、零测试。现状与提纯方案见 `docs/REVIEW_2026-09.md` 的平台可维护性一节；难点在于解析段与网络请求深度交织（item 映射循环套在 `if (res.ok)` 内），提纯属于**有风险的改动**，且这两个文件没有回归网，所以正确顺序是：先抓一份真实载荷做 fixture，再提纯，最后断言同一份 fixture 解析结果不变。
+- **曾经的缺口已补上（2026-09-12）**：`bilibili.ts` 与 `xiaohongshu.ts` 原先分支密集、零测试。两者**都先抓了逐字真实载荷做 fixture，再提纯解析段，最后断言同一份 fixture 解析结果不变**（顺序见提交 `342ce6c` → `e4c8b56` → `bc0ffc3`、`06f30c7` → `272a989` → `d8b6c1`）。
+  - 现有回归网：`tests/bilibili.parse.test.ts`、`tests/xiaohongshu.parse.test.ts`、`tests/xiaohongshu.enrich.test.ts`，载荷在 `tests/fixtures/bilibili/`、`tests/fixtures/xiaohongshu/`。
+  - 提纯过程中真实抓到过一个缺陷：小红书同时存在两个提取器，行为不一致——这正是「先建网再动刀」要防的那类回归。
+  - 仍需注意：fixture 覆盖的是**实测到的形状**，平台改版后要先补新载荷再改解析。
 
 ## 11. 提交规范
 

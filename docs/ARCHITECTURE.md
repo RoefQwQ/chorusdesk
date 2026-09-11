@@ -177,35 +177,48 @@ export interface FetchResult {
   authorMeta?: { name?: string; avatar?: string };
   nextCursor?: string;         // 下一页游标
   hasMore?: boolean;           // false 表示到底
-  error?: string;              // 用户可读错误
+  error?: FetchError;          // 结构化失败：{ code, message }，不是字符串
   totalFetched?: number;       // 归一化前原始条数
+}
+
+/** `code` 驱动同步层策略（是否重试/冷却），`message` 直接给用户看。 */
+export interface FetchError {
+  code: FetchErrorCode;        // 含 'rate_limit' / 'network' / 'auth' / 'parse' / 'unsupported' 等
+  message: string;
 }
 
 export interface PlatformAdapter {
   platform: string;
+  /** 平台知识：两次请求的最小间隔（ms）。缺省用通用默认值。 */
+  minRequestIntervalMs?: number;
+  /** 平台知识：该平台媒体是否值得写入用户磁盘。缺省 = 是。 */
+  archivesMedia?: boolean;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
-  checkAuthStatus?(): Promise<{ loggedIn: boolean; username?: string }>;
   fetchHistory?(channel, uid, limit, options, authorName?, authorAvatar?): Promise<FetchResult>;
   fetchAjaxFallback?(channel, limit, page, options?): Promise<FetchResult>;
   parseGraphQLResult?(channel, tweetData, userData, limit, onlyOriginal?, bottomCursor?): FetchResult;
 }
 ```
 
-`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。
+两个能力字段都是「平台知识随平台走」（AGENTS 规则 8）的形状：`minRequestIntervalMs` 由 `sync/batchSync.ts` 与 `sync/rateLimit.ts` 以 `Math.max(用户配置, 平台下限)` 合并——**覆盖可以抬高下限，永不能压低**；`archivesMedia` 由 `services/imageCache` 在写入前读取。
+
+`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；模块只导出一个函数 `getAdapter(platform)`，找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）。没有运行时注册入口——新增平台就是在 `ADAPTER_MAP` 里加一行。
 
 各平台能力现状（`fetchLatest` 为必实现）：
 
 | adapter | fetchLatest 主要数据源 | 可选能力 |
 |---|---|---|
-| `bilibili.ts` | `api.bilibili.com/x/polymer/web-dynamic/v1/feed/space`（动态）+ `x/v2/medialist/resource/list`（视频，权威源） | `fetchHistory`（offset 翻页）、`checkAuthStatus` |
+| `bilibili.ts` | `api.bilibili.com/x/polymer/web-dynamic/v1/feed/space`（动态）+ `x/v2/medialist/resource/list`（视频，权威源） | `fetchHistory`（offset 翻页） |
 | `twitter.ts` | 不直接发请求：`FETCH_TWITTER_TIMELINE` 消息 → background | `parseGraphQLResult`（归一化 GraphQL 响应） |
 | `pixiv.ts` | `www.pixiv.net/ajax/user/{uid}/profile/all` + `ajax/user/{uid}?full=1` | — |
 | `fantia.ts` | `fantia.jp/api/v1/fanclubs/{id}`（内嵌 recent posts） | — |
-| `xiaohongshu.ts` | 抓取 `www.xiaohongshu.com/user/profile/{userId}` 页面 HTML 解析 | `checkAuthStatus` |
-| `weibo.ts` | `m.weibo.cn/api/container/getIndex`（uid + containerid 翻页） | `fetchAjaxFallback`（`weibo.com/ajax/statuses/mymblog`）、`checkAuthStatus` |
+| `xiaohongshu.ts` | 抓取 `www.xiaohongshu.com/user/profile/{userId}` 页面 HTML 解析 | — |
+| `weibo.ts` | `m.weibo.cn/api/container/getIndex`（uid + containerid 翻页） | `fetchAjaxFallback`（`weibo.com/ajax/statuses/mymblog`） |
 | `douyin.ts` | 不直接请求抖音：经 `FETCH_DOUYIN_SNAPSHOT` 从已打开的抖音标签页采集 DOM 快照（后台直连只会拿到反爬 JS 挑战页） | — |
 | `youtube.ts` | 官方 RSS `www.youtube.com/feeds/videos.xml?channel_id=`（先尝试抓频道页解析 `channel_id`） | — |
-| `rss.ts` | 任意 RSS/Atom 源，`bgFetch` 拉取后 DOMParser 解析 | — |
+| `rss.ts` | 任意 RSS/Atom 源，`bgFetch` 拉取后 DOMParser 解析 | `archivesMedia: false`（声明不参与本地图片归档） |
+
+三处 `checkAuthStatus`（bilibili / xiaohongshu / weibo）已于 2026-09-12 删除：全仓零调用，Cookie 由 `credentials: 'include'` 与 host_permissions 自动携带，这些函数只是既没被调用、也没能改变结果的探测。
 
 规则：adapter 只做“请求 + 归一化”，**不直接写 Dexie、不修改 Vue 状态**；跨域请求一律经 `src/infrastructure/chrome/http.ts bgFetch()`（见 §5.4）。
 
@@ -284,7 +297,8 @@ version(5): 数据迁移（无 schema 变更）——清理存量推文正文尾
 
 ### 4.7 图片缓存服务 `src/services/imageCache/`
 
-- `index.ts`：`imageCacheService` 编排（`isReady/bindDirectory/unbindDirectory/cachePostImages/cachePosts.../getCachedImageUrl` 等，对外以该对象方法为准），内部经 `proxyImage`/直连取 Blob，命中磁盘后生成 object URL；进程内 `objectUrlMemoryCache` 与 `inFlightCacheJobs` 分别做内存去重与并发写去重。
+- `index.ts`：`imageCacheService` 编排，实际对外方法只有 7 个——`isReady` / `bindDirectory` / `unbindDirectory` / `getLocalCachedMediaUrl` / `isPostFullyCached` / `cacheMediaItem` / `cachePost`，内部经 `proxyImage`/直连取 Blob，命中磁盘后生成 object URL；进程内 `objectUrlMemoryCache`、`inFlightCacheJobs`（并发写去重）与 `knownMissingMedia`/`postDirCache`（负向探测与目录解析的记忆，避免每次挂载重复走目录树）各司其职。
+  - **写入侧受平台能力开关管辖**：`cacheMediaItem` 与 `cachePost` 先问 `getAdapter(platform)?.archivesMedia !== false`，为假直接返回不做事（rss 声明 `archivesMedia: false`，理由见 `src/adapters/types.ts` 该字段注释）。**读取侧刻意不设这个门**，否则早先已归档的图会从磁盘上"消失"。卡片的自动保存与设置页的批量归档都经过 `cacheMediaItem`，因此这一个咽喉点即可覆盖全部写入路径。
 - `fsManager.ts`：File System Access API；目录句柄持久化在**独立的** IndexedDB `'FeedHubFSCache'`（store `'handles'`，key `'root_cache_dir'`），与业务库 `CreatorFeedHubDB` 分开；提供 `promptSelectDirectory/verifyDirectoryPermission/getOrCreateNestedDirectory/getExistingNestedDirectory/saveBlobToFile/readFileAsBlob/...`。
 - `pathResolver.ts`：目录结构 `[创作者名, 平台中文名, YYYYMMDD_短id]`（`resolvePostDirSegments`）；文件名/目录名跨平台净化 `sanitizePathSegment`（Windows 保留字符替换、去首尾点）；`resolveFileExtension` 由 MIME/URL 推断扩展名。
 - 目录选择须由用户手势触发（浏览器权限要求）；绑定目录信息记录在 `settings.imageCacheDirectoryName` 与句柄库中。
@@ -399,6 +413,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 | `chrome.storage.session` | `devLog.entries` / `devLog.verbose` | 开发者日志环形缓冲（150 条）与详细模式开关 | `src/utils/devLog.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_theme` | 明暗主题 | `useDarkMode.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_hidden_creators` / `creator_feed_hidden_platforms` | 隐藏创作者/平台偏好 | `useCreatorVisibility.ts` |
+| `localStorage`（dashboard 页） | `cfh_feed_platform_list_rows` / `cfh_feed_creator_list_rows` | 两个侧栏各自的行数（4–8），由把手拖动或方向键写入 | `views/FeedView.vue` → `components/LoopScroll.vue` 的 `storage-key` |
 | JSON 备份 | `{ version:'1.0', exportedAt, creators, channels, settings, posts }` | 导出/导入 | `useBackupManager.ts` → `src/application/backupService.ts` + `backupFileService.ts` |
 
 注意：当前备份格式**不含** `deletedPostIds`（回收站内容不随备份迁移），也**不含**
@@ -420,9 +435,12 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
   因此 `record()` 是同步的）。
 - 跨上下文并发写入采用「先读后合并」，最坏情况丢一行诊断，不引入跨上下文锁。
 
-埋点位置（scope 名即面板中的筛选值）：`sw`（worker 启动）、`router`（消息接入与拒绝）、
-`alarm`（定时触发）、`bgFetch`（主机与 HTTP 状态）、`channelSync`（逐账号同步结果与错误码）、
-`hostAccess`（RSS 站点授权结果）、`imageCache`（离线归档统计）。
+埋点位置（scope 名即面板中的筛选值）。基础设施类：`sw`（worker 启动）、`router`（消息接入与拒绝）、
+`alarm`（定时触发）、`bgFetch`（主机与 HTTP 状态）、`channelSync`、`autoSync`（自动同步结果与角标）、
+`hostAccess`（RSS 站点授权结果）、`imageCache`（离线归档统计）、`media`（页面侧图片代理失败与磁盘探测汇总）。
+平台类：`bilibili`、`douyin`、`twitter`、`xiaohongshu`——平台特有的诊断（如注入失败、风控重定向分类）走这里。
+
+> 计数刻意不写死：scope 会随埋点增减，列举会立刻过期。以 `grep -rn "devLog\.\(info\|warn\|error\|debug\)(" src entrypoints` 的结果为准。
 
 ## 8. 数据库兼容策略（原则）
 
