@@ -758,20 +758,23 @@ B30. **Withny 平台整体移除**（2026-09-12，用户决定）——**已完�
     中性徽章（各处已是 `?.` 兜底）。**未做删除迁移**——破坏性操作；用户可在关注管理里自行删除该
     频道（`channelService.deleteCascade`）。新增 `tests/channelSync.unsupported.test.ts`（3 例）钉住
     这条契约，并把「把 adapter 检查挪到 `updating` 写入之后」的变异验证为会失败。
-B33. **平台评估的三条落地项**（2026-09-12 处理状态）：
-    ① **RSS 真实 fixture 做法已写进 `docs/DEVELOPMENT.md` §10**（fixture 必须逐字来自真实报文、
-    必须包含修复所依赖的字段、「注释断言上游行为而无载荷支撑＝披着引用外衣的猜测」），并写明本仓现状：
-    RSS 是唯一用真实报文测 adapter 的平台，Twitter 的 fixture 是手工构造的。
-    ② **有意不补测试的模块已记录（同节）**：`youtube.ts`(111) 的 **RSS 映射**有意不补——
-    官方 feed 上的平直 `filter().map()`，每个字段都有 `||` 兜底，没有「解析一半」的中间状态。
-    **但同文件真正脆弱的一段反而没测**：`@handle → channelId` 的三正则兜底；三个全 miss 时
-    channelId 保持原样并拿去请求 RSS，之后的行为**未实测**（可能是如实报错，也可能是「成功但 0 条」）。
-    ③ **`bilibili`(435) / `xiaohongshu`(390) 的提纯+测试：未做，前置条件已实测确认需要用户参与。**
-    2026-09-12 用**扩展自己的 `bgFetch`**（真实代码路径、全新 profile、无用户数据）请求
-    `x/polymer/web-dynamic/v1/feed/space?host_mid=2`，返回 **HTTP 412**——所以取不到载荷的原因是
-    **会话**，不是请求方式。结论：真实载荷必须由用户在已登录浏览器上导出一次（"Copy as cURL"/响应体），
-    拿到后按「fixture → 提纯 → 断言同一 fixture 解析结果不变」的顺序做。
-    在此之前不应动这两个文件的解析段（零回归网下改主路径）。
+B33. **平台评估的三条落地项**（2026-09-12）：
+    ① **RSS 真实 fixture 做法已写进 `docs/DEVELOPMENT.md` §10**；② **有意不补测试的模块已记录**（同节，
+    `youtube.ts` 的 RSS 映射有意不补，但同文件 `@handle → channelId` 的三正则兜底**没测**且是真脆弱点）。
+    ③ **bilibili 提纯的前置步骤已完成：fixture ＋ 现状固定测试**。
+    `tests/fixtures/bilibili/space-dynamic.ts`（两账号、脱敏、**按解析路径裁剪**，8 KB）＋
+    `tests/bilibili.parse.test.ts`（7 例，只 mock `bgFetch`，走真实 `fetchLatest` 入口）。
+    载荷**无需用户导出**——用 omp relay 借用户已登录的浏览器，在页面上下文里 `fetch`（只读、不导航、
+    不点击），已验证可拿到 HTTP 200 / code 0 / 13 条 item。此前"412 ＝ 需要用户会话"的结论仍成立，
+    但**不该由用户手抄 DevTools**。
+    **固定过程中发现两处真实行为**（已写入测试注释，等待决定）：
+    - **可疑缺口**：动态接口被风控拒绝（`-412`）时，只要 medialist 返回 code 0 且列表为空，
+      适配器就把它当作权威的"该账号无内容"，返回**成功的空结果**——`-412`（`lastDynamicCode`）
+      从不外露。medialist 只覆盖**视频投稿**，不覆盖图文动态，所以"有图无视频且被限流"的账号会被
+      报成"无内容"。这正是 AGENTS 规则 13 禁止的形状。（对照：medialist **也**失败时会如实报错。）
+    - `hasMore` 在水位线提前 `break` 的那条路径上返回 `undefined`（空结果分支不返回该字段）。
+      当前良性（水位线只用于无 cursor 的常规同步，`__END__` 只在回溯时写入），已固定以免将来被误改。
+    剩余：把解析段提成纯函数（在用同一份 fixture 保持绿的**前提**下做），xiaohongshu 同法。
 B32. **占位名前缀清单与 `urlParser` 系统性脱节**（2026-09-12，B30 的同类问题查全的结果）——
     **部分完成（提交 `c9b97e8`）：缺失的 8 个前缀已补齐，复核 15/16；根治（改为单一来源＋守卫测试）未做**——
     拿 `urlParser` **实际生成**的 16 个 `suggestedName` 前缀，逐个对 channelSync 的两份手写清单判：
