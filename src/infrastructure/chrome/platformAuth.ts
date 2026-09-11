@@ -29,7 +29,6 @@ export async function checkPlatformCookieLogins(): Promise<PlatformAuthStatus> {
     { key: 'twitter', domain: 'x.com', authCookieNames: ['auth_token', 'ct0'] },
     { key: 'pixiv', domain: 'pixiv.net', authCookieNames: ['PHPSESSID'] },
     { key: 'fantia', domain: 'fantia.jp', authCookieNames: ['_session_id'] },
-    { key: 'withny', domain: 'withny.fun', authCookieNames: ['withny_session', 'token', 'remember_web'] },
     { key: 'xiaohongshu', domain: 'xiaohongshu.com', authCookieNames: ['web_session', 'a1', 'webId'] },
     { key: 'weibo', domain: 'weibo.com', authCookieNames: ['SUB', 'SUBP', '_T_WM'] },
   ];

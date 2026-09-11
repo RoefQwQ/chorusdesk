@@ -20,7 +20,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     if (!input.startsWith('http://') && !input.startsWith('https://')) {
       if (input.startsWith('@')) {
         input = `https://x.com/${input.slice(1)}`;
-      } else if (/^(?:www\.)?(?:bilibili|twitter|x|youtube|youtu|pixiv|fantia|withny|xiaohongshu|xhslink|weibo|douyin)\./i.test(input)) {
+      } else if (/^(?:www\.)?(?:bilibili|twitter|x|youtube|youtu|pixiv|fantia|xiaohongshu|xhslink|weibo|douyin)\./i.test(input)) {
         input = `https://${input}`;
       } else if (/^\d{5,12}$/.test(input)) {
         // Pure digits -> likely Bilibili UID or Pixiv UID
@@ -177,20 +177,6 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
           cleanUrl: `https://fantia.jp/posts/${postMatch[1]}`,
           suggestedName: `Fantia投稿_${postMatch[1]}`,
           isContentUrl: true,
-        };
-      }
-    }
-
-    // 6. Withny
-    if (host.includes('withny.fun')) {
-      const parts = pathname.split('/').filter(Boolean);
-      if (parts.length >= 2 && (parts[0] === 'users' || parts[0] === 'channels')) {
-        const uid = parts[1];
-        return {
-          platform: 'withny',
-          accountId: uid,
-          cleanUrl: `https://withny.fun/users/${uid}`,
-          suggestedName: `Withny_${uid}`,
         };
       }
     }

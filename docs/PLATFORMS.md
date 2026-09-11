@@ -13,7 +13,6 @@ Chorus 直接复用浏览器对应平台的已登录会话（Cookie / LocalStora
 | YouTube | youtube.com | 官方公开 RSS（无需登录） | 最新公开视频 | 仅最新批次 | 不需要 |
 | Pixiv | pixiv.net | 浏览器 Cookie | 插画、漫画、系列作品 | 支持 | Background 图片代理服务 |
 | Fantia | fantia.jp | 浏览器 Cookie | 俱乐部动态、已赞助会员附件 | 支持 | 自动处理鉴权头 |
-| Withny | withny.fun | 浏览器 Cookie | 图文动态、赞助更新 | 支持 | 不需要 |
 | 小红书 | xiaohongshu.com | 浏览器 Cookie | 图文笔记、视频笔记 | 支持 | 自动清洗 Referer |
 | 微博 | weibo.com | 浏览器 Cookie | 原创微博、转发、九宫格图片、视频 | 支持 | 自动清洗 Referer |
 | 抖音 | douyin.com | 已打开的抖音页面（不读取凭据） | 创作者短视频、图文作品 | 支持（需登录） | 直连加载，失败时走 Background 图片代理（该 CDN 无 Referer 要求） |

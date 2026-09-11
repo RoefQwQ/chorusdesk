@@ -5,7 +5,6 @@ import { youtubeAdapter } from '../adapters/youtube';
 import { twitterAdapter } from '../adapters/twitter';
 import { pixivAdapter } from '../adapters/pixiv';
 import { fantiaAdapter } from '../adapters/fantia';
-import { withnyAdapter } from '../adapters/withny';
 import { xiaohongshuAdapter } from '../adapters/xiaohongshu';
 import { weiboAdapter } from '../adapters/weibo';
 import { douyinAdapter } from '../adapters/douyin';
@@ -17,7 +16,6 @@ const ADAPTER_MAP: Record<string, PlatformAdapter> = {
   twitter: twitterAdapter,
   pixiv: pixivAdapter,
   fantia: fantiaAdapter,
-  withny: withnyAdapter,
   xiaohongshu: xiaohongshuAdapter,
   weibo: weiboAdapter,
   douyin: douyinAdapter,

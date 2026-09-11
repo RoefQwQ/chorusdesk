@@ -28,7 +28,7 @@ chorusdesk/
 │  ├─ adapters/                     # 各平台实现
 │  │  ├─ types.ts                   # FetchOptions/FetchResult/PlatformAdapter 契约
 │  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts
-│  │  ├─ withny.ts xiaohongshu.ts weibo.ts youtube.ts rss.ts
+│  │  ├─ xiaohongshu.ts weibo.ts youtube.ts rss.ts
 │  │  ├─ douyin.ts                  # 抖音 adapter（快照 → Post 映射）
 │  │  ├─ douyin/contract.ts         # 抖音快照校验/归一化（唯一了解页面结构的地方）
 │  │  ├─ douyin/collector.ts        # 注入抖音页面的只读 DOM 采集脚本
@@ -129,7 +129,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 ### 4.1 类型契约 `src/types/index.ts`
 
-- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'withny' | 'xiaohongshu' | 'weibo' | 'douyin' | 'rss' | (string & {})`。
+- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'xiaohongshu' | 'weibo' | 'douyin' | 'rss' | (string & {})`（Withny 于 2026-09-12 整体移除）。
 - `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记。
 - 实体：
   - `Creator { id, name, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
@@ -152,7 +152,6 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 | twitter | `twitter_<tweetId>` |
 | pixiv | `pixiv_<illustId>` |
 | fantia | `fantia_<postId>` |
-| withny | `withny_<itemId>` |
 | xiaohongshu | `xiaohongshu_<noteId>` |
 | weibo | `weibo_<mblogId/bid>` |
 | douyin | `douyin_<awemeId>` |
@@ -192,7 +191,7 @@ export interface PlatformAdapter {
 }
 ```
 
-`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 10 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。
+`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。
 
 各平台能力现状（`fetchLatest` 为必实现）：
 
@@ -202,7 +201,6 @@ export interface PlatformAdapter {
 | `twitter.ts` | 不直接发请求：`FETCH_TWITTER_TIMELINE` 消息 → background | `parseGraphQLResult`（归一化 GraphQL 响应） |
 | `pixiv.ts` | `www.pixiv.net/ajax/user/{uid}/profile/all` + `ajax/user/{uid}?full=1` | — |
 | `fantia.ts` | `fantia.jp/api/v1/fanclubs/{id}`（内嵌 recent posts） | — |
-| `withny.ts` | `withny.fun/api/users/{username}/posts` | — |
 | `xiaohongshu.ts` | 抓取 `www.xiaohongshu.com/user/profile/{userId}` 页面 HTML 解析 | `checkAuthStatus` |
 | `weibo.ts` | `m.weibo.cn/api/container/getIndex`（uid + containerid 翻页） | `fetchAjaxFallback`（`weibo.com/ajax/statuses/mymblog`）、`checkAuthStatus` |
 | `douyin.ts` | 不直接请求抖音：经 `FETCH_DOUYIN_SNAPSHOT` 从已打开的抖音标签页采集 DOM 快照（后台直连只会拿到反爬 JS 挑战页） | — |

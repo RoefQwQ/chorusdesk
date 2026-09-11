@@ -23,7 +23,6 @@ export const PLATFORM_HOSTS = [
   'pixiv.net',
   'pximg.net',
   'fantia.jp',
-  'withny.fun',
   'xiaohongshu.com',
   'xhslink.com',
   'xhscdn.com',

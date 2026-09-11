@@ -725,3 +725,113 @@ B28. **`enableR18Blur` 是死设置**（2026-09-11 核对商店政策时发现�
     它读起来像一项已实现的合规能力。修法二选一：接上真正的模糊/隐藏逻辑，或删掉它（含类型与默认值），
     **不要留着当装饰**。与上架相关：商店对不适合全年龄的内容要求标记 Mature，而这条决定依据是
     「产品实际会展示什么」，所以先定这个设置的去留，再定商店的 Mature 标记。
+B29. **上架的合规缺口（上架前必须补，已核对一手政策）**：见 `docs/PUBLISHING.md` §1.4，共 5 条——
+    其中第 1 条最硬：*Limited Use* 第 6 条要求扩展自有网站上有固定措辞的主动声明
+    （"The use of information received from Google APIs will adhere to the Chrome Web Store User Data
+    Policy, including the Limited Use requirements."），而 `docs/PRIVACY.md` 目前**没有**这句话。
+    其余为：隐私政策需要可填写的公开 URL；`optional_host_permissions: ['*://*/*']` 必须在文案里
+    点名解释（政策禁止为未实现功能预申请权限）；描述不能只是平台名清单（Keyword Spam）；
+    Mature 标记待定（依赖 B28）。
+B30. **Withny 平台整体移除**（2026-09-12，用户决定）——现为 9 个平台。改动位点：适配器文件、
+    `PLATFORM_HOSTS`、`platformAuth` 的 cookie 行、`pathResolver` 的目录名、`Platform` 联合类型、
+    `PLATFORM_REGISTRY` 条目、`registry` 注册、`urlParser` 的主机提示与解析分支，以及
+    README / PLATFORMS / ARCHITECTURE / PUBLISHING / 设置页文案。**已验证**：产物 `host_permissions`
+    19 → 18（派生自 allowlist，符合规则 2）、519 项测试全过、全仓 `withny` 零残留。
+    顺带发现一个**既有漏项**：`urlParser` 为 Withny 生成 `Withny_${uid}` 占位名，而 channelSync 的
+    两份占位前缀列表**都不认它**——频道名判据含 `startsWith(channel.platform)`（小写 `withny`），
+    但 `'Withny_x'.startsWith('withny')` 为 false，也没有像 `Pixiv`/`Fantia` 那样的显式大写条目；
+    创作者名单里则完全没有 Withny。也就是说**它的真实昵称从来没被写入过**，正是规则 9 描述的那种
+    静默失败。平台已去，问题随之消失，但**规则 9 的两份清单值得据此复核一遍**。
+    **存量数据**：已绑定过 Withny 的用户其 channel 行仍在库里；`getAdapter` 返回 undefined，
+    `updateChannel` 在写 `updating` **之前**返回「不支持的平台: withny」，落库为可见错误
+    （`channelSync.ts:506`），不会卡在「同步中」也不会静默跳过；UI 对未知平台退化为原始 key ＋
+    中性徽章（各处已是 `?.` 兜底）。**未做删除迁移**——破坏性操作；用户可在关注管理里自行删除该
+    频道（`channelService.deleteCascade`）。新增 `tests/channelSync.unsupported.test.ts`（3 例）钉住
+    这条契约，并把「把 adapter 检查挪到 `updating` 写入之后」的变异验证为会失败。
+B31. **`FetchError.retryable` 是只写字段**（2026-09-12 写 B30 测试时发现，**只报告不擅自处理**）：
+    全仓仅三处出现——类型声明、`fetchError()` 的赋值、各 adapter 传参——**没有任何读取方**。
+    与 B28 同源（声明了却无人消费），但性质不同：它属于一个**结构化错误契约**，将来可能有消费者，
+    且已被注释与文档引用。处理方式应由用户定：接上真实的退避/重试判断，或删掉该字段。
+B26. **`PLATFORMS.md` §2.2 的 Twitter 建议此前是空头支票**（随 B10 修复，**待真机复验**）：
+    该节说「可先在浏览器中打开目标博主的推特主页标签页，扩展会优先复用当前活跃标签页的前端网络会话」
+    ——在注入路径修好之前，这句话做不到（函数一进页面就 `ReferenceError`）。修复后逻辑上成立，
+    但**尚未在真实 x.com 上验证过**（需要人已登录的 x.com 标签页）。下次真机使用时可留意日志里
+    是否出现标签页路径而非直连路径。
+B27. **父级自查：提交信息声称「已记入文档」而实际没写**（本次会话发生一次）：`fca660a` 的
+    提交信息写着「recorded in docs/REVIEW_2026-09.md」，但两处更正当时一条都没落地。
+    与规则 26 同源——**「我说我做了」不是证据，文件里有没有才是**。已补齐（平台表那行、
+    方法注记里的「生造键名」更正、本条目、AGENTS 规则 9 的案例）。
+
+B24. ~~**「清除筛选」按钮不清账号类型筛选**~~ —— **已完成（2026-09-11）**：新增
+    `clearAllDirectoryFilters()`（住在状态旁边，而不是在模板里手写一遍），按钮改为调用它。
+    新增 `tests/creatorDirectoryFilters.test.ts` —— **挂载真实视图、点真实按钮**。
+    第一版只测了 composable，把模板改回手写三筛选的变异**不会失败**（测试看不见真正坏掉的那处）；
+    改为挂载后同一变异立即失败。原始记录：`CreatorsView.vue:594`
+    的空态按钮只重置 `creatorSearch`、`creatorPlatformFilter` 与标签三态，**不重置
+    `creatorRoleFilter`**。而空态判据是 `filteredCreatorsList.length === 0`，后者包含角色筛选
+    ——所以当「账号类型」是唯一把列表清空的原因时，这个按钮点了没有任何反应。修法是一行
+    （把 `creatorRoleFilter = 'all'` 加进那个表达式），但那是行为改动，没有混进 B11 的纯重构提交。
+B25. **`e2e/creators-render.mjs` 的第 20–22 步曾是**非确定性**的（已修）**：它捕获了排序下拉框的
+    动画中间态。同一份构建连跑两次，恰好在且仅在这 3 步上不同——根因是规则 30：**离屏未合成的
+    窗口不产生帧**，而该下拉是 Vue `<Transition>`，其进退场动画永不收敛。已改为捕获前关闭下拉、
+    并用 `aria-expanded` 断言开合状态（`aria-expanded=true` / 选项出现 / Escape 后 `false` /
+    触发标签变为「手动排序」），比原先的截图更强。**影响面**：这 3 步恰是手动排序那几步，
+    所有重构都没碰；其余 19 步（三套模板、筛选、排序、标签、批量）从无抖动，那部分证据仍然成立。
+    同一次还暴露出父级在点击后**同步**读 DOM（读到的是上一帧），`AppSelect` 因此看起来是死的——
+    与规则 30 末段同一条。
+
+B23. **分层总评（逐条验证通过）**：12 个 adapter 零 db import（规则 1 成立）；
+    `infrastructure/db/*` 零 `chrome.*`（规则 2 成立方向）；`douyin/collector.ts` 自包含
+    且是唯一 collector 文件（规则 9 成立）；无 2-节点环；最长依赖链 11 个模块且全程向下。
+    `urlParser.ts` 8 处子串判定判定为「可疑但不违规」——它们丢弃输入 host、在硬编码域名上
+    重建 `cleanUrl`，与抖音的注入决策不同源，见评审文件。
+
+#### 队列 C — 需要用户决定
+
+8. **发布范围**（二.10）：**材料已起草（2026-09-11）** —— 新增 `docs/PUBLISHING.md`
+   （商店清单字段含当前值与改写提案、逐权限理由与代码位置、审查员可自查的三个「不是」、
+   升级与降级说明、抖音/X 能力边界的如实表述）。**仍待用户决定的三件事**写在该文件 §1：
+   是否上架、抖音表述口径、发布范围与版本策略——未确认前不要提交审核。
+   前置事实：抖音路径**没有官方 API 解法**（`DOUYIN_RESEARCH_2026-09.md` 一/二节），
+   上架说明必须如实呈现这一点（已写进 §4.3，含「隐藏作品计入标注数」这条容易被当成故障的事实）。
+9. **P6 整体 UI 风格重设计**：用户明确「当前不排期」。注意与队列 A.3 撞车，先拆后设计。
+10. **Non-goals**（`AGENTS.md` 有专节，不要再提议）：RSS 卡片不显示配图；视频缩略图不加
+    角标/播放图标。
+11. ~~**E2E 门禁要不要也跑在 PR 上**（A.2 的后续，需要用户拍板）。~~ ——
+    **已决定并落地（2026-09-11）**：用户拍板加入。`ci.yml` 的 `verify` job 在 `npm run build`
+    之后增加「Ensure Chrome and Xvfb are available」+「`xvfb-run -a node e2e/release-gate.mjs`」，
+    与 `release.yml` 同一步骤。本机（Windows，同一脚本的 Chrome/CDP 部分）实测 **3.9 s / 16 项**。
+    **首次推送即失败，且三次连续失败**（2026-09-11 的 `feat(sync)`／`docs(publishing)`／
+    `chore(release)` 三个提交）：失败在我自己写的那一步 shell 里——
+    `(command -v google-chrome || command -v google-chrome-stable) --version`，
+    **给子 shell 传参数是非法语法**，bash 报 `syntax error near unexpected token '--version'`，
+    于是 **E2E 门禁根本没跑到**（失败在它前面的准备步骤）。`release.yml` 里是同一行、同一个错误。
+    已修为 `chrome_bin="$(command -v … || true)"` 后判断并执行；用 Git for Windows 的 bash 5.3
+    逐条 `bash -n` 校验两个 workflow 的全部 `run:` 块（旧行在本机复现出完全相同的报错，
+    新行全部通过）。`ci.yml` 另加 `workflow_dispatch`，可 `gh workflow run ci.yml` 手动触发。
+    **教训**：CI 的 Linux 路径不是「本机跑不了所以放着」——它一直在跑，只是**从没跑过我新加的那一步**。
+    代价与取舍（原始记录）：现状：只在打 tag 的
+    `release.yml` 里跑，所以「自动同步开关通知早于落库」这类**只有真实宿主能暴露**的回归，
+    要等到发版才被拦住。放到 `ci.yml`（push/PR）上跑一遍的代价是每个 PR 多起一次
+    Chrome + Xvfb（本机实测整轮 **3.5 s**，CI 上主要是浏览器启动与拉镜像）。
+    取舍：PR 覆盖 vs CI 时长与被浏览器环境波动拖累的风险。想加的话，加在 `ci.yml` 的
+    `verify` job 之后、`xvfb-run -a node e2e/release-gate.mjs`，`.output` 已由该 job 构建。
+
+#### 仍不可验（环境限制，别浪费时间重试）
+
+- **alarm 跨浏览器重启的长期行为**：CDP `loadUnpacked` 加载的扩展不跨重启留存，
+  重启后重新加载等同全新安装，alarm 与 `onInstalled` 时序都被重建而非延续。
+  要验只能在真实安装的扩展上做。
+- **抖音 / Twitter 路径的固有脆弱性**（二.7 / 二.13）：属外部依赖，本地重构无法消除。
+- 二.13 已更正：抖音同步**无**前置条件（不再要求用户先打开创作者主页）。
+
+#### 已知陷阱（本次会话踩过，省你时间）
+
+- 扩展 E2E 必须带 `--enable-unsafe-extension-debugging`，否则 `Extensions.loadUnpacked`
+  报 `Method not available`（规则 28，已按实测改写）。
+- 导入成功路径的 `alert()` **阻塞渲染进程**，连带 `Runtime.evaluate` / `Page.enable` 永久挂起；
+  须在执行动作前启用 Page 域并应答 `Page.javascriptDialogOpening`。
+- 视觉验证只开独立 profile 的专用实例，绝不驱动用户正在浏览的窗口（规则 25）。
+- jsdom 不做布局：几何问题用规则 30 的单文件 HTML 打包在真实排版引擎里量。
+- 脚本化改写必须断言命中数，否则「匹配不到」会产出假绿（规则 26）。
+- 本仓库 `core.autocrlf=true`：签入为 LF，工作区可能是 CRLF，多行锚点会匹配不到。

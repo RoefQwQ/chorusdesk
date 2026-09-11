@@ -176,7 +176,7 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
           <Sparkles class="w-3.5 h-3.5 text-indigo-500 shrink-0" />
           <span>登录说明：</span>
         </div>
-        <p>• <b>大多数平台</b>（B站、Pixiv、Fantia、Withny 等）自动使用浏览器登录状态，在主站登录即可生效。</p>
+        <p>• <b>大多数平台</b>（B站、Pixiv、Fantia 等）自动使用浏览器登录状态，在主站登录即可生效。</p>
         <p>• <b>抗限流同源抓取</b>：X (Twitter) 结合浏览器活跃标签页与同源请求，保障同步稳定性。</p>
         <p>• <b>通用订阅协议</b>：支持标准 RSS 2.0 / Atom 1.0 与 RSSHub 源，订阅博客、Substack 等外部内容。</p>
       </div>

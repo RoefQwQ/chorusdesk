@@ -42,7 +42,6 @@
 | YouTube | youtube.com | 官方公开 RSS 订阅流（免登录） | 最新视频投稿 | 仅最新 |
 | Pixiv | pixiv.net | 复用浏览器 Cookie | 插画、漫画、系列作品（内置防盗链处理） | 支持 |
 | Fantia | fantia.jp | 复用浏览器 Cookie | 俱乐部动态、赞助会员专享附件 | 支持 |
-| Withny | withny.fun | 复用浏览器 Cookie | 图文动态、赞助更新 | 支持 |
 | 小红书 | xiaohongshu.com | 复用浏览器 Cookie | 图文笔记、视频笔记 | 支持 |
 | 微博 | weibo.com | 复用浏览器 Cookie | 原创微博、转发、九宫格长图、视频 | 支持 |
 | 抖音 | douyin.com | 不读取任何凭据（真实页面采集） | 创作者短视频、图文作品 | 支持（需登录，见下方说明） |

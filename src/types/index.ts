@@ -4,7 +4,6 @@ export type Platform =
   | 'twitter'
   | 'pixiv'
   | 'fantia'
-  | 'withny'
   | 'xiaohongshu'
   | 'weibo'
   | 'douyin'
@@ -85,18 +84,6 @@ export const PLATFORM_REGISTRY: Record<string, PlatformMeta> = {
     authType: 'cookie',
     authTypeName: '共享浏览器 Cookie',
     description: '支持创作者粉丝俱乐部最新投稿，共享会员会话可看专属更新。',
-  },
-  withny: {
-    key: 'withny',
-    name: 'Withny',
-    domain: 'withny.fun',
-    color: '#F59E0B',
-    bgColor: 'bg-amber-500',
-    badgeBg: 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800',
-    urlPlaceholder: 'https://withny.fun/users/username',
-    authType: 'cookie',
-    authTypeName: '共享浏览器 Cookie',
-    description: '支持创作者文字与图片发布，继承当前浏览器登录状态。',
   },
   xiaohongshu: {
     key: 'xiaohongshu',

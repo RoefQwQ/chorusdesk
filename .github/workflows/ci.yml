@@ -4,6 +4,10 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Manual trigger. Useful for re-running the extension-host gate without
+  # inventing a commit, and for checking the workflow itself after editing it:
+  # `gh workflow run ci.yml` then `gh run watch`.
+  workflow_dispatch:
 
 jobs:
   verify:
@@ -52,7 +56,13 @@ jobs:
           if ! command -v google-chrome >/dev/null && ! command -v google-chrome-stable >/dev/null; then
             sudo apt-get update && sudo apt-get install -y google-chrome-stable
           fi
-          (command -v google-chrome || command -v google-chrome-stable) --version
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || true)"
+          if [ -z "$chrome_bin" ]; then
+            sudo apt-get update && sudo apt-get install -y google-chrome-stable
+            chrome_bin="$(command -v google-chrome-stable)"
+          fi
+          echo "chrome binary: $chrome_bin"
+          "$chrome_bin" --version
 
       - name: Extension E2E gate
         run: xvfb-run -a node e2e/release-gate.mjs
