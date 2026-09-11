@@ -103,9 +103,26 @@ function updateNumberSetting(key: 'itemsPerFetch' | 'requestDelayMs', value: str
   void props.context.onUpdateSettings({ [key]: Number(value) });
 }
 
-function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Event) {
+/**
+ * Persist the switch, then let the worker reconcile the alarm.
+ *
+ * The order is load-bearing. `setupAutoSync` reads the **stored** setting, so
+ * notifying before the write had committed had the worker read the old value
+ * and take the `enableAutoSync === false` branch — which CLEARS the alarm the
+ * user just switched on, leaving none until the next worker start. Measured in
+ * the real extension host by `e2e/release-gate.mjs` (`alarm.enable-auto-sync`),
+ * 2026-09-11.
+ */
+async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event: Event) {
   const value = (event.target as HTMLInputElement).checked;
-  void props.context.onUpdateSettings({ [key]: value });
+  try {
+    await props.context.onUpdateSettings({ [key]: value });
+  } catch (err) {
+    // A setting that did not land must not drive a reconcile: the worker would
+    // act on the previous value.
+    console.warn('[Chorus] 设置保存失败：', err);
+    return;
+  }
   if (key === 'enableAutoSync') props.context.onNotifyAutoSyncChanged();
 }
 </script>
