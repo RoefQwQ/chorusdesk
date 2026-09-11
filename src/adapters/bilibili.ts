@@ -1,6 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions, FetchError } from './types';
 import { buildPost } from './buildPost';
+import { mapSpaceDynamicItem } from './bilibili/spaceDynamic';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { toSecureMediaUrl } from '../utils/media';
@@ -85,15 +86,15 @@ export const bilibiliAdapter: PlatformAdapter = {
           if (data.offset) nextCursor = String(data.offset);
 
           for (const rawItem of items) {
-            const item = asRecord(rawItem);
-            const modules = asRecord(item.modules);
-            const moduleAuthor = asRecord(modules.module_author);
-            const moduleDynamic = asRecord(modules.module_dynamic);
-
-            if (moduleAuthor.name) authorName = String(moduleAuthor.name);
-            if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(String(moduleAuthor.face));
-
+            const mapped = mapSpaceDynamicItem(rawItem, channel, seenBvids, {
+              onlyOriginal: options?.onlyOriginal,
+              fallbackToNow: true,
+            });
+            const moduleAuthor = asRecord(asRecord(asRecord(rawItem).modules).module_author);
             const pubTime = moduleAuthor.pub_ts ? Number(moduleAuthor.pub_ts) * 1000 : 0;
+
+            if (mapped.authorName) authorName = mapped.authorName;
+            if (mapped.authorAvatar) authorAvatar = mapped.authorAvatar;
 
             // Counted before the watermark / onlyOriginal filters below: the
             // difference between this and `posts.length` is what tells the sync
@@ -101,87 +102,17 @@ export const bilibiliAdapter: PlatformAdapter = {
             // platform returned nothing".
             rawFetched++;
 
-            // WATERMARK CHECK: dynamic feed is newest-first, stop as soon as we hit old content
+            // WATERMARK CHECK: the feed is newest-first, so stop as soon as we hit
+            // old content. This is the caller's loop, not the mapping's business.
             if (sinceTs > 0 && pubTime > 0 && pubTime <= sinceTs) {
               hasMore = false;
               nextCursor = undefined;
               break;
             }
 
-            const isForward = item.type === 'DYNAMIC_TYPE_FORWARD' || Boolean(item.orig);
-            if (options?.onlyOriginal && isForward) continue;
+            if (mapped.filteredAsForward || mapped.duplicate || mapped.skippedForIdentity) continue;
 
-            const major = asRecord(moduleDynamic.major);
-            const archive = asRecord(major.archive);
-            const archiveBvid = typeof archive.bvid === 'string' ? archive.bvid : undefined;
-            if (archiveBvid && seenBvids.has(archiveBvid)) continue;
-            if (archiveBvid) seenBvids.add(archiveBvid);
-
-            const idStr =
-              (typeof item.id_str === 'string' && item.id_str) ||
-              String(asRecord(item.basic).comment_id_str ?? item.id ?? '');
-            if (!archiveBvid && !idStr) continue; // no stable identity — skip rather than fabricate
-            const postId = archiveBvid
-              ? `bilibili_video_${archiveBvid}`
-              : `bilibili_${idStr}`;
-
-            const text =
-              (typeof asRecord(moduleDynamic.desc).text === 'string' && asRecord(moduleDynamic.desc).text) ||
-              (typeof archive.desc === 'string' && archive.desc) ||
-              '';
-            const title = typeof archive.title === 'string' ? archive.title : '';
-
-            const mediaList: Post['mediaList'] = [];
-            if (major.archive) {
-              mediaList.push({
-                type: 'video',
-                previewUrl: String(archive.cover ?? ''),
-                originalUrl: `https://www.bilibili.com/video/${archiveBvid}`,
-              });
-            }
-            const draw = asRecord(major.draw);
-            if (Array.isArray(draw.items)) {
-              for (const rawImg of draw.items) {
-                const img = asRecord(rawImg);
-                const src = typeof img.src === 'string' ? img.src : '';
-                if (src) mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
-              }
-            }
-            // Forward posts: archive/draw media live on the original item, not the forward wrapper.
-            if (isForward && item.orig) {
-              const origMajor = asRecord(asRecord(asRecord(asRecord(item.orig).modules).module_dynamic).major);
-              const origArchive = asRecord(origMajor.archive);
-              const origBvid = typeof origArchive.bvid === 'string' ? origArchive.bvid : '';
-              if (origMajor.archive && origBvid && !mediaList.some((m) => m.type === 'video' && m.originalUrl.endsWith(origBvid))) {
-                mediaList.push({
-                  type: 'video',
-                  previewUrl: String(origArchive.cover ?? ''),
-                  originalUrl: `https://www.bilibili.com/video/${origBvid}`,
-                });
-              }
-              const origDraw = asRecord(origMajor.draw);
-              if (Array.isArray(origDraw.items)) {
-                for (const rawImg of origDraw.items) {
-                  const img = asRecord(rawImg);
-                  const src = typeof img.src === 'string' ? img.src : '';
-                  if (src && !mediaList.some((m) => m.type === 'image' && m.previewUrl === src)) {
-                    mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
-                  }
-                }
-              }
-            }
-
-            allPosts.push(buildPost(channel, {
-              id: postId,
-              title,
-              content: typeof text === 'string' ? (text || title || '（分享动态）') : (title || '（分享动态）'),
-              mediaList,
-              originalUrl: archiveBvid
-                ? `https://www.bilibili.com/video/${archiveBvid}`
-                : `https://t.bilibili.com/${idStr}`,
-              publishedAt: pubTime || Date.now(),
-              isRepost: isForward,
-            }));
+            allPosts.push(mapped.post);
 
             if (allPosts.length >= limit) break;
           }
@@ -324,87 +255,18 @@ export const bilibiliAdapter: PlatformAdapter = {
           if (data.offset) nextCursor = String(data.offset);
 
           for (const rawItem of items) {
-            const item = asRecord(rawItem);
-            const modules = asRecord(item.modules);
-            const moduleAuthor = asRecord(modules.module_author);
-            const moduleDynamic = asRecord(modules.module_dynamic);
+            const mapped = mapSpaceDynamicItem(rawItem, channel, seenBvids, {
+              onlyOriginal: options.onlyOriginal,
+              // The history path never used `Date.now()` as a per-item fallback in
+              // the same way; its ordering comes from the cursor.
+              fallbackToNow: false,
+            });
 
-            if (moduleAuthor.name) authorName = String(moduleAuthor.name);
-            if (moduleAuthor.face) authorAvatar = toSecureMediaUrl(String(moduleAuthor.face));
+            if (mapped.authorName) authorName = mapped.authorName;
+            if (mapped.authorAvatar) authorAvatar = mapped.authorAvatar;
+            if (mapped.filteredAsForward || mapped.duplicate || mapped.skippedForIdentity) continue;
 
-            const isForward = item.type === 'DYNAMIC_TYPE_FORWARD' || Boolean(item.orig);
-            if (options.onlyOriginal && isForward) continue;
-
-            const major = asRecord(moduleDynamic.major);
-            const archive = asRecord(major.archive);
-            const archiveBvid = typeof archive.bvid === 'string' ? archive.bvid : undefined;
-            if (archiveBvid && seenBvids.has(archiveBvid)) continue;
-            if (archiveBvid) seenBvids.add(archiveBvid);
-            const idStr =
-              (typeof item.id_str === 'string' && item.id_str) ||
-              String(asRecord(item.basic).comment_id_str ?? item.id ?? '');
-            if (!archiveBvid && !idStr) continue; // no stable identity — skip rather than fabricate
-            const postId = archiveBvid
-              ? `bilibili_video_${archiveBvid}`
-              : `bilibili_${idStr}`;
-            const pubTime = moduleAuthor.pub_ts ? Number(moduleAuthor.pub_ts) * 1000 : Date.now();
-            const text =
-              (typeof asRecord(moduleDynamic.desc).text === 'string' && asRecord(moduleDynamic.desc).text) ||
-              (typeof archive.desc === 'string' && archive.desc) ||
-              '';
-            const title = typeof archive.title === 'string' ? archive.title : '';
-
-            const mediaList: Post['mediaList'] = [];
-            if (major.archive) {
-              mediaList.push({
-                type: 'video',
-                previewUrl: String(archive.cover ?? ''),
-                originalUrl: `https://www.bilibili.com/video/${archiveBvid}`,
-              });
-            }
-            const draw = asRecord(major.draw);
-            if (Array.isArray(draw.items)) {
-              for (const rawImg of draw.items) {
-                const img = asRecord(rawImg);
-                const src = typeof img.src === 'string' ? img.src : '';
-                if (src) mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
-              }
-            }
-            // Forward posts: archive/draw media live on the original item, not the forward wrapper.
-            if (isForward && item.orig) {
-              const origMajor = asRecord(asRecord(asRecord(asRecord(item.orig).modules).module_dynamic).major);
-              const origArchive = asRecord(origMajor.archive);
-              const origBvid = typeof origArchive.bvid === 'string' ? origArchive.bvid : '';
-              if (origMajor.archive && origBvid && !mediaList.some((m) => m.type === 'video' && m.originalUrl.endsWith(origBvid))) {
-                mediaList.push({
-                  type: 'video',
-                  previewUrl: String(origArchive.cover ?? ''),
-                  originalUrl: `https://www.bilibili.com/video/${origBvid}`,
-                });
-              }
-              const origDraw = asRecord(origMajor.draw);
-              if (Array.isArray(origDraw.items)) {
-                for (const rawImg of origDraw.items) {
-                  const img = asRecord(rawImg);
-                  const src = typeof img.src === 'string' ? img.src : '';
-                  if (src && !mediaList.some((m) => m.type === 'image' && m.previewUrl === src)) {
-                    mediaList.push({ type: 'image', previewUrl: src, originalUrl: src });
-                  }
-                }
-              }
-            }
-
-            allPosts.push(buildPost(channel, {
-              id: postId,
-              title,
-              content: typeof text === 'string' ? (text || title || '（分享动态）') : (title || '（分享动态）'),
-              mediaList,
-              originalUrl: archiveBvid
-                ? `https://www.bilibili.com/video/${archiveBvid}`
-                : `https://t.bilibili.com/${idStr}`,
-              publishedAt: pubTime,
-              isRepost: isForward,
-            }));
+            allPosts.push(mapped.post);
 
             if (allPosts.length >= limit) break;
           }

@@ -774,7 +774,18 @@ B33. **平台评估的三条落地项**（2026-09-12）：
       报成"无内容"。这正是 AGENTS 规则 13 禁止的形状。（对照：medialist **也**失败时会如实报错。）
     - `hasMore` 在水位线提前 `break` 的那条路径上返回 `undefined`（空结果分支不返回该字段）。
       当前良性（水位线只用于无 cursor 的常规同步，`__END__` 只在回溯时写入），已固定以免将来被误改。
-    剩余：把解析段提成纯函数（在用同一份 fixture 保持绿的**前提**下做），xiaohongshu 同法。
+    **解析段提纯已完成（同一提交内，且靠 fixture 证明等价）**：新增
+    `src/adapters/bilibili/spaceDynamic.ts`（142 行，纯函数 `mapSpaceDynamicItem`；
+    无 `chrome.*`、无 db、无时钟），`fetchLatest` 与 `fetchHistory` 两处改为共用它。
+    提纯前实测：两份映射实现里 **18/49 行逐字相同**，且此前零测试覆盖——
+    典型的"改了一份、漏了另一份"形状（回溯路径最容易被漏）。
+    提纯后 `bilibili.ts` 435 → 286 行；其中 `DYNAMIC_TYPE_FORWARD` 判断与 `major.archive`
+    解析**各剩 0 处**（全部收进纯函数），唯一剩余的 `buildPost` 是 medialist 补充路径
+    （不同数据源，不应合并）。
+    **等价性证据**：提纯前后 `tests/bilibili.parse.test.ts` 的 7 例全部保持通过——这就是先建
+    fixture 的意义，否则这次改动是盲改。两处原有差异（`Date.now()` 兜底、水位线提前 break）
+    改为**显式参数**而非隐藏分支。
+    剩余：xiaohongshu 同法（先 fixture，再提纯）。
 B32. **占位名前缀清单与 `urlParser` 系统性脱节**（2026-09-12，B30 的同类问题查全的结果）——
     **部分完成（提交 `c9b97e8`）：缺失的 8 个前缀已补齐，复核 15/16；根治（改为单一来源＋守卫测试）未做**——
     拿 `urlParser` **实际生成**的 16 个 `suggestedName` 前缀，逐个对 channelSync 的两份手写清单判：
