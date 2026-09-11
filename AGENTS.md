@@ -16,6 +16,11 @@ Decisions the user has already made. Re-raising one as a "found issue" or a "sma
 follow-up" wastes their time; if new evidence genuinely contradicts a decision, say so
 once, with the evidence, and wait.
 
+- **A video post needs no badge on its thumbnail.** The footer link already reads
+  「视频动态」 for exactly those posts, so it is the at-rest identifier; an extra icon over
+  the media would repeat it a third time (the hover prompt being the second). Asked and
+  declined 2026-09-11: 「现在右下角本来就有文字标识，为啥还要额外加一个」. Do not propose a
+  play icon, a corner badge, or a duration pill for video thumbnails.
 - **RSS cards do not need images.** Card rendering for RSS is text-first by decision
   (2026-09-11: 「rss不需要这个」). The article *reader* view still renders the article's
   images — that part is in scope and works. Do not add a thumbnail, a count hint, or an
