@@ -4,12 +4,14 @@ import { createApp, nextTick, type App } from 'vue';
 import FeedView from '../entrypoints/dashboard/views/FeedView.vue';
 
 /**
- * The feed's two sidebars, which want different scrollers (2026-09-11):
+ * The feed's two sidebars, which want different scrollers (2026-09-11, revised 2026-09-12):
  *
  * - the **right** creator list wraps around seamlessly and its height is draggable
  *   between 4 and 8 rows;
  * - the **left** platform list only has to scroll — the user's words: 「左侧的不需要
- *   无头滚动，只需要能上下滚动即可」.
+ *   无头滚动，只需要能上下滚动即可」. It got the same drag grip on 2026-09-12
+ *   (「这边也一样做一个跟创作者下方可拉动一样的按钮」): both heights are adjustable, and
+ *   each remembers its own.
  *
  * Asserted against the real `FeedView`, because that is where the two are wired and
  * where they could be swapped or mis-nested. `LoopScroll`'s own behaviour is covered
@@ -17,7 +19,8 @@ import FeedView from '../entrypoints/dashboard/views/FeedView.vue';
  *
  * The distinguishing observations are the ones with real consequences: whether the
  * rows are rendered twice (that duplication *is* the wrap mechanism), and whether a
- * drag grip exists.
+ * drag grip exists — and, now that both have one, that their stored row counts cannot
+ * be each other's.
  */
 
 /** The minimum context surface `FeedView` reads while rendering. */
@@ -152,20 +155,61 @@ describe('feed sidebars — scroller configuration', () => {
     expect(bilibili).toBe(1);
   });
 
-  it('offers the drag grip on the creator list only', async () => {
-    // The left column's height was never adjustable and should stay that way.
+  it('gives both sidebars a drag grip', async () => {
+    // Reported 2026-09-12: 「这边也一样做一个跟创作者下方可拉动一样的按钮」. The left
+    // column's height is adjustable on exactly the same terms as the right one.
     await mountFeed();
-    const grips = host!.querySelectorAll('[role="separator"]');
+    const grips = [...host!.querySelectorAll('[role="separator"]')];
 
-    expect(grips.length).toBe(1);
-    expect(grips[0].closest('aside')!.textContent).toContain('创作者');
+    // Located by which scroller they resize, not by the enclosing aside's text: both
+    // asides mention 「平台」 (every creator row says "N 个平台"), so a text match on the
+    // aside cannot tell them apart.
+    const resizes = (label: string) =>
+      grips.filter((g) => (g.parentElement?.querySelector(`[role="group"][aria-label="${label}"]`) ? true : false));
+
+    expect(grips.length).toBe(2);
+    expect(resizes('创作者列表').length).toBe(1);
+    expect(resizes('平台列表').length).toBe(1);
   });
 
-  it('exposes the 4–8 row range on that grip', async () => {
+  it('keeps the two sidebars row counts independent across a remount', async () => {
+    // A shared storage key would make one column's drag silently resize the other.
+    // The collision is only observable after a remount: within one mount each
+    // `LoopScroll` holds its own ref, and storage is read once at setup. A remount is
+    // also exactly when the user would see it, which is what makes it the honest
+    // place to assert.
     await mountFeed();
-    const grip = host!.querySelector('[role="separator"]') as HTMLElement;
+    const gripFor = (label: string) =>
+      [...host!.querySelectorAll('[role="separator"]')].find((g) =>
+        g.parentElement?.querySelector(`[role="group"][aria-label="${label}"]`),
+      )!;
 
-    expect(grip.getAttribute('aria-valuemin')).toBe('4');
-    expect(grip.getAttribute('aria-valuemax')).toBe('8');
+    // Drive the LEFT column to its minimum; the right column is never touched.
+    const leftGrip = gripFor('平台列表');
+    for (let i = 0; i < 4; i++) {
+      leftGrip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+      await nextTick();
+    }
+    expect(leftGrip.getAttribute('aria-valuenow')).toBe('4');
+
+    // Remount against the same stub storage, as a page reload would.
+    app?.unmount();
+    host?.remove();
+    await mountFeed();
+
+    expect(gripFor('平台列表').getAttribute('aria-valuenow')).toBe('4');
+    // Untouched column must still be at its default. Under a shared key it comes back
+    // at 4, dragged along by the other column's drag.
+    expect(gripFor('创作者列表').getAttribute('aria-valuenow')).toBe('6');
+  });
+
+  it('exposes the 4–8 row range on both grips', async () => {
+    await mountFeed();
+    const grips = [...host!.querySelectorAll('[role="separator"]')] as HTMLElement[];
+
+    for (const grip of grips) {
+      expect(grip.getAttribute('aria-valuemin')).toBe('4');
+      expect(grip.getAttribute('aria-valuemax')).toBe('8');
+    }
   });
 });

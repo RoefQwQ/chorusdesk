@@ -119,12 +119,18 @@ function handleSearchInput(event: Event) {
       <!-- The list is capped and scrolls; it deliberately does NOT loop. The
            left column feeds the tag filter below it, and an uncapped list grew
            without bound as platforms were added, pushing that section down. -->
+      <!-- Resizable on the same terms as the creator list below: same grip, same
+           Arrow/Home/End keys, same persisted row count — a control that appears in
+           one sidebar and not the other reads as an omission rather than a decision. -->
       <LoopScroll
         :loop="false"
         :item-count="orderedPlatformKeys.length + 1"
         :rows="6"
         :min-rows="4"
         :max-rows="8"
+        storage-key="cfh_feed_platform_list_rows"
+        :cap-to-viewport="350"
+        resizable
         aria-label="平台列表"
       >
       <!-- All Platforms Button -->
