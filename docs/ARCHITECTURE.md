@@ -16,7 +16,7 @@
 ## 2. 目录结构与分层
 
 ```text
-creator-feed-hub/
+chorusdesk/
 ├─ entrypoints/                     # 扩展入口（薄）
 │  ├─ background.ts                 # MV3 Service Worker：生命周期 + 薄消息路由
 │  ├─ popup/                        # Popup 入口（App.vue + composables）

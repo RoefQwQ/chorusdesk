@@ -1,4 +1,4 @@
-# AGENTS.md — Chorus / creator-feed-hub
+# AGENTS.md — Chorus / chorusdesk
 
 Binding constraints for anyone (human or agent) editing this repo. Reusable rules only.
 One-off review output lives in `docs/REVIEW_2026-09.md` — do not copy it here.
