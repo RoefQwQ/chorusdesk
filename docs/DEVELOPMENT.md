@@ -210,6 +210,16 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
   - 本机 Chrome 152 起 `--load-extension` 被忽略，不能用它加载未打包扩展；**但 CDP `Extensions.loadUnpacked` 可用**（需 `--enable-unsafe-extension-debugging`），可做扩展级验证；纯排版问题则把组件打包成单文件 HTML 在普通页面中量（见 `AGENTS.md` 规则 28/30）。
 - 性能改动自检：优先既有索引（`[channelId+publishedAt]`、`isBookmarked` 等），不新增全表扫描式展示查询；UI 不重复拉取同一批数据；批量写用 `bulkPut/bulkDelete`；存在性判断用 `primaryKeys()`；内存里复制大数组前先想清楚是否必要。
 - 新测试只为一个真正不确定的边界而写（例如新平台日期解析、水位/去重交互）；不要为了“有测试”而写。断言可观察契约与真实错误，不钉实现细节。
+- **fixture 必须来自真实报文。** 这条不是风格问题，而是规则 15/21 的翻车点：按“解析器当前读什么”手写的 fixture，只证明解析器与自己一致——Twitter 的 `tweet_results` 双层嵌套 bug 就是这样被固化成“期望行为”，并穿过了 typecheck、lint 与全套测试。
+  - 至少要有一份**逐字抓取**的真实载荷（`tests/fixtures/` 下已有 `douyin/`、`rss/` 两个目录，照此放）。
+  - fixture **必须包含修复所依赖的字段**。曾有一次修复之所以长期无法被测试发现，是因为 fixture 里恰好缺了那个字段（media entity 的 `url`），于是测试与实现互相点头、与真实报文无关。
+  - 注释里断言上游行为（“某字段的含义是…”）而没有真实载荷支撑，就是**披着引用外衣的猜测**；要么附上 fixture，要么删掉断言。
+  - 本仓现状：**RSS 是唯一直接用真实报文测 adapter 的平台**，应作为模板；Twitter 的 fixture 是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
+- **有意不补测试的模块要写下来，否则下次会被当成疏漏**：
+  - `youtube.ts`（**111 行**）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
+  - **但同一文件里真正脆弱的一段没有被测试**，这条例外不覆盖它：`@handle → channelId` 的解析是**三个正则依次兜底**（`feeds/videos.xml?channel_id=` / `<link rel=canonical>` / 内联 `"channelId":"UC…"`），跑在 YouTube 页面 HTML 上。三个全 miss 时 `channelId` 保持 `@handle` 原样，接着就用它去请求 RSS —— 之后会怎样**没有实测过，不要替它下结论**（可能是 HTTP 错误而如实报错，也可能是「成功但 0 条」，而后者正是规则 13 要防的那种不可信零）。要补测试就补这三个正则（用手工 HTML——它是页面抓取，天然没有稳定报文），而不是补 RSS 映射。
+  - `withny.ts` 曾在此名单内，**2026-09-12 随平台整体移除**（队列 B30）。
+- **真实缺口（不是有意例外）**：`bilibili.ts`（**435 行**）与 `xiaohongshu.ts`（**390 行**），分支密集、零测试。现状与提纯方案见 `docs/REVIEW_2026-09.md` 的平台可维护性一节；难点在于解析段与网络请求深度交织（item 映射循环套在 `if (res.ok)` 内），提纯属于**有风险的改动**，且这两个文件没有回归网，所以正确顺序是：先抓一份真实载荷做 fixture，再提纯，最后断言同一份 fixture 解析结果不变。
 
 ## 11. 提交规范
 
