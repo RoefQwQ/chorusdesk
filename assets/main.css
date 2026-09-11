@@ -150,6 +150,31 @@
   color: var(--color-slate-500);
 }
 
+/**
+ * Sortable table headers.
+ *
+ * The button fills its `<th>` (see the cell's `p-0`), which is what the W3C
+ * sortable-table pattern asks for: the click target is the whole header cell, not
+ * just the label. Hover and focus have to be visible on the *header*, because the
+ * affordance is the header being clickable at all — a static header gives the
+ * user no reason to try.
+ */
+.sort-header {
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.sort-header:hover {
+  color: var(--color-indigo-600);
+  background-color: var(--color-slate-50);
+}
+.sort-header:focus-visible {
+  outline: 2px solid var(--color-indigo-500);
+  outline-offset: -2px;
+}
+.dark .sort-header:hover {
+  color: var(--color-indigo-400);
+  background-color: var(--color-slate-800);
+}
+
 /* Custom scrollbars for clean UI */
 ::-webkit-scrollbar {
   width: 6px;

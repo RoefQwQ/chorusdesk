@@ -52,6 +52,7 @@ import {
   Users,
   UserRound,
   ChevronDown,
+  ChevronsUpDown,
   LayoutGrid,
   List,
   LayoutList,
@@ -151,15 +152,78 @@ const creatorPlatformFilter = ref('all');
 const creatorTagFilter = ref('all');
 /** 账号类型筛选：'all' | AccountRole。按创作者名下是否存在该类型账号过滤。 */
 const creatorRoleFilter = ref<'all' | AccountRole>('all');
+/**
+ * Sort state: a column key plus a direction.
+ *
+ * `platform` and `manual` are not columns — they are orderings that only the
+ * toolbar dropdown can express — so the union is wider than the sortable headers.
+ * Clicking a header is a shortcut into this same state rather than a second,
+ * parallel notion of "order", which is what keeps the dropdown and the header
+ * indicators from ever disagreeing.
+ *
+ * `dir` exists because a one-way sort cannot answer the obvious question. "作品数"
+ * is useful both as most-posts-first and fewest-first, and "创作者" both A→Z and
+ * Z→A; without a direction the headers could only ever offer one of the two.
+ */
+type CreatorSortKey = 'updated' | 'posts' | 'channels' | 'name' | 'tags' | 'platform' | 'manual';
+
 const creatorSortOptions = [
   { value: 'updated', label: '最近活跃' },
   { value: 'posts', label: '作品数量' },
   { value: 'channels', label: '账号数量' },
   { value: 'name', label: '字母名称' },
+  { value: 'tags', label: '标签' },
   { value: 'platform', label: '按平台分组' },
   { value: 'manual', label: '手动排序' },
 ];
-const creatorSortBy = ref<'updated' | 'channels' | 'posts' | 'name' | 'platform' | 'manual'>('updated');
+const creatorSortBy = ref<CreatorSortKey>('updated');
+const creatorSortDir = ref<'asc' | 'desc'>('desc');
+
+/** The direction a column should default to when first clicked. */
+function defaultSortDir(key: CreatorSortKey): 'asc' | 'desc' {
+  // Text reads naturally A→Z; counts and timestamps are almost always wanted
+  // largest/newest first.
+  return key === 'name' || key === 'tags' ? 'asc' : 'desc';
+}
+
+/**
+ * Header click: sort by that column, or flip the direction if already sorted by
+ * it. Matches the behaviour every data table has, so it needs no learning.
+ */
+function toggleSort(key: CreatorSortKey) {
+  if (creatorSortBy.value === key) {
+    creatorSortDir.value = creatorSortDir.value === 'asc' ? 'desc' : 'asc';
+    return;
+  }
+  creatorSortBy.value = key;
+  creatorSortDir.value = defaultSortDir(key);
+}
+
+/** True when `key` is the active sort column — the header that shows an arrow. */
+function isSortedBy(key: CreatorSortKey): boolean {
+  return creatorSortBy.value === key;
+}
+
+/** `aria-sort` value for a header, per the W3C sortable-table pattern. */
+function ariaSortFor(key: CreatorSortKey): 'ascending' | 'descending' | 'none' {
+  if (!isSortedBy(key)) return 'none';
+  return creatorSortDir.value === 'asc' ? 'ascending' : 'descending';
+}
+
+/**
+ * The toolbar dropdown's binding.
+ *
+ * Bound to the same state the headers write, so the two can never disagree, and
+ * picking a key here also applies that key's natural direction — otherwise
+ * choosing 「字母名称」 after sorting by 作品数 would silently give Z→A.
+ */
+const sortSelection = computed<CreatorSortKey>({
+  get: () => creatorSortBy.value,
+  set: (key) => {
+    creatorSortBy.value = key;
+    creatorSortDir.value = defaultSortDir(key);
+  },
+});
 /** 批量选择模式：开启后每行/卡片显示复选框，工具栏切换为批量操作。 */
 const isBatchMode = ref(false);
 const selectedCreatorIds = ref<Set<string>>(new Set());
@@ -297,12 +361,17 @@ const filteredCreatorsList = computed(() => {
   }
 
   // 5. Sorting
+  const channelCount = (c: Creator) => (creatorChannelMap.value[c.id] || []).length;
+  const postCount = (c: Creator) => context.value.creatorPostCountMap[c.id] || 0;
+  const lastActive = (c: Creator) =>
+    Math.max(c.updatedAt || 0, ...(creatorChannelMap.value[c.id] || []).map((ch) => ch.lastCheckAt || 0));
+
   list.sort((a, b) => {
     if (creatorSortBy.value === 'platform') {
       // Group by the creator's first platform (in user's sidebar order),
       // newest-active within the group.
       const rank = (c: Creator) => {
-        const platforms = (creatorChannelMap.value[c.id] || []).map(ch => ch.platform);
+        const platforms = (creatorChannelMap.value[c.id] || []).map((ch) => ch.platform);
         const order = context.value.platformOrder.length > 0 ? context.value.platformOrder : Object.keys(PLATFORM_REGISTRY);
         let best = order.length;
         for (const p of platforms) {
@@ -313,29 +382,37 @@ const filteredCreatorsList = computed(() => {
       };
       const byRank = rank(a) - rank(b);
       if (byRank !== 0) return byRank;
+      return lastActive(b) - lastActive(a);
     }
     if (creatorSortBy.value === 'manual') {
       // Shared with the persistence layer; must not return NaN when both
       // records lack a sortOrder (the pre-drag state of every creator).
       return compareManualEntries(a, b);
     }
-    if (creatorSortBy.value === 'channels') {
-      const countA = (creatorChannelMap.value[a.id] || []).length;
-      const countB = (creatorChannelMap.value[b.id] || []).length;
-      return countB - countA;
+
+    // Column sorts. Each branch states its comparison in ascending terms and the
+    // direction is applied once, so adding a column cannot forget the arrow.
+    let ascending: number;
+    switch (creatorSortBy.value) {
+      case 'name':
+        ascending = (a.name || '').localeCompare(b.name || '', 'zh');
+        break;
+      case 'tags':
+        ascending = ((a.tags || [])[0] || '').localeCompare((b.tags || [])[0] || '', 'zh');
+        break;
+      case 'channels':
+        ascending = channelCount(a) - channelCount(b);
+        break;
+      case 'posts':
+        ascending = postCount(a) - postCount(b);
+        break;
+      default:
+        ascending = lastActive(a) - lastActive(b);
     }
-    if (creatorSortBy.value === 'posts') {
-      const countA = context.value.creatorPostCountMap[a.id] || 0;
-      const countB = context.value.creatorPostCountMap[b.id] || 0;
-      return countB - countA;
-    }
-    if (creatorSortBy.value === 'name') {
-      return (a.name || '').localeCompare(b.name || '');
-    }
-    // 'updated' / 'platform' (within-group): latest channel lastCheckAt or creator updatedAt
-    const timeA = Math.max(a.updatedAt || 0, ...(creatorChannelMap.value[a.id] || []).map(ch => ch.lastCheckAt || 0));
-    const timeB = Math.max(b.updatedAt || 0, ...(creatorChannelMap.value[b.id] || []).map(ch => ch.lastCheckAt || 0));
-    return timeB - timeA;
+    // A stable tie-break keeps the order deterministic between renders; without
+    // it, rows with equal keys shuffle as the list re-sorts.
+    if (ascending === 0) return (a.name || '').localeCompare(b.name || '', 'zh');
+    return creatorSortDir.value === 'asc' ? ascending : -ascending;
   });
 
   return list;
@@ -606,7 +683,7 @@ function loadDemoData() {
               排序
             </span>
             <AppSelect
-              v-model="creatorSortBy"
+              v-model="sortSelection"
               :options="creatorSortOptions"
               aria-label="创作者排序方式"
               button-class="py-1.5 pr-2 pl-0.5 text-xs bg-transparent dark:bg-transparent border-none hover:border-transparent dark:hover:border-transparent"
@@ -930,14 +1007,68 @@ function loadDemoData() {
                   <CheckSquare class="w-3.5 h-3.5" />
                 </button>
               </th>
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-56 sm:w-64">创作者</th>
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-40">标签</th>
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300">已绑平台账号</th>
-              <!-- One header per cell, so the toggle column has somewhere to
-                   belong. A column with no heading reads as an accident. -->
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-28">明细</th>
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-24 text-center">作品数</th>
-              <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-32">同步状态</th>
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-56 sm:w-64" :aria-sort="ariaSortFor('name')">
+                <button
+                  type="button"
+                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
+                  title="按创作者名称排序"
+                  @click="toggleSort('name')"
+                >
+                  <span>创作者</span>
+                  <ChevronDown v-if="isSortedBy('name')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
+                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
+                </button>
+              </th>
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-40" :aria-sort="ariaSortFor('tags')">
+                <button
+                  type="button"
+                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
+                  title="按标签排序"
+                  @click="toggleSort('tags')"
+                >
+                  <span>标签</span>
+                  <ChevronDown v-if="isSortedBy('tags')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
+                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
+                </button>
+              </th>
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300" :aria-sort="ariaSortFor('channels')">
+                <button
+                  type="button"
+                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
+                  title="按已绑定账号数量排序"
+                  @click="toggleSort('channels')"
+                >
+                  <span>已绑平台账号</span>
+                  <ChevronDown v-if="isSortedBy('channels')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
+                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
+                </button>
+              </th>
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-24" :aria-sort="ariaSortFor('posts')">
+                <button
+                  type="button"
+                  class="sort-header w-full py-2.5 px-3 flex items-center justify-center gap-1 cursor-pointer"
+                  title="按作品数量排序"
+                  @click="toggleSort('posts')"
+                >
+                  <span>作品数</span>
+                  <ChevronDown v-if="isSortedBy('posts')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
+                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
+                </button>
+              </th>
+              <th class="p-0 font-semibold text-slate-700 dark:text-slate-300 w-32" :aria-sort="ariaSortFor('updated')">
+                <button
+                  type="button"
+                  class="sort-header w-full py-2.5 px-3 flex items-center gap-1 cursor-pointer text-left"
+                  title="按最近同步时间排序"
+                  @click="toggleSort('updated')"
+                >
+                  <span>同步状态</span>
+                  <ChevronDown v-if="isSortedBy('updated')" class="w-3 h-3 shrink-0" :class="creatorSortDir === 'asc' ? 'rotate-180' : ''" aria-hidden="true" />
+                  <ChevronsUpDown v-else class="w-3 h-3 shrink-0 opacity-40" aria-hidden="true" />
+                </button>
+              </th>
+              <!-- Not sortable, so no button and no aria-sort: it holds row actions,
+                   not data. -->
               <th class="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 w-36 text-right">操作</th>
             </tr>
           </thead>
@@ -964,9 +1095,28 @@ function loadDemoData() {
                   </button>
                 </td>
 
-                <!-- Creator Avatar, Name & Tags -->
+                <!-- Creator: expander, avatar, name.
+                     The expander is a leading chevron because that is where the
+                     pattern puts a row-level disclosure control — first thing in
+                     a left-to-right scan, and its x stays put regardless of how
+                     many platform badges the row has. It previously sat after the
+                     badges, which made its position depend on that row's content. -->
                 <td class="py-2.5 px-3">
-                  <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      class="shrink-0 p-0.5 -ml-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                      :aria-expanded="expandedCreatorIds.has(c.id)"
+                      :title="expandedCreatorIds.has(c.id) ? '收起已绑定账号' : '展开已绑定账号'"
+                      @click="toggleExpandCreator(c.id)"
+                    >
+                      <ChevronDown
+                        class="w-3.5 h-3.5 transition-transform duration-200"
+                        :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }"
+                        aria-hidden="true"
+                      />
+                    </button>
+
                     <div
                       class="relative w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer shadow-2xs"
                       @click="openAvatarPicker(c)"
@@ -988,8 +1138,7 @@ function loadDemoData() {
                   </div>
                 </td>
 
-                <!-- Tags (dedicated column: keeps the creator cell tidy and
-                     the platform-accounts cell's toggle vertically aligned) -->
+                <!-- Tags -->
                 <td class="py-2.5 px-3">
                   <div class="flex items-center gap-1 flex-wrap">
                     <span
@@ -1012,26 +1161,6 @@ function loadDemoData() {
                       <PlatformBadge :platform="platform as string" :count="chs.length" />
                     </template>
                   </div>
-                </td>
-
-                <!-- Expander toggle — its own cell, deliberately.
-                     It used to live after the badges inside that cell, so its
-                     horizontal position depended on how many platforms the
-                     creator has: a four-platform row pushed it right, a
-                     one-platform row left it against the badges, and the edge
-                     came out ragged. Two earlier attempts only changed the
-                     alignment *within* that cell, which cannot fix a position
-                     that varies with the preceding content. In its own cell
-                     every row's toggle occupies the same column. -->
-                <td class="py-2.5 px-3">
-                  <button
-                    @click="toggleExpandCreator(c.id)"
-                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-400 border border-slate-200/70 dark:border-slate-700/70 transition-colors cursor-pointer shrink-0"
-                  >
-                    <span>{{ expandedCreatorIds.has(c.id) ? '收起明细' : '查看全部' }}</span>
-                    <span class="text-[10px] text-slate-400 font-mono">({{ context.channels.filter(ch => ch.creatorId === c.id).length }})</span>
-                    <ChevronDown class="w-3 h-3 text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': expandedCreatorIds.has(c.id) }" />
-                  </button>
                 </td>
 
                 <!-- Post Count -->
@@ -1113,7 +1242,7 @@ function loadDemoData() {
 
               <!-- Nested Table Row if Expanded -->
               <tr v-if="expandedCreatorIds.has(c.id)" class="bg-slate-50/50 dark:bg-slate-800/40">
-                <td :colspan="isBatchMode ? 8 : 7" class="p-3">
+                <td :colspan="isBatchMode ? 7 : 6" class="p-3">
                   <div class="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
                     <div class="flex items-center justify-between text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
                       <span class="font-bold text-slate-700 dark:text-slate-200">【{{ c.name }}】全部已绑定平台账号</span>
