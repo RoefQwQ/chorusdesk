@@ -217,7 +217,12 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
   - 本仓现状：**RSS 是唯一直接用真实报文测 adapter 的平台**，应作为模板；Twitter 的 fixture 是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
 - **有意不补测试的模块要写下来，否则下次会被当成疏漏**：
   - `youtube.ts`（**111 行**）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
-  - **但同一文件里真正脆弱的一段没有被测试**，这条例外不覆盖它：`@handle → channelId` 的解析是**三个正则依次兜底**（`feeds/videos.xml?channel_id=` / `<link rel=canonical>` / 内联 `"channelId":"UC…"`），跑在 YouTube 页面 HTML 上。三个全 miss 时 `channelId` 保持 `@handle` 原样，接着就用它去请求 RSS —— 之后会怎样**没有实测过，不要替它下结论**（可能是 HTTP 错误而如实报错，也可能是「成功但 0 条」，而后者正是规则 13 要防的那种不可信零）。要补测试就补这三个正则（用手工 HTML——它是页面抓取，天然没有稳定报文），而不是补 RSS 映射。
+  - **但同一文件里真正脆弱的一段没有被测试**，这条例外不覆盖它：`@handle → channelId` 的解析是**三个正则依次兜底**（`feeds/videos.xml?channel_id=` / `<link rel=canonical>` / 内联 `"channelId":"UC…"`），跑在 YouTube 页面 HTML 上。三个全 miss 时 `channelId` 保持 `@handle` 原样，接着就用它去请求 RSS。
+**2026-09-12 已实测，结论是好的那一种**：`feeds/videos.xml?channel_id=@nonexistent_handle_zzz`
+返回 **HTTP 404**（`UCabcdefghijklmnopqrstuv` 同样 404），所以适配器抛出并返回 `network` 错误——
+**不会**变成「成功但 0 条」那种不可信的零（规则 13 合规）。
+`tests/youtube.handle.test.ts`（5 例，jsdom，因为适配器用 `DOMParser`）逐条钉住三个正则分支＋这条 404 行为，
+并记录了一个实测细节：`og:title` 优先于 `<title>`，且**只有** `<title>` 分支会剥掉「 - YouTube」后缀。
   - `withny.ts` 曾在此名单内，**2026-09-12 随平台整体移除**（队列 B30）。
 - **真实缺口（不是有意例外）**：`bilibili.ts`（**435 行**）与 `xiaohongshu.ts`（**390 行**），分支密集、零测试。现状与提纯方案见 `docs/REVIEW_2026-09.md` 的平台可维护性一节；难点在于解析段与网络请求深度交织（item 映射循环套在 `if (res.ok)` 内），提纯属于**有风险的改动**，且这两个文件没有回归网，所以正确顺序是：先抓一份真实载荷做 fixture，再提纯，最后断言同一份 fixture 解析结果不变。
 
