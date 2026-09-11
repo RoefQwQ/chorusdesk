@@ -39,18 +39,24 @@ Chorus 是一款本地运行的开源浏览器扩展，不设云端服务器，�
 
 ```text
 浏览器本地存储
-├─ IndexedDB (Dexie)
+├─ IndexedDB (Dexie)，库名 CreatorFeedHubDB
 │   ├─ creators: 创作者名片、主头像、自定义标签
 │   ├─ channels: 绑定的平台账号、角色与同步状态
-│   ├─ posts: 动态缓存、媒体链接、发布时间
-│   ├─ tombstones: 已删除动态的索引（用于防止重复拉出）
-│   └─ stats: 同步时间统计
-├─ chrome.storage.local
-│   └─ settings: 界面主题、同步间隔等配置
+│   ├─ posts: 动态缓存、媒体链接、发布时间、已读与收藏（以 0|1 存储）
+│   ├─ settings: 界面主题、同步间隔等配置（键 app_settings）
+│   └─ deletedPostIds: 已删除动态的墓碑（含完整快照，用于回收站还原）
+├─ IndexedDB，库名 FeedHubFSCache（与业务库分开）
+│   └─ handles: 本地图片缓存目录的句柄
+├─ localStorage（仅 dashboard 页面）
+│   ├─ creator_feed_theme: 明暗主题
+│   └─ creator_feed_hidden_creators / creator_feed_hidden_platforms: 隐藏偏好
 ├─ chrome.storage.session（仅内存，关闭浏览器即清空）
 │   └─ 开发者日志：最多 150 条运行记录，不写入磁盘、不参与备份导出
 └─ 本地文件系统 (可选)
     └─ FileSystem Access API: 本地离线保存的图片文件
 ```
+
+> 没有独立的统计表：`getDatabaseStats()` 在调用时按需统计各表行数。
+> 业务数据只存在于上表列出的位置；`chrome.storage.local` 已不再存放设置。
 
 项目代码完全开源，可以在仓库中直接查看所有网络请求与存储逻辑。

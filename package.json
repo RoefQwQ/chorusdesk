@@ -3,6 +3,24 @@
   "version": "1.0.0",
   "private": true,
   "license": "CC-BY-NC-SA-4.0",
+  "description": "Chorus —— 本地优先的多平台创作者动态聚合浏览器扩展（WXT + Vue 3 + MV3）",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RoefQwQ/chorusdesk.git"
+  },
+  "homepage": "https://github.com/RoefQwQ/chorusdesk#readme",
+  "bugs": {
+    "url": "https://github.com/RoefQwQ/chorusdesk/issues"
+  },
+  "keywords": [
+    "browser-extension",
+    "manifest-v3",
+    "wxt",
+    "vue3",
+    "dexie",
+    "rss",
+    "aggregator"
+  ],
   "type": "module",
   "scripts": {
     "dev": "wxt",

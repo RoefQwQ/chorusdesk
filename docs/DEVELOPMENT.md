@@ -36,7 +36,7 @@
  → Composable（UI 状态与动作，经 actions 注入避免反向依赖）
  → Vue 组件（components/ → 目标 views/）
  → 入口接线（entrypoints/*/main.ts、App.vue 模板、background.ts 路由）
- → 验证（§9）与提交（§10）
+ → 验证（§10）与提交（§11）
 ```
 
 样例要点（以“在 Dashboard 增加按 XX 过滤”为例）：
@@ -50,7 +50,7 @@
 1. 在 `src/adapters/` 新建 `<platform>.ts`，实现 `PlatformAdapter` 契约（`src/adapters/types.ts`）：
    - 必实现 `fetchLatest(channel, limit, options)` → 归一化 `FetchResult`（`posts[]`、`authorMeta?`、`nextCursor?`、`hasMore?`、`error?`、`totalFetched?`）。
    - 需要历史翻页 → `fetchHistory?`；需要第二请求通道 → `fetchAjaxFallback?`；需要页内 GraphQL/JSON 归一化 → `parseGraphQLResult?`；需要登录探测 → `checkAuthStatus?`（返回 `{ loggedIn, username? }`）。
-2. 请求统一走 `src/utils/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §7.2 处理。
+2. 请求统一走 `src/utils/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
 3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base64(guid) 32位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。
 4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册；不要改 `getAdapter` 的 rss 回退语义。
 5. 在 `src/types/index.ts` 增加 `Platform` 字面量、`PLATFORM_REGISTRY` 元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
@@ -111,7 +111,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 6. 每拆完一步立即 `npm run build` + 手动回归对应 Tab；commit 粒度按“一个边界一次提交”。
 7. 迁移收尾（独立提交）：全部调用方切到真实实现后，再删除 `src/adapters/index.ts` 与 `src/db/index.ts` 中的兼容 re-export（或降级为仅类型导出）。
 
-## 7. 增量功能交付模板
+## 6. 增量功能交付模板
 
 每个功能使用独立变更说明，禁止只写“完成重构”这类不可验收描述：
 
@@ -138,7 +138,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 4. 验证是否覆盖了实际用户可观察行为，而不仅是类型检查？本轮已完成构建、类型与纯函数冒烟；真实扩展点击回归因用户明确禁止操作当前浏览器而保留为未覆盖项。
 5. 文档是否准确描述“已完成”与“迁移中”的边界？
 
-## 8. 变更记录格式
+## 7. 变更记录格式
 
 ```text
 日期：YYYY-MM-DD
@@ -148,20 +148,20 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 验证：实际执行的命令和结果
 风险：未覆盖的运行时平台或权限场景
 ```
-## 9. 平台请求与图片
+## 8. 平台请求与图片
 
-### 9.1 请求纪律
+### 8.1 请求纪律
 - 一切跨域走 `bgFetch()`；扩展环境不要直连 `fetch`（页面 CORS / 受限头会失败）。
 - `fetch` 无法手工设置 `Cookie`/`User-Agent`/`Referer`/`Origin` 等受限头：B 站登录靠 `credentials:'include'` + host_permissions 自动带 Cookie；UA 用浏览器自己的。不要把 UA/Referer 塞进 BG_FETCH headers 期望生效。
-- 遵守平台节流：adapter 不做无界循环；批量/深挖的间隔由 sync 层保证（§9.3 表）。
+- 遵守平台节流：adapter 不做无界循环；批量/深挖的间隔由 sync 层保证（§8.3 表）。
 
-### 9.2 图片三件套
+### 8.2 图片三件套
 - 入库前：`toSecureMediaUrl()` 归一化（协议补全、小红书 avatar → `sns-avatar-qc.xhscdn.com`、XHS 永久 fileId 直链等已在 `utils/media.ts` 处理，改动先读该文件与 `postRepository.healBrokenPostMedia`）。
 - 渲染失败：先 `markImageFailed`，再 `proxyImage()`（`PROXY_IMAGE` 消息、候选 URL 列表、data URL）；不要在组件里重复实现 base64 转换（`handleProxyImage` 已有，含 8192 分块避免栈溢出）。
 - 离线缓存：`src/services/imageCache/`（File System Access）。写盘只在用户绑定目录后；目录选择必须由用户手势触发；路径分段由 `resolvePostDirSegments` 决定（`[创作者名, 平台中文名, YYYYMMDD_短id]`），文件名经 `sanitizePathSegment` 净化。
 - DNR 规则 id 空间：1001–1006 已占用，新规则从 1007 起；`removeRuleIds` 列表与 `addRules` 必须同步更新，保持幂等。
 
-### 9.3 同步保护速查（改动冷却/间隔前先看）
+### 8.3 同步保护速查（改动冷却/间隔前先看）
 
 | 语义 | 现值 | 位置 |
 |---|---|---|
@@ -177,7 +177,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 
 调小即提高风控风险：**只允许在明确产品决策下改动，并更新本表。**
 
-## 10. 安全与隐私红线
+## 9. 安全与隐私红线
 
 - 扩展申请了 `cookies/tabs/scripting/activeTab` 与大量 host permissions；新增平台/域必须先问“是否最小必要”，host permission 只加实际请求与 `<img>` 直连的域。
 - 不要在源码、备份 JSON、日志中夹带用户 Cookie/Token/密钥。x.com guest bearer token 是公开常量（已内联在 `twitterTimeline.ts`），不要把它误当密钥挪进配置。
@@ -186,7 +186,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 外部数据（平台 HTML/JSON、备份文件、消息载荷）一律当作 `unknown`/不可信输入：解析用可选链 + 类型收窄 + try/catch，禁止把响应直接当强类型用；新边界不用 `any`。
 - 删除类操作必须二次确认；清理动态不得触碰 `isBookmarked`（`cleanupOldPosts` 语义）；恢复操作前如有同名 id 用 put/bulkPut 覆盖语义而非报错。
 
-## 11. 验证规范
+## 10. 验证规范
 
 - 构建/类型/Lint：`npm run build`、`npm run typecheck` 与 `npm run lint` 必须通过（CI 三件套 + lint）。类型检查用原生 TS7 编译器（`@typescript/native` 别名），ESLint 工具链经 `typescript: npm:@typescript/typescript6` 官方兼容别名消费经典 API（见 `eslint.config.js` 头注释）。
 - 加载方式：`chrome://extensions/` 开发者模式加载 `.output/chrome-mv3/`，代码更新后重新构建并点“重新加载”；扩展页不更新先怀疑旧产物。
@@ -202,10 +202,14 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
   - 图片直连/代理回退/失败占位/本地磁盘缓存绑定与批量缓存；
   - 自动同步开关与未读角标。
 - 无法运行扩展的场景：用**一次性脚本**做单元冒烟（例如非扩展环境 `bgFetch` 的直连兜底、纯函数如 `parseProfileUrl`/`toSecureMediaUrl`/`interleaveChannelsByPlatform`），跑完即删，不留在仓库当测试。
+- 需要**真实浏览器**才能回答的行为（页面渲染、排版、滚动、真实平台报文），用 `e2e/` 下的 CDP 探针脚本，详见 [e2e/README.md](../e2e/README.md)：
+  - 必须指向**独立 profile** 的调试端口，绝不接管用户日常浏览的实例；
+  - 探针只读，不点击、不提交、不修改扩展数据；
+  - 本机 Chrome 152 起 `--load-extension` 被忽略，无法用命令行加载未打包扩展，需改为把组件打包成单文件 HTML 在普通页面中验证（见 `AGENTS.md` 规则 28/30）。
 - 性能改动自检：优先既有索引（`[channelId+publishedAt]`、`isBookmarked` 等），不新增全表扫描式展示查询；UI 不重复拉取同一批数据；批量写用 `bulkPut/bulkDelete`；存在性判断用 `primaryKeys()`；内存里复制大数组前先想清楚是否必要。
 - 新测试只为一个真正不确定的边界而写（例如新平台日期解析、水位/去重交互）；不要为了“有测试”而写。断言可观察契约与真实错误，不钉实现细节。
 
-## 10. 提交规范
+## 11. 提交规范
 
 提交前逐项确认：
 

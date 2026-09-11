@@ -146,8 +146,13 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
 `types → adapters/platform → infrastructure/db + sync → application → entrypoints (UI)`
 
 - Adapters MUST NOT import the db. Repositories MUST NOT import `chrome.*`.
-- The `application/` facade layer is currently **half-adopted** (#10). Until that is resolved, do
-  not add new direct `infrastructure/db` imports from UI code.
+- **The `application/` facade covers the writes, not everything.** Creator / channel / post /
+  backup go through `src/application` (`creatorService`, `channelService`, `postService`,
+  `backupService`). What still imports `src/infrastructure/db/*` directly from UI is the bare
+  `db` handle, `settingsRepository`, `statsService` and media maintenance (`healBrokenPostMedia`,
+  `cleanupOldPosts`) — 9 call sites as of 2026-09-11. Fix queue #10 resolved the *facade*, so do
+  not restate it as unfinished; equally, do not treat the remaining direct imports as
+  sanctioned. Prefer adding a service method over a new direct repository import.
 - New platform = new file in `src/adapters/` implementing `PlatformAdapter`; register in
   `src/platform/registry.ts`. See `docs/REVIEW_2026-09.md` for the full 6-8 touch-point list.
 

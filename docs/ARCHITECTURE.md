@@ -6,12 +6,12 @@
 ## 1. 总览
 
 - 形态：Chromium 扩展（Manifest V3），基于 [WXT](https://wxt.dev)（`wxt ^0.21.4`）+ Vue 3（`vue ^3.5.42`）+ Tailwind CSS 4 + Dexie（`dexie ^4.4.5`）。
-- 定位：本地优先的多平台创作者动态聚合。无自建后端，业务数据落在浏览器 IndexedDB，设置/会话凭证落在 `chrome.storage.local`。
+- 定位：本地优先的多平台创作者动态聚合。无自建后端，业务数据落在浏览器 IndexedDB，设置与业务数据同库（Dexie 的 `settings` 表，键 `app_settings`）；`chrome.storage.local` 仅用于清理已卸载平台的遗留键。
 - 构建入口：`entrypoints/`（WXT 约定）；产物目录 `.output/chrome-mv3/`。
 - 开发/构建命令见 `package.json`：`npm run dev` / `npm run build` / `npm run zip`。
 - 权限（`wxt.config.ts`）：`storage`、`cookies`、`activeTab`、`tabs`、`scripting`、`declarativeNetRequest`、`alarms`，外加各平台域与 CDN 的 `host_permissions`。
 
-当前正处于“兼容式重构”过程：职责向 `src/sync`、`src/platform`、`src/infrastructure/*` 迁移，`src/db`、`src/adapters` 保留为兼容导出桶。**重构尚未结束**，具体边界见 §9“已知迁移边界”。
+当前正处于“兼容式重构”过程：职责向 `src/sync`、`src/platform`、`src/infrastructure/*` 迁移，`src/db`、`src/adapters` 仅剩无人引用的兼容导出桶（已确认零调用方，见 §9.4）。**重构尚未结束**，具体边界见 §9“已知迁移边界”。
 
 ## 2. 目录结构与分层
 
@@ -42,7 +42,7 @@ creator-feed-hub/
 │  ├─ db/index.ts                   # 兼容桶：re-export infrastructure/db
 │  ├─ infrastructure/
 │  │  ├─ db/                        # Dexie 数据库 + 仓储（真实实现）
-│  │  │  ├─ database.ts             # FeedDatabase + 版本 1-3 schema
+│  │  │  ├─ database.ts             # FeedDatabase + 版本 1-5 schema
 │  │  │  ├─ settingsRepository.ts   # DEFAULT_SETTINGS / getSettings / saveSettings
 │  │  │  ├─ statsService.ts         # getDatabaseStats
 │  │  │  └─ postRepository.ts       # 动态生命周期：删除/回收站/清理/媒体自愈
@@ -84,7 +84,7 @@ creator-feed-hub/
 
 **当前物理依赖与目标态的差异**（Dashboard 数据/回收站组合层已完成第一阶段收敛）：
 - Dashboard 与 Popup 的数据库、同步导入已直接依赖 `src/infrastructure/db/*`、`src/sync/*`；其余 UI 业务仍在 App.vue 内联。
-- `src/adapters/index.ts` 与 `src/db/index.ts` 仍作为外部兼容桶，不能删除；内部真实模块不应反向依赖它们。
+- `src/adapters/index.ts` 与 `src/db/index.ts` 已无任何调用方（全仓 grep 为零），属可删除的遗留重导出；内部真实模块本就不应依赖它们。
 - `src/infrastructure/chrome/autoSync.ts` 已直接依赖 `../db/*` 与 `../../sync/channelSync`。
 - 新代码（以及后续清理）应直接依赖真实实现：`src/sync/*`、`src/platform/registry.ts`、`src/infrastructure/db/*`；不要在兼容桶里新增业务逻辑。
 ## 2.1 本轮重构验收记录
@@ -121,7 +121,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 - `main.ts` 挂载 `App.vue`；`index.html` 含 `<meta name="referrer" content="no-referrer">`。
 - `App.vue` 负责顶部导航、跨页面状态组合、全局弹窗与仍未下沉的应用动作。
 - `views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均为真实页面承载组件，通过显式 context 与 emits 接收数据、上抛动作；原四个大模板区块已从 App.vue 删除。
-- 已抽离部件：`composables/useDarkMode.ts`、`useDeletedPosts.ts`、`useDashboardData.ts`，以及 `components/PostCard.vue`、`MediaLightbox.vue`、`ImageCacheSettings.vue`。
+- 已抽离部件：`composables/useDarkMode.ts`、`useDeletedPosts.ts`、`useDashboardData.ts`，以及 `components/PostCard.vue`、`MediaLightbox.vue`、`ImageCacheSettings.vue` 等；`composables/` 现有 14 个（按功能分组，不再逐一列举）。
 - 当前未完成：App.vue 仍直接协调部分数据库/同步、Chrome Storage、备份导入导出和全局弹窗；真实 Chromium 点击回归仍需执行。不得据此宣称入口层已完全变薄。
 
 ## 4. 核心模块边界
@@ -191,7 +191,7 @@ export interface PlatformAdapter {
 }
 ```
 
-`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。`src/platform/index.ts` 仅为 re-export 兼容层。
+`src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 10 个平台 adapter；`getAdapter(platform)` 找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）；`registerAdapter(key, adapter)` 供运行时注册。`src/platform/index.ts` 仅为 re-export 兼容层。
 
 各平台能力现状（`fetchLatest` 为必实现）：
 
@@ -391,7 +391,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 
 | 存储 | 键 | 用途 | 读写方 |
 |---|---|---|---|
-| IndexedDB | 库 `CreatorFeedHubDB`（5 表） | 业务数据 | `src/infrastructure/db/*` |
+| IndexedDB | 库 `CreatorFeedHubDB`（5 表：`creators`/`channels`/`posts`/`settings`/`deletedPostIds`） | 业务数据 | `src/infrastructure/db/*` |
 | IndexedDB | 库 `FeedHubFSCache`，store `handles`，key `root_cache_dir` | 图片缓存根目录句柄 | `src/services/imageCache/fsManager.ts` |
 | `chrome.storage.session` | `devLog.entries` / `devLog.verbose` | 开发者日志环形缓冲（150 条）与详细模式开关 | `src/utils/devLog.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_theme` | 明暗主题 | `useDarkMode.ts` |
@@ -423,7 +423,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 
 ## 8. 数据库兼容策略（原则）
 
-1. 库名固定 `CreatorFeedHubDB`；**不得删除或重排已有 version 1–3**；schema 变更只能追加新 version，且新 version 需声明**全部** store 的完整索引（Dexie 语义）。
+1. 库名固定 `CreatorFeedHubDB`；**不得删除或重排已有 version 1–5**；schema 变更只能追加新 version，且新 version 需声明**全部** store 的完整索引（Dexie 语义）。
 2. 新字段必须对旧数据有默认兜底（读取端 `getSettings` 已示范 `{ ...DEFAULT_SETTINGS, ...item.value }` 合并模式）。
 3. 导入旧 JSON 必须容忍缺字段（现有导入为逐表 `bulkPut`，缺字段行保留旧行默认值）。
 4. `Post.id`/`Channel.id` 生成规则不可随意改变（收藏、已读、墓碑、去重全部依赖 id）。
@@ -434,10 +434,10 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 
 **Dashboard 渐进拆分尚未完成，以下内容务必如实描述，勿按 README 的理想分层推断“已完成 View 重构”：**
 
-1. Dashboard 已完成四个真实页面 View 接入：`views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均由 `App.vue` 通过 context/emits 接线；`components/DashboardSection.vue` 仍是未使用的通用容器脚手架。
+1. Dashboard 已完成四个真实页面 View 接入：`views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均由 `App.vue` 通过 context/emits 接线；`components/DashboardSection.vue` 零引用（确认未使用），是可删除的遗留脚手架。
 2. 已抽离且正在被 App.vue 使用：`composables/useDarkMode.ts`、`composables/useDeletedPosts.ts`、`composables/useDashboardData.ts`，以及 `components/PostCard.vue`、`components/MediaLightbox.vue`、`components/ImageCacheSettings.vue`。
 3. App.vue 仍保留部分跨页面应用动作、全局弹窗、Chrome Storage 与数据库协调；这属于后续入口收敛边界，不代表 View 是空壳或重复实现。
-4. 兼容桶仍在被部分生产代码使用；新模块直接依赖真实模块，兼容桶保留用于旧调用方迁移。
+4. `src/adapters/index.ts` 与 `src/db/index.ts` **零引用**（曾作为迁移期兼容桶，迁移已结束）；新代码直接依赖真实模块，这两个文件可直接删除。
 5. 消息 `OPEN_DASHBOARD` 保留 handler 但仓库内无发送方（Popup 直接开标签页）；删除/改造需先决定是否统一走消息。
 6. `Popup/App.vue` 仍为单体（composables 已抽离 `usePageDetection`/`useQuickFollow`/`usePopupNavigation`）；Popup 尚无 `views/` 拆分计划落地。
 7. 自动同步为串行单频道执行（无交错/无进度回传 UI），与 Dashboard 手动“全部刷新”的交错路径是两套实现；如需统一属功能变更，不在本次文档范围内。

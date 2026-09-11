@@ -83,7 +83,8 @@ Chorus 直接复用浏览器对应平台的已登录会话（Cookie / LocalStora
 
 - manifest 的 `host_permissions` 由该清单**派生生成**（`wxt.config.ts` 调用
   `platformHostMatchPatterns()`），不再手写第二份列表；
-- 图片代理的域名白名单、凭据策略与 Referer 选择同样读取该清单；
+- 凭据策略与 Referer 选择同样读取该清单，调用点在两处：`messages/bgFetch.ts` 与
+  `messages/proxyImage.ts` 各自的 `isPlatformHost()` / `resolveMediaReferer()`；
 - 匹配一律基于解析后的 hostname（精确或合法子域），从不使用字符串包含判断。
 
 新增一个平台只需修改 `PLATFORM_HOSTS`，权限、凭据与代理三处会自动一致；有一条测试

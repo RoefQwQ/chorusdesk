@@ -28,6 +28,9 @@ node_modules/
 *credentials*.json
 *secrets*.json
 
+# Agent/tool state (worktrees, local agent config)
+.claude/
+
 # OS/editor files
 .DS_Store
 Thumbs.db
