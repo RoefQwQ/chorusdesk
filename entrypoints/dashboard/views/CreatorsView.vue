@@ -27,40 +27,35 @@ export interface CreatorsViewContext {
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
   PLATFORM_REGISTRY,
-  ACCOUNT_ROLE_ORDER,
-  ACCOUNT_ROLE_SHORT_LABELS,
   type AccountRole,
   type Platform,
   type Creator,
   type Channel,
 } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
-import { compareManualEntries } from '../../../src/utils/order';
 import {
   RefreshCw,
   Plus,
   CheckSquare,
   Search,
-  X,
-  ArrowUpDown,
-  Filter,
-  Tag,
   Square,
   Edit3,
   History,
   Trash2,
   AlertCircle,
   Users,
-  UserRound,
   ChevronDown,
   ChevronsUpDown,
-  LayoutGrid,
-  List,
-  LayoutList,
 } from 'lucide-vue-next';
-import AppSelect, { type AppSelectOption } from '../components/AppSelect.vue';
 import ChannelRow from '../components/creator/ChannelRow.vue';
 import CreatorCardHeader from '../components/creator/CreatorCardHeader.vue';
+import CreatorDirectoryToolbar, {
+  type CreatorDirectoryToolbarContext,
+} from '../components/creator/CreatorDirectoryToolbar.vue';
+import {
+  useCreatorDirectoryFilters,
+  type CreatorSortKey,
+} from '../composables/useCreatorDirectoryFilters';
 // Both of these were used in the template without being imported, so they
 // resolved to nothing and every 已绑平台账号 cell silently rendered EMPTY in all
 // three views, as did the delete icon. `vue-tsc` does not flag an unresolved
@@ -125,7 +120,37 @@ function onCreatorDrop(id: string) {
   dragOverCreatorId.value = null;
 }
 
-// ==================== CREATORS DIRECTORY FILTER & SORT & BATCH STATE ====================
+// ==================== CREATORS DIRECTORY: FILTER / SORT / BATCH STATE ====================
+// Search, filters, sorting and the derived list live in the composable; this view
+// keeps only what it renders and owns (view mode, expansion, selection, avatars).
+const directory = useCreatorDirectoryFilters({
+  creators: () => props.context.creators,
+  channels: () => props.context.channels,
+  creatorPostCountMap: () => props.context.creatorPostCountMap,
+  platformOrder: () => props.context.platformOrder,
+});
+const {
+  creatorSearch,
+  creatorPlatformFilter,
+  creatorTagFilter,
+  creatorRoleFilter,
+  includeTags,
+  excludeTags,
+  creatorSortOptions,
+  creatorSortBy,
+  creatorSortDir,
+  sortSelection,
+  toggleSort,
+  isSortedBy,
+  ariaSortFor,
+  allTags,
+  cycleTagFilter,
+  clearAllTagFilters,
+  getTagFilterState,
+  creatorCountByRole,
+  filteredCreatorsList,
+} = directory;
+
 const VIEW_MODE_STORAGE_KEY = 'creator_feed_creators_view_mode';
 const viewMode = ref<'grid' | 'list' | 'detailed'>(
   (typeof localStorage !== 'undefined' &&
@@ -179,124 +204,11 @@ function onRowClick(event: MouseEvent, creatorId: string) {
   toggleExpandCreator(creatorId);
 }
 
-const creatorSearch = ref('');
-const creatorPlatformFilter = ref('all');
-const creatorTagFilter = ref('all');
-/** 账号类型筛选：'all' | AccountRole。按创作者名下是否存在该类型账号过滤。 */
-const creatorRoleFilter = ref<'all' | AccountRole>('all');
-/**
- * Sort state: a column key plus a direction.
- *
- * `platform` and `manual` are not columns — they are orderings that only the
- * toolbar dropdown can express — so the union is wider than the sortable headers.
- * Clicking a header is a shortcut into this same state rather than a second,
- * parallel notion of "order", which is what keeps the dropdown and the header
- * indicators from ever disagreeing.
- *
- * `dir` exists because a one-way sort cannot answer the obvious question. "作品数"
- * is useful both as most-posts-first and fewest-first, and "创作者" both A→Z and
- * Z→A; without a direction the headers could only ever offer one of the two.
- */
-type CreatorSortKey = 'updated' | 'posts' | 'channels' | 'name' | 'tags' | 'platform' | 'manual';
-
-// Typed against `CreatorSortKey` so the generic `AppSelect` can prove the options
-// match the ref it is bound to: without the annotation Vue widens `value` to
-// `string`, and a typo here would be accepted silently.
-const creatorSortOptions: AppSelectOption<CreatorSortKey>[] = [
-  { value: 'updated', label: '最近活跃' },
-  { value: 'posts', label: '作品数量' },
-  { value: 'channels', label: '账号数量' },
-  { value: 'name', label: '字母名称' },
-  { value: 'tags', label: '标签' },
-  { value: 'platform', label: '按平台分组' },
-  { value: 'manual', label: '手动排序' },
-];
-const creatorSortBy = ref<CreatorSortKey>('updated');
-const creatorSortDir = ref<'asc' | 'desc'>('desc');
-
-/** The direction a column should default to when first clicked. */
-function defaultSortDir(key: CreatorSortKey): 'asc' | 'desc' {
-  // Text reads naturally A→Z; counts and timestamps are almost always wanted
-  // largest/newest first.
-  return key === 'name' || key === 'tags' ? 'asc' : 'desc';
-}
-
-/**
- * Header click: sort by that column, or flip the direction if already sorted by
- * it. Matches the behaviour every data table has, so it needs no learning.
- */
-function toggleSort(key: CreatorSortKey) {
-  if (creatorSortBy.value === key) {
-    creatorSortDir.value = creatorSortDir.value === 'asc' ? 'desc' : 'asc';
-    return;
-  }
-  creatorSortBy.value = key;
-  creatorSortDir.value = defaultSortDir(key);
-}
-
-/** True when `key` is the active sort column — the header that shows an arrow. */
-function isSortedBy(key: CreatorSortKey): boolean {
-  return creatorSortBy.value === key;
-}
-
-/** `aria-sort` value for a header, per the W3C sortable-table pattern. */
-function ariaSortFor(key: CreatorSortKey): 'ascending' | 'descending' | 'none' {
-  if (!isSortedBy(key)) return 'none';
-  return creatorSortDir.value === 'asc' ? 'ascending' : 'descending';
-}
-
-/**
- * The toolbar dropdown's binding.
- *
- * Bound to the same state the headers write, so the two can never disagree, and
- * picking a key here also applies that key's natural direction — otherwise
- * choosing 「字母名称」 after sorting by 作品数 would silently give Z→A.
- */
-const sortSelection = computed<CreatorSortKey>({
-  get: () => creatorSortBy.value,
-  set: (key) => {
-    creatorSortBy.value = key;
-    creatorSortDir.value = defaultSortDir(key);
-  },
-});
 /** 批量选择模式：开启后每行/卡片显示复选框，工具栏切换为批量操作。 */
 const isBatchMode = ref(false);
 const selectedCreatorIds = ref<Set<string>>(new Set());
-const includeTags = ref<Set<string>>(new Set());
-const excludeTags = ref<Set<string>>(new Set());
 const failedAvatarUrls = ref<Set<string>>(new Set());
 
-// All available tags
-const allTags = computed(() => {
-  const set = new Set<string>();
-  context.value.creators.forEach(c => c.tags?.forEach(t => set.add(t)));
-  return Array.from(set);
-});
-
-// Tag filtering tri-state helpers (neutral -> include -> exclude -> neutral)
-function cycleTagFilter(t: string) {
-  if (includeTags.value.has(t)) {
-    includeTags.value.delete(t);
-    excludeTags.value.add(t);
-  } else if (excludeTags.value.has(t)) {
-    excludeTags.value.delete(t);
-  } else {
-    includeTags.value.add(t);
-  }
-  includeTags.value = new Set(includeTags.value);
-  excludeTags.value = new Set(excludeTags.value);
-}
-
-function clearAllTagFilters() {
-  includeTags.value = new Set();
-  excludeTags.value = new Set();
-}
-
-function getTagFilterState(t: string): 'include' | 'exclude' | 'none' {
-  if (includeTags.value.has(t)) return 'include';
-  if (excludeTags.value.has(t)) return 'exclude';
-  return 'none';
-}
 
 // Avatar fallback & failure handling
 function handleAvatarError(url?: string) {
@@ -323,135 +235,6 @@ function getCreatorAvatar(c?: Creator | null): string {
   }
   return '';
 }
-
-// Platform count map per creator
-const creatorChannelMap = computed(() => {
-  const map: Record<string, Channel[]> = {};
-  for (const ch of context.value.channels) {
-    if (!map[ch.creatorId]) map[ch.creatorId] = [];
-    map[ch.creatorId].push(ch);
-  }
-  return map;
-});
-
-// Creators per account role (filter pill badges) — counts creators, not channels.
-const creatorCountByRole = computed<Record<string, number>>(() => {
-  const counts: Record<string, number> = { all: context.value.creators.length };
-  for (const role of ACCOUNT_ROLE_ORDER) counts[role] = 0;
-  for (const c of context.value.creators) {
-    const roles = new Set(
-      context.value.channels.filter(ch => ch.creatorId === c.id).map(ch => ch.accountRole || 'main')
-    );
-    for (const r of roles) counts[r] = (counts[r] || 0) + 1;
-  }
-  return counts;
-});
-
-// Filtered and sorted creators list for Directory tab
-const filteredCreatorsList = computed(() => {
-  let list = [...context.value.creators];
-
-  // 1. Search filter (matches creator name, tag, or channel account/displayName)
-  if (creatorSearch.value.trim()) {
-    const q = creatorSearch.value.trim().toLowerCase();
-    list = list.filter(c => {
-      const matchName = (c.name || '').toLowerCase().includes(q);
-      const matchTag = c.tags?.some(t => t.toLowerCase().includes(q));
-      const matchCh = context.value.channels.some(
-        ch => ch.creatorId === c.id && ((ch.displayName || '').toLowerCase().includes(q) || ch.accountId.toLowerCase().includes(q))
-      );
-      return matchName || matchTag || matchCh;
-    });
-  }
-
-  // 2. Platform filter
-  if (creatorPlatformFilter.value !== 'all') {
-    list = list.filter(c => {
-      return context.value.channels.some(ch => ch.creatorId === c.id && ch.platform === creatorPlatformFilter.value);
-    });
-  }
-
-  // 3. Tag filter (positive inclusion & negative exclusion)
-  if (excludeTags.value.size > 0) {
-    list = list.filter(c => {
-      const cTags = c.tags || [];
-      return !cTags.some(t => excludeTags.value.has(t));
-    });
-  }
-  if (includeTags.value.size > 0) {
-    list = list.filter(c => {
-      const cTags = c.tags || [];
-      return cTags.some(t => includeTags.value.has(t));
-    });
-  }
-  if (creatorTagFilter.value !== 'all') {
-    list = list.filter(c => c.tags?.includes(creatorTagFilter.value));
-  }
-
-  // 4. Account-type filter: creator has at least one channel of that role.
-  if (creatorRoleFilter.value !== 'all') {
-    list = list.filter(c =>
-      context.value.channels.some(ch => ch.creatorId === c.id && (ch.accountRole || 'main') === creatorRoleFilter.value)
-    );
-  }
-
-  // 5. Sorting
-  const channelCount = (c: Creator) => (creatorChannelMap.value[c.id] || []).length;
-  const postCount = (c: Creator) => context.value.creatorPostCountMap[c.id] || 0;
-  const lastActive = (c: Creator) =>
-    Math.max(c.updatedAt || 0, ...(creatorChannelMap.value[c.id] || []).map((ch) => ch.lastCheckAt || 0));
-
-  list.sort((a, b) => {
-    if (creatorSortBy.value === 'platform') {
-      // Group by the creator's first platform (in user's sidebar order),
-      // newest-active within the group.
-      const rank = (c: Creator) => {
-        const platforms = (creatorChannelMap.value[c.id] || []).map((ch) => ch.platform);
-        const order = context.value.platformOrder.length > 0 ? context.value.platformOrder : Object.keys(PLATFORM_REGISTRY);
-        let best = order.length;
-        for (const p of platforms) {
-          const i = order.indexOf(p);
-          if (i !== -1 && i < best) best = i;
-        }
-        return best;
-      };
-      const byRank = rank(a) - rank(b);
-      if (byRank !== 0) return byRank;
-      return lastActive(b) - lastActive(a);
-    }
-    if (creatorSortBy.value === 'manual') {
-      // Shared with the persistence layer; must not return NaN when both
-      // records lack a sortOrder (the pre-drag state of every creator).
-      return compareManualEntries(a, b);
-    }
-
-    // Column sorts. Each branch states its comparison in ascending terms and the
-    // direction is applied once, so adding a column cannot forget the arrow.
-    let ascending: number;
-    switch (creatorSortBy.value) {
-      case 'name':
-        ascending = (a.name || '').localeCompare(b.name || '', 'zh');
-        break;
-      case 'tags':
-        ascending = ((a.tags || [])[0] || '').localeCompare((b.tags || [])[0] || '', 'zh');
-        break;
-      case 'channels':
-        ascending = channelCount(a) - channelCount(b);
-        break;
-      case 'posts':
-        ascending = postCount(a) - postCount(b);
-        break;
-      default:
-        ascending = lastActive(a) - lastActive(b);
-    }
-    // A stable tie-break keeps the order deterministic between renders; without
-    // it, rows with equal keys shuffle as the list re-sorts.
-    if (ascending === 0) return (a.name || '').localeCompare(b.name || '', 'zh');
-    return creatorSortDir.value === 'asc' ? ascending : -ascending;
-  });
-
-  return list;
-});
 
 // ==================== RESPONSIVE MASONRY COLUMN STACKS ====================
 // Tracking windowWidth to distribute creators into independent columns,
@@ -530,6 +313,53 @@ function batchDeleteSelectedCreators() {
   if (ids.length === 0) return;
   emit('batch-delete', ids);
 }
+
+/** Leaving batch mode drops the selection: the checkboxes are gone from the UI. */
+function toggleBatchMode() {
+  isBatchMode.value = !isBatchMode.value;
+  if (!isBatchMode.value) selectedCreatorIds.value = new Set();
+}
+
+/**
+ * The toolbar's contract: values down, callbacks up.
+ *
+ * A fresh object per render is intentional (and is what re-renders the toolbar):
+ * the component holds no state of its own, so the filters cannot drift between
+ * the toolbar and the three view templates that read the same composable.
+ */
+const toolbarContext = computed<CreatorDirectoryToolbarContext>(() => ({
+  search: creatorSearch.value,
+  platformFilter: creatorPlatformFilter.value,
+  roleFilter: creatorRoleFilter.value,
+  sortBy: creatorSortBy.value,
+  sortOptions: creatorSortOptions,
+  viewMode: viewMode.value,
+  tagsExpanded: isTagsExpanded.value,
+  isBatchMode: isBatchMode.value,
+  selectedCount: selectedCreatorIds.value.size,
+  allTags: allTags.value,
+  includeTags: includeTags.value,
+  excludeTags: excludeTags.value,
+  creatorCountByPlatform: props.context.creatorCountByPlatform,
+  creatorCountByRole: creatorCountByRole.value,
+  filteredCount: filteredCreatorsList.value.length,
+  totalCount: props.context.creators.length,
+  onSearch: (value) => { creatorSearch.value = value; },
+  onPlatform: (value) => { creatorPlatformFilter.value = value; },
+  onRole: (value) => { creatorRoleFilter.value = value as 'all' | AccountRole; },
+  onSort: (key) => { sortSelection.value = key as CreatorSortKey; },
+  onViewMode: setViewMode,
+  onToggleTagsExpanded: () => { isTagsExpanded.value = !isTagsExpanded.value; },
+  onCycleTag: cycleTagFilter,
+  onClearTagFilters: clearAllTagFilters,
+  onToggleBatchMode: toggleBatchMode,
+  onSelectAll: selectAllFilteredCreators,
+  onClearSelection: clearCreatorSelection,
+  onBatchRefresh: batchRefreshSelectedCreators,
+  onBatchDelete: batchDeleteSelectedCreators,
+  onAdd: () => openAddModal('new'),
+  getTagFilterState,
+}));
 
 // Account role labels/badge classes live in ChannelRow (single source).
 
@@ -625,261 +455,10 @@ function loadDemoData() {
 
 <template>
   <section class="space-y-4">
-    <!-- Header & Action Toolbar (single compact row) -->
-    <div class="flex flex-wrap items-center justify-between gap-2.5">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="font-bold text-lg text-slate-900 dark:text-white">关注管理</h2>
-        <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900">
-          {{ filteredCreatorsList.length }} / {{ context.creators.length }} 位创作者
-        </span>
-      </div>
-
-      <!-- Right Action Group: View Mode Switcher + Batch Mode + Add Button -->
-      <div class="flex items-center gap-2 flex-wrap">
-        <!-- View Mode Switcher -->
-        <div class="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shadow-2xs">
-          <button
-            type="button"
-            @click="setViewMode('grid')"
-            :class="viewMode === 'grid' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
-            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-            title="网格磁贴视图 (中等密度，清晰直观)"
-          >
-            <LayoutGrid class="w-3.5 h-3.5" />
-            <span class="hidden md:inline">网格</span>
-          </button>
-          <button
-            type="button"
-            @click="setViewMode('list')"
-            :class="viewMode === 'list' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
-            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-            title="紧凑列表视图 (超高密度，一屏容纳 20+ 位创作者)"
-          >
-            <List class="w-3.5 h-3.5" />
-            <span class="hidden md:inline">紧凑列表</span>
-          </button>
-          <button
-            type="button"
-            @click="setViewMode('detailed')"
-            :class="viewMode === 'detailed' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
-            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-            title="详细卡片视图 (完全展开全部账号与角色管理)"
-          >
-            <LayoutList class="w-3.5 h-3.5" />
-            <span class="hidden md:inline">详细卡片</span>
-          </button>
-        </div>
-
-        <button
-          @click="isBatchMode = !isBatchMode; if (!isBatchMode) selectedCreatorIds = new Set();"
-          :class="isBatchMode ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'"
-          class="flex items-center gap-1.5 px-3 py-1.5 border rounded-xl text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
-        >
-          <CheckSquare class="w-3.5 h-3.5" />
-          <span>{{ isBatchMode ? '完成批量' : '批量操作' }}</span>
-        </button>
-
-        <button
-          @click="openAddModal('new')"
-          class="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-        >
-          <Plus class="w-4 h-4" />
-          <span>+ 关注创作者</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Filter & Search Bar (Streamlined high-density bar) -->
-    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 shadow-2xs space-y-2.5">
-      <div class="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
-        <!-- Search Input -->
-        <div class="relative flex-1">
-          <Search class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            v-model="creatorSearch"
-            type="text"
-            placeholder="快速搜索创作者名称、标签或账号..."
-            class="w-full pl-8 pr-8 py-1.5 bg-slate-100 dark:bg-slate-800 border-none rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
-          />
-          <button
-            v-if="creatorSearch"
-            @click="creatorSearch = ''"
-            class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full"
-          >
-            <X class="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <!-- Sort By Select -->
-        <div class="flex items-center gap-2 shrink-0">
-          <div class="flex items-center gap-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-            <span class="pl-2.5 text-[11px] text-slate-400 font-medium flex items-center gap-1">
-              <ArrowUpDown class="w-3.5 h-3.5" />
-              排序
-            </span>
-            <AppSelect
-              v-model="sortSelection"
-              :options="creatorSortOptions"
-              aria-label="创作者排序方式"
-              button-class="py-1.5 pr-2 pl-0.5 text-xs bg-transparent dark:bg-transparent border-none hover:border-transparent dark:hover:border-transparent"
-            />
-          </div>
-
-          <!-- Tags Drawer Trigger Button if tags exist -->
-          <button
-            v-if="allTags.length > 0"
-            type="button"
-            @click="isTagsExpanded = !isTagsExpanded"
-            :class="isTagsExpanded || includeTags.size > 0 || excludeTags.size > 0 ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-transparent'"
-            class="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer"
-            title="展开/收起标签过滤"
-          >
-            <Tag class="w-3.5 h-3.5" />
-            <span>标签</span>
-            <span v-if="includeTags.size > 0 || excludeTags.size > 0" class="w-2 h-2 rounded-full bg-indigo-500"></span>
-            <ChevronDown class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': isTagsExpanded }" />
-          </button>
-        </div>
-      </div>
-
-      <!-- Platform Filter Pills (Compact Row) -->
-      <div class="flex flex-wrap items-center gap-1 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-        <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
-          <Filter class="w-3 h-3" />
-          平台:
-        </span>
-        <button
-          @click="creatorPlatformFilter = 'all'"
-          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer"
-          :class="creatorPlatformFilter === 'all'
-            ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
-            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
-        >
-          全部 ({{ context.creators.length }})
-        </button>
-        <template v-for="(cfg, pKey) in PLATFORM_REGISTRY" :key="pKey">
-          <button
-            v-if="context.creatorCountByPlatform[pKey]"
-            @click="creatorPlatformFilter = pKey"
-            class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
-            :class="creatorPlatformFilter === pKey
-              ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
-              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
-          >
-            <span>{{ cfg.name }}</span>
-            <span class="text-[10px] opacity-75">({{ context.creatorCountByPlatform[pKey] || 0 }})</span>
-          </button>
-        </template>
-      </div>
-
-      <!-- Account-Type Filter Pills -->
-      <div class="flex flex-wrap items-center gap-1 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-        <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
-          <UserRound class="w-3 h-3" />
-          账号类型:
-        </span>
-        <button
-          @click="creatorRoleFilter = 'all'"
-          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer"
-          :class="creatorRoleFilter === 'all'
-            ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
-            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
-        >
-          全部 ({{ context.creators.length }})
-        </button>
-        <button
-          v-for="role in ACCOUNT_ROLE_ORDER"
-          :key="'role-' + role"
-          @click="creatorRoleFilter = role"
-          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
-          :class="creatorRoleFilter === role
-            ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
-            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
-        >
-          <span>{{ ACCOUNT_ROLE_SHORT_LABELS[role] }}</span>
-          <span class="text-[10px] opacity-75">({{ creatorCountByRole[role] || 0 }})</span>
-        </button>
-      </div>
-
-      <!-- Collapsible Tags Filter Row -->
-      <div v-if="allTags.length > 0 && isTagsExpanded" class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs animate-fade-in">
-        <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
-          <Tag class="w-3 h-3" />
-          标签筛选:
-        </span>
-        <button
-          type="button"
-          @click="clearAllTagFilters"
-          :class="includeTags.size === 0 && excludeTags.size === 0 ? 'bg-indigo-600 text-white font-semibold shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'"
-          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer"
-        >
-          全部
-        </button>
-        <button
-          v-for="t in allTags"
-          :key="'dir-tag-' + t"
-          type="button"
-          @click="cycleTagFilter(t)"
-          :class="[
-            getTagFilterState(t) === 'include'
-              ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-              : getTagFilterState(t) === 'exclude'
-              ? 'bg-rose-600 text-white font-bold shadow-2xs line-through'
-              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-          ]"
-          class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
-          :title="getTagFilterState(t) === 'include' ? '正向包含（点击切为反向排除）' : getTagFilterState(t) === 'exclude' ? '反向排除（点击取消）' : '点击设置为正向包含(+)'"
-        >
-          <span v-if="getTagFilterState(t) === 'include'" class="text-[10px] font-black">+</span>
-          <span v-else-if="getTagFilterState(t) === 'exclude'" class="text-[10px] font-black">−</span>
-          <span>#{{ t }}</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Batch Action Toolbar (When Batch Mode Active) -->
-    <div
-      v-if="isBatchMode"
-      class="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-indigo-50/90 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70 rounded-2xl animate-fade-in"
-    >
-      <div class="flex items-center gap-3">
-        <button
-          @click="selectAllFilteredCreators"
-          class="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-indigo-50 cursor-pointer"
-        >
-          <CheckSquare class="w-3.5 h-3.5 text-indigo-600" />
-          <span>全选 ({{ filteredCreatorsList.length }})</span>
-        </button>
-        <button
-          @click="clearCreatorSelection"
-          class="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline cursor-pointer"
-        >
-          清空选择
-        </button>
-        <span class="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-          已选 {{ selectedCreatorIds.size }} 位
-        </span>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <button
-          @click="batchRefreshSelectedCreators"
-          :disabled="selectedCreatorIds.size === 0"
-          class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40 transition-colors cursor-pointer shadow-2xs"
-        >
-          <RefreshCw class="w-3.5 h-3.5" />
-          <span>同步选中</span>
-        </button>
-        <button
-          @click="batchDeleteSelectedCreators"
-          :disabled="selectedCreatorIds.size === 0"
-          class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40 transition-colors cursor-pointer shadow-2xs"
-        >
-          <Trash2 class="w-3.5 h-3.5" />
-          <span>删除选中</span>
-        </button>
-      </div>
-    </div>
+    <!-- Header row, filter bar and batch toolbar. Stateless: every value comes from
+         `toolbarContext` and every change goes back through it, so the filter state
+         has exactly one home (useCreatorDirectoryFilters). -->
+    <CreatorDirectoryToolbar :context="toolbarContext" />
 
     <!-- Empty Creators State -->
     <div v-if="context.creators.length === 0" class="text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
