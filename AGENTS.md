@@ -191,6 +191,27 @@ For any platform in that shape, keep the boundary:
   drop any item lacking a stable id or a finite plausible timestamp.
 - `src/adapters/<p>.ts` — maps the validated DTO onto `Post` via `buildPost`.
 
+**"Self-contained" is not advice, and `chrome.scripting` is not only Douyin's.** The injected
+function is serialized with `Function.prototype.toString()`, so it carries **no closure**: every
+identifier must be a parameter, a local, or a page global. Twitter's injected function read
+`Bearer ${TWITTER_BEARER_TOKEN}` — a module constant — for as long as that path existed. In the page
+that is a `ReferenceError`, caught by the function's own `try/catch`, returned as a plain failure, and
+the sync fell through to the direct fetch. **The page path never ran once, in production, and nothing
+could tell**: the failure looked like a platform problem, and `PLATFORMS.md`'s advice to open the
+creator's profile and retry was inert.
+
+Two things made it invisible, and both are the general lesson:
+
+- An injected function that catches its own errors converts a programming mistake into a plausible
+  platform message. Assert on the *result*, never on "it did not throw".
+- Calling the function **object** in a test keeps the closure and passes; only evaluating its
+  **source** with no closure reproduces what Chrome does. `tests/twitterTimeline.injected.test.ts`
+  does that, and it is the template for any new injected path.
+
+Constants for an injected function travel through `executeScript`'s `args` (Twitter: the bearer plus
+the four GraphQL sets — one definition, shared with the direct fetch, which is also why the two can no
+longer drift).
+
 Nothing else may learn the page's shape. When the markup changes, only the collector, the contract,
 and the fixtures should need edits — never the db, `channelSync`, `buildPost`, or another platform.
 

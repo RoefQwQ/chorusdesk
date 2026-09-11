@@ -608,7 +608,16 @@ B9. ~~**`__END__` 游标终态语义有三份实现**（最高价值）~~ ——
     `historySync.ts:16-46`（提前返回 +
    抖音特判）、`historySync.ts:110-115`（同一规则在挖矿循环里再写一遍，注释逐字重复）、
    `channelSync.ts:194,:394`（写入侧）。今天改「完成」的含义必须改三处。
-B10. **Twitter GraphQL `features` 在同一个文件里有两份逐字拷贝**：
+B10. ~~**Twitter GraphQL `features` 在同一个文件里有两份逐字拷贝**~~ —— **已完成（2026-09-11，
+    提交 `fca660a`）**，且**顺带挖出一个真缺陷**：驱动两份实现对比时发现，注入函数引用了模块作用域的
+    `TWITTER_BEARER_TOKEN`，而 `chrome.scripting` 会 `toString()` 序列化函数——页面里直接
+    `ReferenceError`，被它自己的 `try/catch` 吞成一条普通失败信息。**Twitter 的标签页路径在生产中
+    一次都没跑成功过**，每次都静默落到直连兜底；`PLATFORMS.md` §2.2 那条「打开博主页面重试以复用
+    会话」的建议因此从未生效。已修：bearer 与四组 features 全部经 `args` 传入，构建产物证实注入函数
+    为 `func:async(e,t,n,r,i)=>`、从参数取值（token 在 bundle 里只剩 1 次）。同时补上该函数缺失的
+    `catch`（`executeScript` 在帧消失时 reject，原本会穿过函数、跳过直连兜底）。
+    新增 `tests/twitterTimeline.injected.test.ts`（8 用例）——**关键是它求值函数的「源码」（无闭包）
+    并断言结果**，因为该函数会吞掉自己的异常，「没抛错」这种断言看不见这个 bug。原条目：
     `twitterTimeline.ts:76-141` 与 `:277-345`（后者是给注入脚本重新声明的一份）。
     X 改一个 flag 要改相隔 200 行的两处。
 B11. **三态标签过滤器两份**：`useFeedFilters.ts:82-118` 与
@@ -679,6 +688,16 @@ B22. **规则 8 的台账出现漂移**（已核实）：规则 8 记的 9 处�
     第 9 处 `useDeletedPosts.ts:11`（回收站读路径直连 `postRepository`）**不在**。
     形态正是该规则禁止的（「优先加 service 方法而非新增直连 import」），却落在规则用来自我
     约束的清单之外——「已知债务、已枚举」这句话就是这样悄悄失效的。已记录未修。
+B26. **`PLATFORMS.md` §2.2 的 Twitter 建议此前是空头支票**（随 B10 修复，**待真机复验**）：
+    该节说「可先在浏览器中打开目标博主的推特主页标签页，扩展会优先复用当前活跃标签页的前端网络会话」
+    ——在注入路径修好之前，这句话做不到（函数一进页面就 `ReferenceError`）。修复后逻辑上成立，
+    但**尚未在真实 x.com 上验证过**（需要人已登录的 x.com 标签页）。下次真机使用时可留意日志里
+    是否出现标签页路径而非直连路径。
+B27. **父级自查：提交信息声称「已记入文档」而实际没写**（本次会话发生一次）：`fca660a` 的
+    提交信息写着「recorded in docs/REVIEW_2026-09.md」，但两处更正当时一条都没落地。
+    与规则 26 同源——**「我说我做了」不是证据，文件里有没有才是**。已补齐（平台表那行、
+    方法注记里的「生造键名」更正、本条目、AGENTS 规则 9 的案例）。
+
 B24. **「清除筛选」按钮不清账号类型筛选**（B11 期间发现，未修）：`CreatorsView.vue:594`
     的空态按钮只重置 `creatorSearch`、`creatorPlatformFilter` 与标签三态，**不重置
     `creatorRoleFilter`**。而空态判据是 `filteredCreatorsList.length === 0`，后者包含角色筛选
