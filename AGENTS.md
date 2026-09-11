@@ -168,10 +168,24 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
   `backupService`) — including the whole recycle-bin lifecycle, which used to import seven
   repository functions directly from the UI. What still imports `src/infrastructure/db/*` directly
   from UI is the bare `db` handle, `settingsRepository`, `statsService` and media maintenance
-  (`healBrokenPostMedia`, `cleanupOldPosts`) — 8 call sites as of 2026-09-11, down from 9. Fix
-  queue #10 resolved the *facade*, so do not restate it as unfinished; equally, do not treat the
-  remaining direct imports as sanctioned. Prefer adding a service method over a new direct
-  repository import.
+  (`healBrokenPostMedia`, `cleanupOldPosts`) — **8 usage sites as of 2026-09-11, down from 9**,
+  in exactly these files (`grep -rn "infrastructure/db" entrypoints/` reproduces it; count the
+  *usages*, not the files, and `import type` does not count — a type-only import crosses nothing
+  at runtime):
+
+  |file|what|
+  |---|---|
+  |`dashboard/composables/useDashboardShell.ts`|`db`, `settingsRepository`, `statsService`, `healBrokenPostMedia`|
+  |`dashboard/composables/useFeedFilters.ts`|`settingsRepository`|
+  |`dashboard/composables/useMediaMaintenance.ts`|`healBrokenPostMedia`, `cleanupOldPosts`|
+  |`popup/composables/useQuickFollow.ts`|`db`|
+
+  The list was earlier just a phrase, and that is how it drifted: a 9th site
+  (`useDeletedPosts.ts`) sat outside the four named categories while being exactly the shape this
+  rule forbids, so "known debt, enumerated" stopped being true without anyone editing the rule.
+  Fix queue #10 resolved the *facade*, so do not restate it as unfinished; equally, do not treat
+  the remaining direct imports as sanctioned. Prefer adding a service method over a new direct
+  repository import, and **add the file to the table above in the same commit**.
 - New platform = new file in `src/adapters/` implementing `PlatformAdapter`; register in
   `src/platform/registry.ts`. See `docs/REVIEW_2026-09.md` for the full 6-8 touch-point list.
 

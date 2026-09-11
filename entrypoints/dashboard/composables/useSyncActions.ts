@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import type { Creator, Channel } from '../../../src/types';
-import { updateChannel, updateCreator, batchUpdateChannelsInterleaved, clearStaleUpdatingStatus } from '../../../src/sync';
+import { updateChannel, updateCreator, batchUpdateChannelsInterleaved } from '../../../src/sync';
+import { channelService } from '../../../src/application';
 import { originPattern, requestHostAccess } from '../../../src/infrastructure/chrome/optionalHostAccess';
 import { devLog } from '../../../src/utils/devLog';
 
@@ -92,7 +93,7 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       console.error('Refresh all error', err);
     } finally {
       isRefreshingAll.value = false;
-      await clearStaleUpdatingStatus();
+      await channelService.clearStaleUpdatingStatus();
       await deps.reloadData();
     }
   }

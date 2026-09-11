@@ -11,18 +11,6 @@ import {
   statesEndOfHistory,
 } from './cursorState';
 
-/**
- * Resets any channels that were left in 'updating' status due to browser restart or crash.
- */
-export async function clearStaleUpdatingStatus() {
-  try {
-    await db.channels.where('status').equals('updating').modify({
-      status: 'idle',
-    });
-  } catch (e) {
-    console.warn('[Adapters] Failed to clear stale updating status:', e);
-  }
-}
 class FetchTimeoutError extends Error {}
 
 

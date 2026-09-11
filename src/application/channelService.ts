@@ -1,4 +1,9 @@
-import { putChannel, updateChannelRole, deleteChannelCascade } from '../infrastructure/db/channelRepository';
+import {
+  putChannel,
+  updateChannelRole,
+  deleteChannelCascade,
+  clearStaleUpdatingStatus,
+} from '../infrastructure/db/channelRepository';
 import type { Channel } from '../types';
 
 /**
@@ -23,5 +28,17 @@ export const channelService = {
   /** Delete a channel and every post cached under it (single tx). */
   async deleteCascade(id: string): Promise<void> {
     await deleteChannelCascade(id);
+  },
+
+  /**
+   * Reset channels left in `updating` by a browser close, a crash, or an MV3
+   * worker teardown. Called on dashboard boot and on popup open.
+   *
+   * It is a plain channel write, so it belongs here and not in `src/sync`: while
+   * it lived beside `channelSync`, every caller pulled in the platform registry
+   * to reset a status column — the popup was loading all ten adapters for it.
+   */
+  async clearStaleUpdatingStatus(): Promise<void> {
+    await clearStaleUpdatingStatus();
   },
 };

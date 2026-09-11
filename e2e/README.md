@@ -94,7 +94,7 @@ Chrome 路径可用 `--chrome <path>` 或 `CHROME_PATH` 指定；profile 自建�
 
 ### `douyin-probe.mjs` — 抖音创作者页面结构探针
 
-验证采集器依赖的页面事实：登录面板状态、作品总数候选元素、作品网格与真实滚动容器、驱动滚动后的网格增长与声明总数对比。`probe-result.json` 是它的一次输出样例。
+验证采集器依赖的页面事实：登录面板状态、作品总数候选元素、作品网格与真实滚动容器、驱动滚动后的网格增长与声明总数对比。结果同时打印到 stdout 并写入 `[out.json]`（默认 `e2e/probe-result.json`，该文件按 `.gitignore` 不入库——它是本机一次实测的产物，不是仓库内容）。
 
 ```bash
 cd e2e && npm install          # 仅这两个探针需要 ws

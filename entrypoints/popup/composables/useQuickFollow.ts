@@ -6,7 +6,7 @@ import { creatorService, channelService } from '../../../src/application';
 // lists and looks up records here; every write goes through the services
 // above, which are the application-layer boundary for persistence.
 import { db } from '../../../src/infrastructure/db/database';
-import { updateChannel, clearStaleUpdatingStatus } from '../../../src/sync';
+
 import type { AuthorMeta } from './usePageDetection';
 import { notifyBadgeRefresh } from '../../../src/utils/badge';
 
@@ -96,7 +96,7 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
 
   /** Loads the catalog and clears stale "updating" statuses on popup open. */
   async function initCatalog() {
-    await clearStaleUpdatingStatus();
+    await channelService.clearStaleUpdatingStatus();
     creators.value = await db.creators.toArray();
     channels.value = await db.channels.toArray();
   }
@@ -185,10 +185,19 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
       await channelService.upsert(newChannel);
 
 
-      // Trigger on-demand initial fetch
-      updateChannel(newChannel, 5)
-        .then(() => notifyBadgeRefresh())
-        .catch(console.error);
+      // Initial fetch, done by the service worker. It must not run here: the
+      // popup is dismissed by a click anywhere outside it, and a fetch owned by
+      // this window dies with it — the channel would be stored with no posts and
+      // nothing would retry. `sendMessage` keeps the worker alive until it
+      // answers, so the fetch survives the popup closing. It also keeps the
+      // platform adapters out of this bundle (queue item B20).
+      void chrome.runtime
+        .sendMessage({ type: 'SYNC_CHANNEL', channelId: newChannel.id, limit: 5 })
+        .then((res: { success?: boolean; error?: string } | undefined) => {
+          if (res && res.success === false) console.warn('[Chorus] 首次抓取失败:', res.error);
+          return notifyBadgeRefresh();
+        })
+        .catch((e) => console.error('[Chorus] 首次抓取失败:', e));
 
       existingChannel.value = newChannel;
       existingCreator.value = (await db.creators.get(targetCreatorId)) || null;

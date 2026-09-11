@@ -69,6 +69,19 @@ export function useCreatorDirectoryFilters(deps: CreatorDirectoryDependencies) {
     getTagFilterState,
   } = useTagFilterState();
 
+  /**
+   * Clears every filter `filteredCreatorsList` reads. Lives here, beside the state,
+   * because the empty-state button that calls it had already drifted once: it reset
+   * search, platform and tags but not the account-type filter, so a list emptied by
+   * role alone left the button appearing to do nothing at all.
+   */
+  function clearAllDirectoryFilters() {
+    creatorSearch.value = '';
+    creatorPlatformFilter.value = 'all';
+    creatorRoleFilter.value = 'all';
+    clearAllTagFilters();
+  }
+
   // Typed against `CreatorSortKey` so the generic `AppSelect` can prove the options
   // match the ref it is bound to: without the annotation Vue widens `value` to
   // `string`, and a typo here would be accepted silently.
@@ -271,6 +284,7 @@ export function useCreatorDirectoryFilters(deps: CreatorDirectoryDependencies) {
     allTags,
     cycleTagFilter,
     clearAllTagFilters,
+    clearAllDirectoryFilters,
     getTagFilterState,
     creatorChannelMap,
     creatorCountByRole,

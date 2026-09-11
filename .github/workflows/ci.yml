@@ -30,3 +30,29 @@ jobs:
 
       - name: Build extension
         run: npm run build
+
+      # The extension-host gate, on every push and PR — not only at release time.
+      #
+      # It earns its place here because it is the only check that can see defects
+      # that live in the extension host rather than in a module: the first thing it
+      # ever ran caught `SettingsView` notifying the worker before persisting the
+      # new setting, so the worker read the OLD value and deleted the auto-sync
+      # alarm the user had just switched on. Unit tests, typecheck and lint were all
+      # green on that commit, and would stay green on a regression that only a real
+      # service worker plus real `chrome.alarms` can expose (AGENTS rule 28).
+      #
+      # Measured 3.5 s on Windows; on the runner the cost is browser start plus
+      # Xvfb. If it ever becomes flaky, treat that as a finding about the gate —
+      # do not delete it to make a red build go away.
+      - name: Ensure Chrome and Xvfb are available
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y xvfb
+          fi
+          if ! command -v google-chrome >/dev/null && ! command -v google-chrome-stable >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y google-chrome-stable
+          fi
+          (command -v google-chrome || command -v google-chrome-stable) --version
+
+      - name: Extension E2E gate
+        run: xvfb-run -a node e2e/release-gate.mjs

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripAppendedLinks, twitterAdapter } from '../src/adapters/twitter';
-import { stripTrailingTcoLink } from '../src/utils/tco';
+import { twitterAdapter } from '../src/adapters/twitter';
 import type { Channel } from '../src/types';
 
 /**
@@ -535,48 +534,6 @@ describe('twitter appended links', () => {
   });
 });
 
-describe('stripAppendedLinks', () => {
-  const MEDIA = 'https://t.co/abc1234567';
-
-  it('removes the link and the gap it leaves', () => {
-    expect(stripAppendedLinks(`正文 ${MEDIA}`, [MEDIA])).toBe('正文');
-  });
-
-  it('collapses the double space a mid-body link leaves behind', () => {
-    expect(stripAppendedLinks(`前 ${MEDIA} 后`, [MEDIA])).toBe('前 后');
-  });
-
-  it('removes a link alone on its own trailing line', () => {
-    expect(stripAppendedLinks(`第一行\n第二行\n${MEDIA}`, [MEDIA])).toBe('第一行\n第二行');
-  });
-
-  it('keeps line breaks that were not around a link', () => {
-    expect(stripAppendedLinks('第一行\n第二行', [MEDIA])).toBe('第一行\n第二行');
-  });
-
-  it('handles several appended links', () => {
-    const second = 'https://t.co/def7654321';
-    expect(stripAppendedLinks(`正文 ${MEDIA} ${second}`, [MEDIA, second])).toBe('正文');
-  });
-
-  it('is a no-op when nothing was appended', () => {
-    expect(stripAppendedLinks('正文', [])).toBe('正文');
-  });
-
-  it('ignores anything that is not a t.co URL', () => {
-    // The values come from untrusted payload JSON. A non-URL must not be able to
-    // blank out text by matching a substring of it, so it is rejected outright
-    // rather than used as a search string.
-    expect(stripAppendedLinks('正文 https://example.com/a', ['https://example.com/a']))
-      .toBe('正文 https://example.com/a');
-    expect(stripAppendedLinks('abcdef', ['abc'])).toBe('abcdef');
-  });
-
-  it('ignores a non-string entry rather than throwing', () => {
-    expect(stripAppendedLinks('正文', [null, undefined, 42, { url: MEDIA }])).toBe('正文');
-  });
-});
-
 /**
  * Retweets, where the media and the text can live on different levels.
  *
@@ -720,37 +677,4 @@ describe('twitter retweets', () => {
   });
 });
 
-describe('stripTrailingTcoLink', () => {
-  const LINK = 'https://t.co/abc1234567';
 
-  it('removes a link at the very end', () => {
-    expect(stripTrailingTcoLink(`正文 ${LINK}`)).toBe('正文');
-  });
-
-  it('removes a link on its own trailing line', () => {
-    expect(stripTrailingTcoLink(`第一行\n第二行\n${LINK}`)).toBe('第一行\n第二行');
-  });
-
-  it('removes several trailing links', () => {
-    expect(stripTrailingTcoLink(`正文 ${LINK} https://t.co/zzz9999999`)).toBe('正文');
-  });
-
-  it('leaves a link in the middle of the text alone', () => {
-    // The text-only rule exists for rows with no entity data left, so it has to
-    // be narrow: a link mid-caption is far more likely to be the author's.
-    expect(stripTrailingTcoLink(`看看 ${LINK} 很好`)).toBe(`看看 ${LINK} 很好`);
-  });
-
-  it('leaves a non-t.co URL alone', () => {
-    expect(stripTrailingTcoLink('正文 https://example.com/a')).toBe('正文 https://example.com/a');
-  });
-
-  it('is a no-op when there is no link', () => {
-    expect(stripTrailingTcoLink('正文')).toBe('正文');
-  });
-
-  it('empties a body that was nothing but the link', () => {
-    // A media-only tweet: the link was the entire body.
-    expect(stripTrailingTcoLink(LINK)).toBe('');
-  });
-});

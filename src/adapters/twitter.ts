@@ -9,9 +9,6 @@ import { devLog } from '../utils/devLog';
 import { stripAppendedLinks, stripTrailingTcoLink } from '../utils/tco';
 import { errorMessage } from '../utils/errorMessage';
 
-// Re-exported so the strip stays pinned on its own, away from the parser.
-export { stripAppendedLinks };
-
 /**
  * The tweet's own text, as X says it should be shown.
  *

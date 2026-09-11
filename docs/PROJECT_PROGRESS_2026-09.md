@@ -652,23 +652,41 @@ B15. **adapter 直接调 `chrome.*`（5 个文件，不在任何已有规则里�
     规则 6 的自发自收不可能发生；cookie 只读存在性，凭据仍只在 `bgFetch` 里按
     `PLATFORM_HOSTS` 附加。代价是 adapter 在扩展之外不可测 + 5 处手写
     `typeof chrome === 'undefined'` 守卫。要不要收拢请用户定（改的是分层口径，不只是代码）。
-B16. **`e2e/README.md:97` 承诺了一个不存在的样例文件**：它说 `e2e/probe-result.json` 是探针的
+B16. ~~**`e2e/README.md:97` 承诺了一个不存在的样例文件**：它说 `e2e/probe-result.json` 是探针的
     输出样例，但该文件被 `e2e/.gitignore:2` 正确忽略（已核实未跟踪），新克隆的人拿不到。
     要么提交一份脱敏样例，要么删掉这句话。
-B17. **测试缺口（已核实）**：`channelSync.clearStaleUpdatingStatus` 与 `tco.isTcoUrl` 无测试；
+B17. ~~**测试缺口（已核实）**~~ —— **已完成（2026-09-11）**：① `clearStaleUpdatingStatus` 新测试 3 例（迁至 `tests/channelRepository.staleStatus.test.ts`，两个变异各自被抓住）；② `tco.ts` 的 19 个用例从 `tests/twitter.emptyTimeline.test.ts` 移入 `tests/tco.test.ts` 并补 `isTcoUrl` 直测（变异：放宽 `t.co` 匹配 → 3 例失败）；顺带删掉 `src/adapters/twitter.ts` 里只被测试引用的 `export { stripAppendedLinks }`（再导出已无生产消费者）。剩余缺口见「平台评估建议」。原始描述：：`channelSync.clearStaleUpdatingStatus` 与 `tco.isTcoUrl` 无测试；
     更要紧的是 `tco.ts` 的测试**只**寄生在 `twitter.emptyTimeline.test.ts` 里（20 处引用），
     按模块名 grep 会误判为「无测试」。另有 7 个 >150 行模块零测试引用，
     负载最重的：`twitterTimeline.ts`(486)、`bilibili.ts`(435)、`xiaohongshu.ts`(389)、
     `weibo.ts`(323)、`postRepository.ts`(212)。唯一该拆的大测试文件是
     `twitter.emptyTimeline.test.ts`(756，四个不相关关注点)。
-B18. **零成本清理**：空目录 `src/db/`；`.gitignore:9` 的 `!.env.example`（文件不存在）、
+B18. ~~**零成本清理**~~ —— **已完成（2026-09-11）**：删空目录 `src/db/`；`.gitignore` 去掉 `.e2e-profile/`（无脚本写它）；`!.env.example` 保留（它是 `!.env*` 的显式豁免，注释已说明）。原始描述：：空目录 `src/db/`；`.gitignore:9` 的 `!.env.example`（文件不存在）、
     `:39` 的 `.e2e-profile/`（无脚本写它）、`:40` 的 `bun.lock`（无 bun 痕迹）。
     `public/icons/icon.svg` 全仓零引用，但**可能是 WXT 的图标源，删前须验 build**。
-B19. **`FeedView.vue` 的两块可拆**（审计里唯一「纯收益」的拆分）：平台侧栏拖拽排序（约
+B19. ~~**`FeedView.vue` 的两块可拆**~~ —— **已完成（2026-09-11）**：`usePlatformDnD.ts` 与
+    `useWaterfallFeed.ts`，视图 **653 → 534 行**。验收用新增的 `e2e/feed-render.mjs`
+    （真实 Chrome，10 步 **逐字节全等** 2,508,622 B；含拖拽落库与无限滚动 36→72 的断言）。
+    **这个工具本身先被修过三轮才可信**：① 相对时间标签按小时漂移 → 夹具改为按天；
+    ② 未读卡片会与「标记已读」写库赛跑 → 夹具预置 `isRead: 1`；
+    ③ 视口尺寸在应用挂载后才设置 → 改为 `about:blank` 先设度量再导航。
+    另：「无限滚动没触发」原本只打一句 NOTE，**这会让一次没滚动的捕获与其它捕获不可比**，
+    现改为断言失败、不写文件。原始描述：（审计里唯一「纯收益」的拆分）：平台侧栏拖拽排序（约
     `FeedView.vue:62-110`）与 masonry 分列 + 高度估算（约 `:162-197`），两者自包含、
     与 context 无共享状态。其余 7 个大文件**审计判定不该拆**（「一个东西的很多方面」，
     或受注入序列化/清理不变量约束），理由见评审文件。
-B20. **popup 会加载全部 10 个平台 adapter**（已核实，非分层违规）：`useQuickFollow.ts:9`
+B20. ~~**popup 会加载全部 10 个平台 adapter**~~ —— **已完成（2026-09-11）**，做法是两处真改动：
+    ① `clearStaleUpdatingStatus` 从 `src/sync/channelSync.ts` 移入 `channelRepository`
+    （经 `channelService` 暴露）——它只是一次 channel 写入，却因为住在 sync 层而让每个调用方
+    （含 popup）拉进整个 registry；
+    ② popup 的首次抓取改由 SW 执行（新消息 `SYNC_CHANNEL`）：`chrome.runtime.sendMessage`
+    会在等待 `sendResponse` 期间保活 worker，所以**关掉弹窗不再中断首次抓取**（此前
+    popup 直接 `updateChannel` 且 fire-and-forget，关窗即丢）。查证：`main` chunk
+    250 → 194 KB 且**已无任何 adapter 实现**（dashboard 297 KB 才带 adapter）。
+    顺带修掉一个刚写出来就发现的缺陷：`updateChannel` **不抛异常**，它 resolve 出带 `error`
+    的 FetchResult——只 catch 的 handler 会把限流/不支持平台报成成功；已改为读 `error`。
+    门禁新增 `syncChannel.message-round-trip`（真实 router + 真实 SW，两个变异各自被抓住：
+    删 dispatch 分支、删策略表条目）。原条目：`useQuickFollow.ts:9`
     从 `src/sync` import `updateChannel`，经 `channelSync.ts:5` 触达 `platform/registry.ts`，
     而该文件静态 import 全部 adapter（`:3-12`）。构建**确有**代码分割，但 `popup.html`
     会 `modulepreload` 那个 256 KB 共享 chunk（已核实其中含 Bilibili/Xiaohongshu 的
@@ -684,7 +702,7 @@ B21. ~~**`src/utils/http.ts` 应归位到 infrastructure/chrome/**~~ —— **�
     （规则 6 要求 SW 直调 `performBgFetch`），但那只解释**这条边**、不解释**它该住在 utils**：
     `http.ts` 是全部 adapter 取数经过的网络端口（fan-in 9）。把文件挪进
     `infrastructure/chrome/` 即消环，且不需要加任何间接层。
-B22. **规则 8 的台账出现漂移**（已核实）：规则 8 记的 9 处直连里 8 处在它点名的四类内，
+B22. ~~**规则 8 的台账出现漂移**~~ —— **已完成（2026-09-11）**：B14 已把台账从 9 改成 8，但「一处」没有定义、正是它上一次悄悄失效的原因；AGENTS 规则 8 现在直接列出 4 个文件与各自的使用点，并写明「数**使用次数**不是文件数，`import type` 不计」。原始记录：规则 8 记的 9 处直连里 8 处在它点名的四类内，
     第 9 处 `useDeletedPosts.ts:11`（回收站读路径直连 `postRepository`）**不在**。
     形态正是该规则禁止的（「优先加 service 方法而非新增直连 import」），却落在规则用来自我
     约束的清单之外——「已知债务、已枚举」这句话就是这样悄悄失效的。已记录未修。
@@ -698,7 +716,11 @@ B27. **父级自查：提交信息声称「已记入文档」而实际没写**�
     与规则 26 同源——**「我说我做了」不是证据，文件里有没有才是**。已补齐（平台表那行、
     方法注记里的「生造键名」更正、本条目、AGENTS 规则 9 的案例）。
 
-B24. **「清除筛选」按钮不清账号类型筛选**（B11 期间发现，未修）：`CreatorsView.vue:594`
+B24. ~~**「清除筛选」按钮不清账号类型筛选**~~ —— **已完成（2026-09-11）**：新增
+    `clearAllDirectoryFilters()`（住在状态旁边，而不是在模板里手写一遍），按钮改为调用它。
+    新增 `tests/creatorDirectoryFilters.test.ts` —— **挂载真实视图、点真实按钮**。
+    第一版只测了 composable，把模板改回手写三筛选的变异**不会失败**（测试看不见真正坏掉的那处）；
+    改为挂载后同一变异立即失败。原始记录：`CreatorsView.vue:594`
     的空态按钮只重置 `creatorSearch`、`creatorPlatformFilter` 与标签三态，**不重置
     `creatorRoleFilter`**。而空态判据是 `filteredCreatorsList.length === 0`，后者包含角色筛选
     ——所以当「账号类型」是唯一把列表清空的原因时，这个按钮点了没有任何反应。修法是一行
@@ -720,14 +742,21 @@ B23. **分层总评（逐条验证通过）**：12 个 adapter 零 db import（�
 
 #### 队列 C — 需要用户决定
 
-8. **发布范围**（二.10）：代码侧权限已收窄（去 `tabs`、DNR WithHostAccess、RSS 按站点授权），
-   但 Chrome Web Store 的安装提示与审核说明未写；发布候选还需安装/升级说明。
+8. **发布范围**（二.10）：**材料已起草（2026-09-11）** —— 新增 `docs/PUBLISHING.md`
+   （商店清单字段含当前值与改写提案、逐权限理由与代码位置、审查员可自查的三个「不是」、
+   升级与降级说明、抖音/X 能力边界的如实表述）。**仍待用户决定的三件事**写在该文件 §1：
+   是否上架、抖音表述口径、发布范围与版本策略——未确认前不要提交审核。
    前置事实：抖音路径**没有官方 API 解法**（`DOUYIN_RESEARCH_2026-09.md` 一/二节），
-   上架说明必须如实呈现这一点。
+   上架说明必须如实呈现这一点（已写进 §4.3，含「隐藏作品计入标注数」这条容易被当成故障的事实）。
 9. **P6 整体 UI 风格重设计**：用户明确「当前不排期」。注意与队列 A.3 撞车，先拆后设计。
 10. **Non-goals**（`AGENTS.md` 有专节，不要再提议）：RSS 卡片不显示配图；视频缩略图不加
     角标/播放图标。
-11. **E2E 门禁要不要也跑在 PR 上**（A.2 的后续，需要用户拍板）。现状：只在打 tag 的
+11. ~~**E2E 门禁要不要也跑在 PR 上**（A.2 的后续，需要用户拍板）。~~ ——
+    **已决定并落地（2026-09-11）**：用户拍板加入。`ci.yml` 的 `verify` job 在 `npm run build`
+    之后增加「Ensure Chrome and Xvfb are available」+「`xvfb-run -a node e2e/release-gate.mjs`」，
+    与 `release.yml` 同一步骤。本机（Windows，同一脚本的 Chrome/CDP 部分）实测 **3.9 s / 16 项**；
+    **Linux/Xvfb 路径本机无法执行**，它只在 CI 上第一次跑时才算被验证过。
+    代价与取舍（原始记录）：现状：只在打 tag 的
     `release.yml` 里跑，所以「自动同步开关通知早于落库」这类**只有真实宿主能暴露**的回归，
     要等到发版才被拦住。放到 `ci.yml`（push/PR）上跑一遍的代价是每个 PR 多起一次
     Chrome + Xvfb（本机实测整轮 **3.5 s**，CI 上主要是浏览器启动与拉镜像）。

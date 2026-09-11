@@ -706,6 +706,75 @@ try {
     return downloadsDir;
   });
 
+  // The popup's post-follow fetch route, end to end through the real router and
+  // the real service worker. It is checked here rather than only in a unit test
+  // because three of its properties live in the extension host and nowhere else:
+  // the sender policy table has to admit the type, the handler has to be reached
+  // (a missing dispatch arm answers nothing and the caller's promise hangs), and
+  // the channel has to come from the worker's own database.
+  //
+  // Both cases below are deliberately network-free. An unknown id proves the
+  // worker looked the channel up instead of trusting the message; a channel on a
+  // platform with no adapter proves the fetch actually ran and had its failure
+  // reported rather than swallowed — `updateChannel` resolves with `error`, it
+  // does not throw, so a handler that only catches calls this a success.
+  await step('syncChannel.message-round-trip', ['dashboard.mounts'], async () => {
+    const probe = `
+      (async () => {
+        const send = (msg) => chrome.runtime.sendMessage(msg).then(
+          (r) => ({ answered: true, response: r }),
+          (e) => ({ answered: false, error: String(e && e.message || e) }),
+        );
+        const unknown = await send({ type: 'SYNC_CHANNEL', channelId: 'nope:missing' });
+        const db = await new Promise((res, rej) => {
+          const q = indexedDB.open('CreatorFeedHubDB');
+          q.onsuccess = () => res(q.result);
+          q.onerror = () => rej(q.error);
+        });
+        await new Promise((res, rej) => {
+          const tx = db.transaction('channels', 'readwrite');
+          tx.objectStore('channels').put({
+            id: 'nope:1', creatorId: 'c_probe', platform: 'nope', accountId: 'probe',
+            displayName: 'no-adapter platform', status: 'idle', profileUrl: 'https://example.com/x',
+          });
+          tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+        });
+        db.close();
+        const unsupported = await send({ type: 'SYNC_CHANNEL', channelId: 'nope:1', limit: 3 });
+        // Remove the probe row: later steps assert on exact row counts, and a
+        // leftover channel here made the fixture import wait forever for a count
+        // that could no longer be reached.
+        const db2 = await new Promise((res, rej) => {
+          const q = indexedDB.open('CreatorFeedHubDB');
+          q.onsuccess = () => res(q.result);
+          q.onerror = () => rej(q.error);
+        });
+        await new Promise((res, rej) => {
+          const tx = db2.transaction('channels', 'readwrite');
+          tx.objectStore('channels').delete('nope:1');
+          tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+        });
+        db2.close();
+        return { unknown, unsupported };
+      })()`;
+    const out = await dashboard.eval(probe);
+    assert(out.unknown?.answered, `the worker never answered SYNC_CHANNEL: ${JSON.stringify(out.unknown)}`);
+    assert(
+      out.unknown.response?.success === false && /不存在/.test(String(out.unknown.response.error)),
+      `an unknown channelId was not refused: ${JSON.stringify(out.unknown.response)}`,
+    );
+    assert(
+      out.unsupported?.answered,
+      `the worker never answered the second SYNC_CHANNEL: ${JSON.stringify(out.unsupported)}`,
+    );
+    assert(
+      out.unsupported.response?.success === false && /不支持的平台/.test(String(out.unsupported.response.error)),
+      `a sync that resolved with an error was not reported as one: ${JSON.stringify(out.unsupported.response)}`,
+    );
+    detail(`unknown id refused; unsupported platform reported: ${out.unsupported.response.error}`);
+    return out;
+  });
+
   const seeded = await step('backup.seed-fixture', ['dashboard.mounts', 'backup.arm-downloads'], async () => {
     // Stay on the settings tab from here on: the feed marks rendered posts as
     // read, which would change the very rows this round trip compares.

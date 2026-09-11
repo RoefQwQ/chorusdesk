@@ -4,6 +4,7 @@ import { handleBgFetch } from '../src/infrastructure/chrome/messages/bgFetch';
 import { handleTwitterTimeline } from '../src/infrastructure/chrome/messages/twitterTimeline';
 import { handleDouyinSnapshot, sweepOrphanDouyinTempTab } from '../src/infrastructure/chrome/messages/douyinSnapshot';
 import { isExtensionPageSender } from '../src/infrastructure/chrome/messages/senderGuard';
+import { handleSyncChannel } from '../src/infrastructure/chrome/messages/syncChannel';
 import { setupDeclarativeNetRules } from '../src/infrastructure/chrome/declarativeNetRequest';
 import { handleAutoSyncAlarm, setupAutoSync, updateUnreadBadge } from '../src/infrastructure/chrome/autoSync';
 import { devLog } from '../src/utils/devLog';
@@ -28,6 +29,7 @@ const SENDER_POLICY: Record<string, 'page'> = {
   FETCH_TWITTER_TIMELINE: 'page',
   FETCH_DOUYIN_SNAPSHOT: 'page',
   REFRESH_BADGE: 'page',
+  SYNC_CHANNEL: 'page',
 };
 
 export default defineBackground(() => {
@@ -110,6 +112,10 @@ export default defineBackground(() => {
 
     if (type === 'FETCH_DOUYIN_SNAPSHOT') {
       return handleDouyinSnapshot(message, sendResponse);
+    }
+
+    if (type === 'SYNC_CHANNEL') {
+      return handleSyncChannel(message, sendResponse);
     }
 
     return false;

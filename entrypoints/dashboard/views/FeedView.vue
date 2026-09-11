@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Search, LayoutGrid, Repeat2, Image as ImageIcon, ImageOff, Tag, Users,
   ChevronDown, Eye, EyeOff, RefreshCw, CheckCircle2,
 } from 'lucide-vue-next';
 import PostCard from '../components/PostCard.vue';
 import LoopScroll from '../components/LoopScroll.vue';
 import type { PlatformMeta, Creator, Channel, Post } from '../../../src/types';
+import { usePlatformDnD } from '../composables/usePlatformDnD';
+import { useWaterfallFeed } from '../composables/useWaterfallFeed';
 
 type LightboxMedia = { url: string; originalUrl?: string; type: string; title?: string } | null;
 
@@ -64,149 +65,29 @@ const emit = defineEmits<{
 }>();
 
 // ===== Sidebar platform list: custom order + drag & drop =====
-/** Ordered platform keys: user order first, unlisted platforms after (registry order). */
-const orderedPlatformKeys = computed<string[]>(() => {
-  const registryKeys = Object.keys(props.context.PLATFORM_REGISTRY);
-  const userOrder = props.context.platformOrder.filter(k => registryKeys.includes(k));
-  const rest = registryKeys.filter(k => !userOrder.includes(k));
-  return [...userOrder, ...rest];
+const {
+  orderedPlatformKeys,
+  dragPlatformKey,
+  dragOverPlatformKey,
+  onPlatformDragStart,
+  onPlatformDragOver,
+  onPlatformDrop,
+} = usePlatformDnD({
+  platformOrder: () => props.context.platformOrder,
+  registryKeys: () => Object.keys(props.context.PLATFORM_REGISTRY),
+  onReorder: (order) => emit('reorder-platforms', order),
 });
 
-const dragPlatformKey = ref<string | null>(null);
-const dragOverPlatformKey = ref<string | null>(null);
-
-function onPlatformDragStart(key: string) {
-  dragPlatformKey.value = key;
-}
-
-function onPlatformDragOver(e: DragEvent, key: string) {
-  if (dragPlatformKey.value === null || dragPlatformKey.value === key) return;
-  e.preventDefault();
-  dragOverPlatformKey.value = key;
-}
-
-function onPlatformDrop(key: string) {
-  const from = dragPlatformKey.value;
-  if (from === null || from === key) {
-    dragPlatformKey.value = null;
-    dragOverPlatformKey.value = null;
-    return;
-  }
-  const next = [...orderedPlatformKeys.value];
-  const fromIdx = next.indexOf(from);
-  const toIdx = next.indexOf(key);
-  if (fromIdx !== -1 && toIdx !== -1) {
-    next.splice(toIdx, 0, next.splice(fromIdx, 1)[0]);
-    emit('reorder-platforms', next);
-  }
-  dragPlatformKey.value = null;
-  dragOverPlatformKey.value = null;
-}
+// ===== Pagination, infinite scroll and the responsive masonry =====
+const { visibleCount, infiniteScrollTrigger, feedColumns } = useWaterfallFeed({
+  posts: () => props.context.filteredPosts,
+});
 
 function handleSearchInput(event: Event) {
+
   emit('update:searchQuery', (event.target as HTMLInputElement).value);
 }
 
-// ===== Pagination & Infinite Scroll (same contract as App.vue feed) =====
-const PAGE_SIZE = 36;
-const visibleCount = ref(PAGE_SIZE);
-const infiniteScrollTrigger = ref<HTMLElement | null>(null);
-let scrollObserver: IntersectionObserver | null = null;
-
-// Reset paging whenever the filtered result set changes (new sync/filter)
-watch(
-  () => props.context.filteredPosts.length,
-  () => { visibleCount.value = PAGE_SIZE; }
-);
-
-function setupScrollObserver() {
-  if (scrollObserver) {
-    scrollObserver.disconnect();
-    scrollObserver = null;
-  }
-  if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return;
-  scrollObserver = new IntersectionObserver(
-    (entries) => {
-      const entry = entries[0];
-      if (entry && entry.isIntersecting) {
-        if (visibleCount.value < props.context.filteredPosts.length) {
-          visibleCount.value += PAGE_SIZE;
-        }
-      }
-    },
-    { rootMargin: '900px 0px' }
-  );
-  if (infiniteScrollTrigger.value) {
-    scrollObserver.observe(infiniteScrollTrigger.value);
-  }
-}
-
-watch(infiniteScrollTrigger, (el) => {
-  if (el && scrollObserver) {
-    scrollObserver.observe(el);
-  }
-});
-
-// ===== Responsive Masonry Waterfall (same algorithm as App.vue) =====
-const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1200);
-const columnCount = computed(() => {
-  if (windowWidth.value < 768) return 1;   // mobile: single column
-  if (windowWidth.value < 1280) return 2;  // tablet: 2 columns
-  return 3;                                 // desktop: 3 columns
-});
-
-function handleResizeForWaterfall() {
-  windowWidth.value = window.innerWidth;
-}
-
-function estimatePostHeight(p: Post): number {
-  let h = 90; // Header avatar + meta info + padding
-  if (p.title) h += 28;
-  if (p.content) {
-    const lines = Math.min(Math.ceil(p.content.length / 32), 4);
-    h += lines * 18;
-  }
-  if (p.mediaList?.length) {
-    if (p.mediaList.length === 1) {
-      h += p.mediaList[0].type === 'video' ? 210 : 320;
-    } else if (p.mediaList.length === 2) {
-      h += 220;
-    } else {
-      h += 260;
-    }
-  }
-  h += 40; // Footer timestamp + direct link bar
-  return h;
-}
-
-const paginatedPosts = computed(() => props.context.filteredPosts.slice(0, Math.max(1, visibleCount.value)));
-
-const feedColumns = computed(() => {
-  const count = Math.max(1, columnCount.value);
-  const cols: Post[][] = Array.from({ length: count }, () => []);
-  const colHeights = new Array<number>(count).fill(0);
-  for (const post of paginatedPosts.value) {
-    let minCol = 0;
-    for (let c = 1; c < count; c++) {
-      if (colHeights[c] < colHeights[minCol]) minCol = c;
-    }
-    cols[minCol].push(post);
-    colHeights[minCol] += estimatePostHeight(post) + 20;
-  }
-  return cols;
-});
-
-onMounted(() => {
-  window.addEventListener('resize', handleResizeForWaterfall);
-  nextTick(setupScrollObserver);
-});
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResizeForWaterfall);
-  if (scrollObserver) {
-    scrollObserver.disconnect();
-    scrollObserver = null;
-  }
-});
 </script>
 
 <template>

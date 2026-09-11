@@ -36,3 +36,30 @@ export async function updateChannelRole(channel: Channel): Promise<void> {
     await db.posts.where('channelId').equals(channel.id).modify({ channelLabel: channel.label });
   });
 }
+
+/**
+ * Reset every channel left mid-sync back to `idle`.
+ *
+ * A sync sets `updating` before it starts and clears it when it finishes, so a
+ * browser close or an MV3 worker teardown in between leaves the row claiming to
+ * be syncing forever — the badge then says 同步中 for a run that no longer exists.
+ * Called on dashboard boot and on popup open.
+ *
+ * Lives in the db layer, not in `src/sync`: it is a plain channel write with no
+ * adapter involved, and while it lived beside `channelSync` every caller had to
+ * pull in the platform registry to reset a status column. The popup, which calls
+ * this on open, was loading all ten adapters to do it.
+ *
+ * Only rows whose status is `updating` are touched, and `errorMessage` is left
+ * alone: a genuinely failed channel keeps both its status and the message that
+ * explains it.
+ */
+export async function clearStaleUpdatingStatus(): Promise<void> {
+  try {
+    await db.channels.where('status').equals('updating').modify({
+      status: 'idle',
+    });
+  } catch (e) {
+    console.warn('[Channels] Failed to clear stale updating status:', e);
+  }
+}

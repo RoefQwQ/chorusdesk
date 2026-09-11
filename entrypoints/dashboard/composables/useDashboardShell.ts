@@ -7,7 +7,8 @@ import {
 } from '../../../src/infrastructure/db/settingsRepository';
 import { getDatabaseStats } from '../../../src/infrastructure/db/statsService';
 import { healBrokenPostMedia } from '../../../src/infrastructure/db/postRepository';
-import { clearStaleUpdatingStatus, updateChannel } from '../../../src/sync';
+import { updateChannel } from '../../../src/sync';
+import { channelService } from '../../../src/application';
 import { useDashboardData } from './useDashboardData';
 import type { DashboardStats } from './useDashboardData';
 
@@ -75,7 +76,7 @@ export function useDashboardShell(): DashboardShellState {
     reloadFeedData,
     loadSettings,
     saveSettings,
-    clearStaleUpdatingStatus,
+    clearStaleUpdatingStatus: () => channelService.clearStaleUpdatingStatus(),
     updateChannel,
     notifyAutoSyncChanged,
   };
