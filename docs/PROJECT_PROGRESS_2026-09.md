@@ -632,9 +632,10 @@ B11. ~~**三态标签过滤器两份**~~ —— **已完成（2026-09-11）**：
     过滤永不生效）。验证：写一次性脚本对 3 个旧实现做 149 项逐输入对比（8 种集合状态 ×
     9 种标签形状 × 2 个旧实现 + 状态机循环 4 步 + `clearTagFromFilters`）**全部等价**；
     另用 `e2e/creators-render.mjs` 在真实 Chrome 做 22 步逐字节对比，**全等**（738611 B）。
-B12. **`err instanceof Error ? err.message : String(err)` 至少三种写法**：两个几乎一样的具名
-    `errorMessage()`（`bgFetch.ts:26`、`proxyImage.ts:21`）+ 约 10 处内联三元。
-    提到 `src/utils/` 一个函数即可。
+B12. ~~**`err instanceof Error ? err.message : String(err)` 至少三种写法**~~ ——
+    **已完成（2026-09-11，提交 `c838a64`）**，验证：`src/utils/errorMessage.ts` 存在且被
+    **16 个文件**引用，全仓该内联三元**零残留**。原条目：两个几乎一样的具名 `errorMessage()`
+    （`bgFetch.ts:26`、`proxyImage.ts:21`）+ 约 10 处内联三元。
 B13. ~~**死代码，约 30 行**~~ —— **已完成（2026-09-11，提交 `b0c3e19`）**：三个零引用导出已删并
     各自核实过全仓（含 tests/e2e）无引用。原条目：`postRepository.ts:63` `restoreDeletedPostId`（是 `restoreDeletedPost`
     的纯别名）、`:70` `restoreDeletedPostIds`（与在用的 `restoreAllDeletedPostIds` 同体，
@@ -725,14 +726,15 @@ B28. **`enableR18Blur` 是死设置**（2026-09-11 核对商店政策时发现�
     它读起来像一项已实现的合规能力。修法二选一：接上真正的模糊/隐藏逻辑，或删掉它（含类型与默认值），
     **不要留着当装饰**。与上架相关：商店对不适合全年龄的内容要求标记 Mature，而这条决定依据是
     「产品实际会展示什么」，所以先定这个设置的去留，再定商店的 Mature 标记。
-B29. **上架的合规缺口（上架前必须补，已核对一手政策）**：见 `docs/PUBLISHING.md` §1.4，共 5 条——
+B29. **上架的合规缺口**（**已随「不上架」决定失效**，2026-09-11 用户决定不提交商店；材料保留在
+    `docs/PUBLISHING.md` §1.4，将来若重新考虑上架再执行）：共 5 条——
     其中第 1 条最硬：*Limited Use* 第 6 条要求扩展自有网站上有固定措辞的主动声明
     （"The use of information received from Google APIs will adhere to the Chrome Web Store User Data
     Policy, including the Limited Use requirements."），而 `docs/PRIVACY.md` 目前**没有**这句话。
     其余为：隐私政策需要可填写的公开 URL；`optional_host_permissions: ['*://*/*']` 必须在文案里
     点名解释（政策禁止为未实现功能预申请权限）；描述不能只是平台名清单（Keyword Spam）；
     Mature 标记待定（依赖 B28）。
-B30. **Withny 平台整体移除**（2026-09-12，用户决定）——现为 9 个平台。改动位点：适配器文件、
+B30. **Withny 平台整体移除**（2026-09-12，用户决定）——**已完成（提交 `0774e68`）**。现为 9 个平台。改动位点：适配器文件、
     `PLATFORM_HOSTS`、`platformAuth` 的 cookie 行、`pathResolver` 的目录名、`Platform` 联合类型、
     `PLATFORM_REGISTRY` 条目、`registry` 注册、`urlParser` 的主机提示与解析分支，以及
     README / PLATFORMS / ARCHITECTURE / PUBLISHING / 设置页文案。**已验证**：产物 `host_permissions`
@@ -762,6 +764,7 @@ B33. **平台评估的三条落地项**（2026-09-12 处理状态）：
     改主路径。正确顺序是：先抓一份真实载荷做 fixture → 再提纯 → 最后断言同一份 fixture 解析结果不变。
     需要一次真实同步来取载荷，所以排在真机验证（B26）之后。
 B32. **占位名前缀清单与 `urlParser` 系统性脱节**（2026-09-12，B30 的同类问题查全的结果）——
+    **部分完成（提交 `c9b97e8`）：缺失的 8 个前缀已补齐，复核 15/16；根治（改为单一来源＋守卫测试）未做**——
     拿 `urlParser` **实际生成**的 16 个 `suggestedName` 前缀，逐个对 channelSync 的两份手写清单判：
     **修复前 8 处缺口**，全部会真实发作（不是理论问题）：9 个 adapter **都会**回传
     `authorMeta.name`（rss 回传 feed 标题、youtube/pixiv 回传 `authorName`…），所以权威昵称拿得到，
