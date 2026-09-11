@@ -698,15 +698,21 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
     <!-- Aligned to the right-hand creator card column (lg:w-64 xl:w-68).
          The reserved column has the same width as that sidebar and is right-aligned
          in the same container, so the two share a right edge — which makes their LEFT
-         edges coincide too. `lg:justify-start` is therefore all it takes to line the
-         widget up with the creator card's left edge; it used to be `justify-center`,
-         which floated it in the middle of the column (2026-09-11). -->
+         edges coincide too.
+         The widget's leading edge sits at the golden-ratio point of the column
+         (2026-09-11: 「挪到上面创作者宽度的 0.618 比例处」), expressed as a percentage
+         spacer rather than a pixel value because the column is 256px at `lg` and 272px
+         at `xl` — a fixed offset would only be right at one breakpoint.
+         Below `lg` the column is `w-auto` and unconstrained, so there is no ratio to
+         speak of and the widget stays right-aligned (`justify-end`). -->
     <div
       v-if="activeTab === 'feed'"
       class="fixed bottom-6 inset-x-0 pointer-events-none z-40"
     >
       <div class="w-full max-w-[98%] 2xl:max-w-[96%] mx-auto px-3 sm:px-6 flex justify-end">
         <div class="w-auto lg:w-64 xl:w-68 flex justify-end lg:justify-start pointer-events-auto">
+          <!-- 61.8% of the column, so the widget starts at the golden-ratio division. -->
+          <div class="hidden lg:block w-[61.8%] shrink-0" aria-hidden="true"></div>
           <ScrollActionToolbar />
         </div>
       </div>

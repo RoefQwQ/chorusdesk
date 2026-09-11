@@ -124,17 +124,23 @@ describe('dashboard — floating reading toolbar', () => {
     expect(toolbar()).toBeNull();
   });
 
-  it('is left-aligned with the right sidebar, not centred in it', async () => {
-    // Asked for 2026-09-11: 「把这个右下角的挪动到和上面的创作者卡片的左侧对齐」. Before,
-    // the reserved column centred the widget, which put it 115px right of the card's
-    // left edge (measured at 1568px: column 272px, widget 42px, (272-42)/2 = 115).
+  it('positions the widget at the golden ratio of the right sidebar column', async () => {
+    // Asked for 2026-09-11: 「挪到上面创作者宽度的 0.618 比例处」 — the widget's leading
+    // edge at 61.8% of the column. It was centred before (115px from the left edge at
+    // 1568px) and briefly left-aligned.
     //
-    // The alignment is pure layout, so jsdom cannot measure it. What it CAN hold is the
-    // one fact the layout depends on: the reserved column and the right sidebar declare
-    // the same widths at the breakpoints where they sit side by side. They are declared
-    // in two different files, so changing one silently drifts the widget in the browser
-    // and nowhere else. Verified in a real browser at 1568px: both edges at x=1225,
-    // delta 0.
+    // The position is pure layout, so jsdom cannot measure it. Measured in a real
+    // browser with the production stylesheet instead — the ratio is exactly 0.618 and
+    // scales with the column, because it is expressed as a percentage rather than a
+    // pixel offset:
+    //
+    //   innerWidth 1568 (xl): column 272 → spacer 168 → left offset 168, ratio 0.618
+    //   innerWidth 1200 (lg): column 256 → spacer 158 → left offset 158, ratio 0.618
+    //   innerWidth  900 (<lg): spacer hidden, widget right-aligned
+    //
+    // What this test holds is the two facts the layout rests on: the ratio, and the
+    // coupling that the reserved column and the sidebar declare the same widths (in
+    // two different files, so changing one drifts the widget with no other symptom).
     await openTab('动态');
     const reserved = toolbar()!.parentElement as HTMLElement;
     expect(reserved).not.toBeNull();
@@ -151,8 +157,16 @@ describe('dashboard — floating reading toolbar', () => {
       [...el.classList].filter((c) => /^(lg|xl):w-/.test(c)).sort();
 
     expect(breakpointWidths(reserved)).toEqual(breakpointWidths(sidebar));
-    // And the widget is pinned to that column's leading edge.
     expect(reserved.className).toContain('lg:justify-start');
+
+    // The ratio lives on the spacer, and must be exactly the golden ratio.
+    const spacer = reserved.firstElementChild as HTMLElement;
+    expect(spacer.getAttribute('aria-hidden')).toBe('true');
+    expect([...spacer.classList].filter((c) => /^w-\[[\d.]+%\]$/.test(c))).toEqual(['w-[61.8%]']);
+    // Hidden below `lg`: at `w-auto` there is no column to take a ratio of, and a
+    // visible spacer would push the right-aligned widget off the edge.
+    expect(spacer.className).toContain('hidden');
+    expect(spacer.className).toContain('lg:block');
   });
 
   it('comes back when the feed is reopened', async () => {
