@@ -117,7 +117,6 @@ const directory = useCreatorDirectoryFilters({
 const {
   creatorSearch,
   creatorPlatformFilter,
-  creatorTagFilter,
   creatorRoleFilter,
   includeTags,
   excludeTags,
@@ -592,7 +591,7 @@ function loadDemoData() {
       <Search class="w-8 h-8 text-slate-400 mx-auto mb-2" />
       <p class="text-xs text-slate-500 mb-3">未找到匹配的创作者</p>
       <button
-        @click="creatorSearch = ''; creatorPlatformFilter = 'all'; creatorTagFilter = 'all'; clearAllTagFilters();"
+        @click="creatorSearch = ''; creatorPlatformFilter = 'all'; clearAllTagFilters();"
         class="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 rounded-lg hover:underline cursor-pointer"
       >
         清除筛选

@@ -8,6 +8,7 @@ import {
 } from '../../../src/types';
 import { compareManualEntries } from '../../../src/utils/order';
 import type { CreatorSortKey } from '../types/creatorDirectory';
+import { useTagFilterState } from './useTagFilterState';
 
 /**
  * One entry of the sort dropdown.
@@ -54,12 +55,19 @@ export interface CreatorDirectoryDependencies {
 export function useCreatorDirectoryFilters(deps: CreatorDirectoryDependencies) {
   const creatorSearch = ref('');
   const creatorPlatformFilter = ref('all');
-  /** Legacy single-tag filter, kept in the pipeline for API compatibility. */
-  const creatorTagFilter = ref('all');
   /** Account-type filter: 'all' | AccountRole. A creator matches when any of its accounts has that role. */
   const creatorRoleFilter = ref<'all' | AccountRole>('all');
-  const includeTags = ref<Set<string>>(new Set());
-  const excludeTags = ref<Set<string>>(new Set());
+
+  // Same tri-state tag filtering as the feed — shared implementation, not a
+  // second copy of the rules.
+  const {
+    includeTags,
+    excludeTags,
+    matchesTagFilter,
+    cycleTagFilter,
+    clearAllTagFilters,
+    getTagFilterState,
+  } = useTagFilterState();
 
   // Typed against `CreatorSortKey` so the generic `AppSelect` can prove the options
   // match the ref it is bound to: without the annotation Vue widens `value` to
@@ -129,30 +137,7 @@ export function useCreatorDirectoryFilters(deps: CreatorDirectoryDependencies) {
     return Array.from(set);
   });
 
-  // Tag filtering tri-state helpers (neutral -> include -> exclude -> neutral)
-  function cycleTagFilter(t: string) {
-    if (includeTags.value.has(t)) {
-      includeTags.value.delete(t);
-      excludeTags.value.add(t);
-    } else if (excludeTags.value.has(t)) {
-      excludeTags.value.delete(t);
-    } else {
-      includeTags.value.add(t);
-    }
-    includeTags.value = new Set(includeTags.value);
-    excludeTags.value = new Set(excludeTags.value);
-  }
-
-  function clearAllTagFilters() {
-    includeTags.value = new Set();
-    excludeTags.value = new Set();
-  }
-
-  function getTagFilterState(t: string): 'include' | 'exclude' | 'none' {
-    if (includeTags.value.has(t)) return 'include';
-    if (excludeTags.value.has(t)) return 'exclude';
-    return 'none';
-  }
+  // Tag filtering tri-state helpers live in `useTagFilterState` (shared with the feed).
 
   // Platform count map per creator
   const creatorChannelMap = computed(() => {
@@ -201,22 +186,9 @@ export function useCreatorDirectoryFilters(deps: CreatorDirectoryDependencies) {
       });
     }
 
-    // 3. Tag filter (positive inclusion & negative exclusion)
-    if (excludeTags.value.size > 0) {
-      list = list.filter(c => {
-        const cTags = c.tags || [];
-        return !cTags.some(t => excludeTags.value.has(t));
-      });
-    }
-    if (includeTags.value.size > 0) {
-      list = list.filter(c => {
-        const cTags = c.tags || [];
-        return cTags.some(t => includeTags.value.has(t));
-      });
-    }
-    if (creatorTagFilter.value !== 'all') {
-      list = list.filter(c => c.tags?.includes(creatorTagFilter.value));
-    }
+    // 3. Tag filter (positive inclusion & negative exclusion) — one predicate,
+    //    shared with the feed.
+    list = list.filter(c => matchesTagFilter(c.tags));
 
     // 4. Account-type filter: creator has at least one channel of that role.
     if (creatorRoleFilter.value !== 'all') {
@@ -286,7 +258,6 @@ export function useCreatorDirectoryFilters(deps: CreatorDirectoryDependencies) {
   return {
     creatorSearch,
     creatorPlatformFilter,
-    creatorTagFilter,
     creatorRoleFilter,
     includeTags,
     excludeTags,

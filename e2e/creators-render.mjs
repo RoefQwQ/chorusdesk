@@ -263,18 +263,43 @@ await shot('19-filters-cleared', () => act(`
   byTitle('紧凑列表视图').click();
   return badge();`));
 
-await shot('20-manual-sort', () => act(`
-  const trigger = byTitle('排序') || [...sec().querySelectorAll('button')].find((b) => /最近活跃|作品数量/.test(b.textContent || ''));
-  const root = sec().querySelector('input[placeholder^="快速搜索创作者"]').closest('div').parentElement;
-  const btn = [...sec().querySelectorAll('button')].find((b) => /最近活跃|作品数量|字母名称/.test((b.textContent || '').trim()));
+// The AppSelect trigger reports its state through `aria-expanded`, and Vue
+// flushes the DOM update on a microtask — so the open state must be read AFTER an
+// await. Reading it synchronously reports the previous render and made a working
+// control look dead (AGENTS rule 30).
+const sortStep = (body) => evaluate(`(async () => { ${PRELUDE} ${body} })()`);
+const sortTrigger = `
+  const trigger = () => [...sec().querySelectorAll('button[aria-expanded]')]
+    .find((b) => /最近活跃|作品数量|账号数量|字母名称|标签|按平台分组|手动排序/.test((b.textContent || '').trim()));
+`;
+
+await shot('20-manual-sort', () => sortStep(`
+  ${sortTrigger}
+  const btn = trigger();
   if (!btn) throw new Error('sort trigger not found');
   btn.click();
-  return 'opened sort dropdown';`));
-await shot('21-manual-sort-chosen', () => act(`
+  await new Promise((r) => setTimeout(r, 150));
+  const opened = btn.getAttribute('aria-expanded');
+  const optionsVisible = [...sec().querySelectorAll('button')].filter((b) => /^手动排序$/.test((b.textContent || '').trim())).length;
+  // Close before capturing: the dropdown is a Vue <Transition>, and this window is
+  // off-screen and never composited, so its enter/leave animation never settles
+  // (rule 30 — no frames means no rAF). Capturing it mid-transition made steps
+  // 20-22 differ between two runs of the SAME build. The open state is asserted
+  // here instead of photographed.
+  btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 150));
+  return 'aria-expanded=' + opened + ' options=' + optionsVisible + ' afterEscape=' + btn.getAttribute('aria-expanded');
+`));
+await shot('21-manual-sort-chosen', () => sortStep(`
+  ${sortTrigger}
+  trigger().click();
+  await new Promise((r) => setTimeout(r, 150));
   const opt = [...sec().querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '手动排序');
-  if (!opt) throw new Error('manual-sort option not found');
+  if (!opt) throw new Error('manual-sort option not found after opening');
   opt.click();
-  return 'chose 手动排序';`));
+  await new Promise((r) => setTimeout(r, 150));
+  return 'sort label now: ' + (trigger() || {}).textContent?.trim();
+`));
 const dragResult = await evaluate(`(async () => { ${PRELUDE}
   const rows = [...sec().querySelectorAll('tbody tr')].filter((tr) => !tr.querySelector('td[colspan]'));
   if (rows.length < 2) {

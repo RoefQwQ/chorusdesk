@@ -1,6 +1,7 @@
 import { computed, ref, type Ref, type ShallowRef } from 'vue';
 import type { Creator, Channel, Post, AppSettings } from '../../../src/types';
 import { saveSettings } from '../../../src/infrastructure/db/settingsRepository';
+import { useTagFilterState } from './useTagFilterState';
 
 export interface FeedFilterDependencies {
   posts: ShallowRef<Post[]>;
@@ -25,11 +26,20 @@ export function useFeedFilters(deps: FeedFilterDependencies) {
 
   const searchQuery = ref('');
   const selectedPlatform = ref<string>('all');
-  const selectedTag = ref<string>('all'); // Legacy backward compatibility
-  const includeTags = ref<Set<string>>(new Set());
-  const excludeTags = ref<Set<string>>(new Set());
   const hideReposts = ref(false);
   const hideTextOnly = ref(false);
+
+  // Tri-state tag filtering is shared with the creators directory — one
+  // implementation, one set of rules for what (−) means.
+  const {
+    includeTags,
+    excludeTags,
+    matchesTagFilter,
+    cycleTagFilter,
+    clearAllTagFilters,
+    clearTagFromFilters,
+    getTagFilterState,
+  } = useTagFilterState();
 
   const creatorMap = computed(() => new Map(creators.value.map(creator => [creator.id, creator])));
 
@@ -78,57 +88,14 @@ export function useFeedFilters(deps: FeedFilterDependencies) {
     await saveSettings({ hideTextOnly: hideTextOnly.value });
   }
 
-  // Tag filtering tri-state helpers (neutral -> include -> exclude -> neutral)
-  function cycleTagFilter(t: string) {
-    if (includeTags.value.has(t)) {
-      // Switch from include (+) to exclude (-)
-      includeTags.value.delete(t);
-      excludeTags.value.add(t);
-    } else if (excludeTags.value.has(t)) {
-      // Switch from exclude (-) to neutral (off)
-      excludeTags.value.delete(t);
-    } else {
-      // Switch from neutral to include (+)
-      includeTags.value.add(t);
-    }
-    includeTags.value = new Set(includeTags.value);
-    excludeTags.value = new Set(excludeTags.value);
-  }
-
-  function clearAllTagFilters() {
-    includeTags.value = new Set();
-    excludeTags.value = new Set();
-    selectedTag.value = 'all';
-  }
-
-  /** Remove a single tag from both tri-state filters (global tag purge). */
-  function clearTagFromFilters(tag: string) {
-    if (includeTags.value.has(tag) || excludeTags.value.has(tag)) {
-      includeTags.value.delete(tag);
-      excludeTags.value.delete(tag);
-      includeTags.value = new Set(includeTags.value);
-      excludeTags.value = new Set(excludeTags.value);
-    }
-  }
-
-  function getTagFilterState(t: string): 'include' | 'exclude' | 'none' {
-    if (includeTags.value.has(t)) return 'include';
-    if (excludeTags.value.has(t)) return 'exclude';
-    return 'none';
-  }
+  // Tag filtering tri-state helpers live in `useTagFilterState` (shared with the
+  // creators directory).
 
   // Visible creators under currently selected platform and tag filter
   const visibleCreatorsForFilter = computed(() => {
     return creators.value.filter(c => {
-      const cTags = c.tags || [];
-      // 1. Exclude tags check (if creator has ANY tag in excludeTags, hide)
-      if (excludeTags.value.size > 0) {
-        if (cTags.some(t => excludeTags.value.has(t))) return false;
-      }
-      // 2. Include tags check (creator must match at least one tag in includeTags)
-      if (includeTags.value.size > 0) {
-        if (!cTags.some(t => includeTags.value.has(t))) return false;
-      }
+      // 1./2. Tag exclusion and inclusion, in that order — see useTagFilterState.
+      if (!matchesTagFilter(c.tags)) return false;
       // 3. Platform filter
       if (selectedPlatform.value !== 'all') {
         const hasPlatformChannel = channels.value.some(
@@ -182,18 +149,11 @@ export function useFeedFilters(deps: FeedFilterDependencies) {
       if (selectedPlatform.value !== 'all' && p.platform !== selectedPlatform.value) {
         return false;
       }
-      // Tag filter (positive inclusion & negative exclusion)
+      // Tag filter (positive inclusion & negative exclusion) — the creator's tags
+      // decide, via the shared predicate.
       const creator = creatorMap.value.get(p.creatorId);
-      const cTags = creator?.tags || [];
-      if (excludeTags.value.size > 0) {
-        if (cTags.some(t => excludeTags.value.has(t))) {
-          return false;
-        }
-      }
-      if (includeTags.value.size > 0) {
-        if (!cTags.some(t => includeTags.value.has(t))) {
-          return false;
-        }
+      if (!matchesTagFilter(creator?.tags)) {
+        return false;
       }
       // Search query
       if (searchQuery.value.trim()) {
@@ -209,7 +169,6 @@ export function useFeedFilters(deps: FeedFilterDependencies) {
   return {
     searchQuery,
     selectedPlatform,
-    selectedTag,
     includeTags,
     excludeTags,
     hideReposts,

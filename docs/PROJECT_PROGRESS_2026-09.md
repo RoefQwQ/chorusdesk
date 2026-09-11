@@ -615,6 +615,14 @@ B11. **三态标签过滤器两份**：`useFeedFilters.ts:82-118` 与
     `useCreatorDirectoryFilters.ts:133-155` 逻辑逐字等价（两份原本就在同一个文件里，
     拆分只是让它可见）。可提 `createTagTriState()` 工厂 + 队列 B 第 8 条的 `selectedTag`/
     `creatorTagFilter` 一起清掉。
+B11. ~~**三态标签过滤器两份**~~ —— **已完成（2026-09-11）**：新增
+    `entrypoints/dashboard/composables/useTagFilterState.ts` 独占三态状态机、两个集合与
+    **第三个重复**——同一个 include/exclude 谓词（原在 `useFeedFilters` 里两处、
+    `useCreatorDirectoryFilters` 里一处，共三份）。顺带清掉两个死状态：`selectedTag`
+    （全仓只有声明/重置/导出，无任何读取）与 `creatorTagFilter`（恒为 `'all'`，第 3.5 步
+    过滤永不生效）。验证：写一次性脚本对 3 个旧实现做 149 项逐输入对比（8 种集合状态 ×
+    9 种标签形状 × 2 个旧实现 + 状态机循环 4 步 + `clearTagFromFilters`）**全部等价**；
+    另用 `e2e/creators-render.mjs` 在真实 Chrome 做 22 步逐字节对比，**全等**（738611 B）。
 B12. **`err instanceof Error ? err.message : String(err)` 至少三种写法**：两个几乎一样的具名
     `errorMessage()`（`bgFetch.ts:26`、`proxyImage.ts:21`）+ 约 10 处内联三元。
     提到 `src/utils/` 一个函数即可。
@@ -671,6 +679,20 @@ B22. **规则 8 的台账出现漂移**（已核实）：规则 8 记的 9 处�
     第 9 处 `useDeletedPosts.ts:11`（回收站读路径直连 `postRepository`）**不在**。
     形态正是该规则禁止的（「优先加 service 方法而非新增直连 import」），却落在规则用来自我
     约束的清单之外——「已知债务、已枚举」这句话就是这样悄悄失效的。已记录未修。
+B24. **「清除筛选」按钮不清账号类型筛选**（B11 期间发现，未修）：`CreatorsView.vue:594`
+    的空态按钮只重置 `creatorSearch`、`creatorPlatformFilter` 与标签三态，**不重置
+    `creatorRoleFilter`**。而空态判据是 `filteredCreatorsList.length === 0`，后者包含角色筛选
+    ——所以当「账号类型」是唯一把列表清空的原因时，这个按钮点了没有任何反应。修法是一行
+    （把 `creatorRoleFilter = 'all'` 加进那个表达式），但那是行为改动，没有混进 B11 的纯重构提交。
+B25. **`e2e/creators-render.mjs` 的第 20–22 步曾是**非确定性**的（已修）**：它捕获了排序下拉框的
+    动画中间态。同一份构建连跑两次，恰好在且仅在这 3 步上不同——根因是规则 30：**离屏未合成的
+    窗口不产生帧**，而该下拉是 Vue `<Transition>`，其进退场动画永不收敛。已改为捕获前关闭下拉、
+    并用 `aria-expanded` 断言开合状态（`aria-expanded=true` / 选项出现 / Escape 后 `false` /
+    触发标签变为「手动排序」），比原先的截图更强。**影响面**：这 3 步恰是手动排序那几步，
+    所有重构都没碰；其余 19 步（三套模板、筛选、排序、标签、批量）从无抖动，那部分证据仍然成立。
+    同一次还暴露出父级在点击后**同步**读 DOM（读到的是上一帧），`AppSelect` 因此看起来是死的——
+    与规则 30 末段同一条。
+
 B23. **分层总评（逐条验证通过）**：12 个 adapter 零 db import（规则 1 成立）；
     `infrastructure/db/*` 零 `chrome.*`（规则 2 成立方向）；`douyin/collector.ts` 自包含
     且是唯一 collector 文件（规则 9 成立）；无 2-节点环；最长依赖链 11 个模块且全程向下。
