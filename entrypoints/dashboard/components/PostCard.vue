@@ -552,7 +552,7 @@ function toggleBookmark() {
             <div
               v-if="isMediaFailed(media.previewUrl)"
               class="w-full h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 p-1 text-center select-none"
-              title="图片无法直接加载，可点击直达原帖查看"
+              title="图片无法直接加载，可在原帖查看"
             >
               <ImageOff class="w-4 h-4 stroke-[1.75]" />
               <span class="text-[9px] mt-1 text-slate-400 dark:text-slate-500 scale-90">预览受限</span>

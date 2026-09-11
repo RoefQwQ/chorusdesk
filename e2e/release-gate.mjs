@@ -1162,6 +1162,12 @@ try {
         popup.eval('typeof chrome === "object" && chrome.runtime && chrome.runtime.id'),
       );
       await cdp.send('Target.closeTarget', { targetId });
+      // Closing a target can also restore the window (observed intermittently: the
+      // end-of-run assertion caught the window back in `normal` state after this
+      // loop). Closing the last tab of a non-primary window makes Chrome re-map the
+      // remaining one, and the re-map does not preserve `minimized`. So hide again
+      // here, not only after creation.
+      await hideWindow(cdp);
     }
     const list = await readAlarms();
     const alarm = alarmIn(list);

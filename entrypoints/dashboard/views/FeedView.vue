@@ -158,7 +158,7 @@ function handleSearchInput(event: Event) {
           dragOverPlatformKey === key ? 'ring-2 ring-indigo-400 border-dashed' : '',
         ]"
         class="w-full flex items-center justify-between px-3 py-2 text-xs rounded-xl border transition-all cursor-grab active:cursor-grabbing"
-        :title="'点击筛选该平台 · 拖拽调整侧栏顺序'"
+        :title="'筛选该平台 · 拖拽调整侧栏顺序'"
       >
         <div class="flex items-center gap-2 truncate">
           <span class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ backgroundColor: context.PLATFORM_REGISTRY[key].color }"></span>
@@ -183,7 +183,7 @@ function handleSearchInput(event: Event) {
           @click="context.toggleHideReposts"
           class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
           :class="context.hideReposts ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
-          :title="context.hideReposts ? '当前仅显示原创，点击恢复显示转发内容' : '点击过滤转发/转推内容，只看创作者原创'"
+          :title="context.hideReposts ? '当前仅显示原创；点按恢复显示转发' : '只看创作者原创（过滤转发/转推）'"
         >
           <div class="flex items-center gap-2">
             <Repeat2 class="w-3.5 h-3.5" :class="{ 'text-amber-600 dark:text-amber-400': context.hideReposts }" />
@@ -203,7 +203,7 @@ function handleSearchInput(event: Event) {
           @click="context.toggleHideTextOnly"
           class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer border"
           :class="context.hideTextOnly ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/40 font-semibold shadow-2xs' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
-          :title="context.hideTextOnly ? '当前已过滤无图文/视频的纯文字博文，点击恢复展示' : '点击过滤纯文字博文，只看包含图片/视频的动态'"
+          :title="context.hideTextOnly ? '当前已过滤纯文字动态；点按恢复显示' : '只看含图片/视频的动态（过滤纯文字）'"
         >
           <div class="flex items-center gap-2">
             <ImageIcon v-if="context.hideTextOnly" class="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
@@ -261,7 +261,7 @@ function handleSearchInput(event: Event) {
                 : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60 hover:bg-slate-200 dark:hover:bg-slate-700 dark:hover:text-white'
             ]"
             class="px-2.5 py-1 text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1"
-            :title="context.getTagFilterState(t) === 'include' ? '当前：正向包含（点击切换为反选排除）' : context.getTagFilterState(t) === 'exclude' ? '当前：反向排除（点击取消选择）' : '点击设置为正向包含(+)'"
+            :title="context.getTagFilterState(t) === 'include' ? '当前：正向包含；再点切为反向排除' : context.getTagFilterState(t) === 'exclude' ? '当前：反向排除；再点取消筛选' : '设为正向包含（+）'"
           >
             <span v-if="context.getTagFilterState(t) === 'include'" class="text-[10px] font-black">+</span>
             <span v-else-if="context.getTagFilterState(t) === 'exclude'" class="text-[10px] font-black">−</span>
@@ -409,7 +409,7 @@ function handleSearchInput(event: Event) {
           <div
             @click="context.toggleExpandCreator(c.id)"
             class="flex items-center justify-between p-2.5 cursor-pointer hover:bg-slate-100/60 dark:hover:bg-slate-700/40 transition-colors gap-2"
-            :title="context.hiddenCreatorIds.has(c.id) ? '点击眼睛恢复显示该创作者' : '点击展开渠道选择，点击眼睛隐藏此创作者'"
+            :title="context.hiddenCreatorIds.has(c.id) ? '展开或收起该创作者的渠道' : '展开或收起该创作者的渠道'"
           >
             <!-- Left: Avatar & Name -->
             <div class="flex items-center gap-2.5 min-w-0">

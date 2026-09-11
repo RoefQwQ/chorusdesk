@@ -290,7 +290,7 @@ const context = computed(() => props.context);
                     :key="t"
                     class="px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer border border-slate-200/50 dark:border-slate-700/50"
                     @click.stop="context.onCycleTag(t)"
-                    :title="'点击过滤标签 #' + t"
+                    :title="'按此标签筛选：#' + t"
                   >
                     #{{ t }}
                   </span>

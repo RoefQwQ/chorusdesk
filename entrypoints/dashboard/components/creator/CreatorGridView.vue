@@ -73,7 +73,7 @@ const context = computed(() => props.context);
             :key="t"
             class="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
             @click="context.onCycleTag(t)"
-            :title="'点击过滤标签 #' + t"
+            :title="'按此标签筛选：#' + t"
           >
             #{{ t }}
           </span>
@@ -98,7 +98,7 @@ const context = computed(() => props.context);
               v-if="context.syncSummary(c.id).hasError"
               @click.stop="context.onToggleExpand(c.id)"
               class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 cursor-pointer flex items-center gap-0.5"
-              title="存在同步异常账号，点击展开查看"
+              title="存在同步异常的账号，展开查看"
             >
               <AlertCircle class="w-2.5 h-2.5" />
               <span>{{ context.syncSummary(c.id).errorCount }}个异常</span>

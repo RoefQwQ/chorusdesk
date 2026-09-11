@@ -75,7 +75,7 @@ const context = computed(() => props.context);
           :key="t"
           class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
           @click="context.onCycleTag(t)"
-          :title="'点击过滤标签 #' + t"
+          :title="'按此标签筛选：#' + t"
         >
           #{{ t }}
         </span>

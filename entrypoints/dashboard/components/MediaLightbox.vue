@@ -30,7 +30,7 @@ async function handleImgError(e: Event, originalUrl?: string) {
         <a v-if="media.originalUrl" :href="media.originalUrl" target="_blank" class="flex items-center gap-1 text-xs text-indigo-400 hover:underline" @click.stop>
           <span>访问原帖</span><ExternalLink class="w-3.5 h-3.5" />
         </a>
-        <button @click="emit('close')" class="p-1.5 rounded-full hover:bg-white/10 text-white cursor-pointer" title="按 ESC 或点击关闭"><X class="w-5 h-5" /></button>
+        <button @click="emit('close')" class="p-1.5 rounded-full hover:bg-white/10 text-white cursor-pointer" title="按 ESC 或点按关闭"><X class="w-5 h-5" /></button>
       </div>
     </div>
     <div class="flex-1 flex items-center justify-center p-2 min-h-0" @click="emit('close')">

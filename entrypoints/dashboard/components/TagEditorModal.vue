@@ -169,7 +169,7 @@ function save() {
               type="button"
               @click="toggleTagInEditingList(t)"
               class="px-2 py-1 cursor-pointer flex items-center gap-1"
-              :title="editingTagsList.includes(t) ? '点击取消为此博主关联此标签' : '点击为此博主添加此标签'"
+              :title="editingTagsList.includes(t) ? '取消关联此标签' : '为该博主关联此标签'"
             >
               <span>{{ editingTagsList.includes(t) ? '✓' : '+' }}</span>
               <span>#{{ t }}</span>

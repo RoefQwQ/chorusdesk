@@ -300,7 +300,7 @@ const context = computed(() => props.context);
             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
         ]"
         class="px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
-        :title="context.getTagFilterState(t) === 'include' ? '正向包含（点击切为反向排除）' : context.getTagFilterState(t) === 'exclude' ? '反向排除（点击取消）' : '点击设置为正向包含(+)'"
+        :title="context.getTagFilterState(t) === 'include' ? '正向包含：再点切为反向排除' : context.getTagFilterState(t) === 'exclude' ? '反向排除：再点取消筛选' : '设为正向包含（+）'"
       >
         <span v-if="context.getTagFilterState(t) === 'include'" class="text-[10px] font-black">+</span>
         <span v-else-if="context.getTagFilterState(t) === 'exclude'" class="text-[10px] font-black">−</span>
