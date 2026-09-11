@@ -71,6 +71,18 @@ export interface PlatformAdapter {
    * Absent = the generic default (`DEFAULT_MIN_INTERVAL_MS`).
    */
   minRequestIntervalMs?: number;
+  /**
+   * Whether this platform's media is worth archiving to the user's disk.
+   *
+   * Absent = yes. RSS says no (2026-09-12): a feed's images live on whatever host
+   * the publisher uses — often a CDN that answers `403` to anything without a
+   * matching `Referer`, which the image proxy cannot forge — so the batch archive
+   * spent its time on guaranteed failures and the log filled with
+   * 「图片代理 assets.juya.uk 失败 403」. Measured on one real library: 7 of 7
+   * failures were RSS. Archiving exists for platforms whose image URLs expire
+   * (xiaohongshu's signed CDN links); a feed can simply be re-fetched.
+   */
+  archivesMedia?: boolean;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
 
   /** Optional platform-specific historical fetch implementation. */

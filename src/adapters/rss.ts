@@ -58,6 +58,10 @@ function stableHash(input: string): string {
 
 export const rssAdapter: PlatformAdapter = {
   platform: 'rss',
+  // A feed's images are hosted wherever the publisher likes, and a publisher CDN that
+  // blocks hotlinking answers 403 to the proxy — the archive then retries every item
+  // on every run for no result. See the field's note in `adapters/types.ts`.
+  archivesMedia: false,
 
   async fetchLatest(channel: Channel, limit: number = 10): Promise<FetchResult> {
     try {

@@ -21,6 +21,7 @@ import {
   resolveFileExtension,
 } from './pathResolver';
 import { proxyImage, toSecureMediaUrl } from '../../utils/media';
+import { getAdapter } from '../../platform/registry';
 
 // In-memory cache of object URLs created from local files to avoid redundant disk reads
 const objectUrlMemoryCache = new Map<string, string>();
@@ -107,6 +108,18 @@ async function resolvePostDir(
   const dir = await getExistingNestedDirectory(root, dirSegments);
   postDirCache.set(key, dir);
   return dir;
+}
+
+/**
+ * Whether media on `platform` should be written to the user's disk.
+ *
+ * The platform decides (`PlatformAdapter.archivesMedia`); a platform that is not in
+ * the registry defaults to yes, matching the interface's absent-means-yes contract.
+ * Reads are deliberately NOT gated: a user who archived RSS images before this rule
+ * existed must keep seeing them on disk.
+ */
+function isArchivablePlatform(platform: string): boolean {
+  return getAdapter(platform)?.archivesMedia !== false;
 }
 
 /**
@@ -269,6 +282,9 @@ export const imageCacheService = {
     mediaIndex: number;
     mediaUrl: string;
   }): Promise<string | null> {
+    // Single write choke point: the card's auto-save and the batch archive both come
+    // through here, so the platform that does not archive is answered with no work.
+    if (!isArchivablePlatform(params.platform)) return null;
     const jobKey = `${params.postId}_${params.mediaIndex}`;
     if (inFlightCacheJobs.has(jobKey)) return null;
     inFlightCacheJobs.add(jobKey);
@@ -318,6 +334,7 @@ export const imageCacheService = {
    */
   async cachePost(post: Post, creatorName?: string): Promise<number> {
     if (!post.mediaList || post.mediaList.length === 0) return 0;
+    if (!isArchivablePlatform(post.platform)) return 0;
     const root = await getSavedRootDirectoryHandle();
     if (!root) return 0;
 

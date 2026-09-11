@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { Folder, FolderCheck, HardDrive, DownloadCloud, RefreshCw, XCircle } from 'lucide-vue-next';
 import { imageCacheService } from '../../../src/services/imageCache';
+import { getAdapter } from '../../../src/platform/registry';
 import { devLog } from '../../../src/utils/devLog';
 import type { AppSettings, Post, Creator } from '../../../src/types';
 import { errorMessage } from '../../../src/utils/errorMessage';
@@ -80,9 +81,14 @@ async function handleBatchCacheExisting() {
 
   if (isBatchCaching.value) return;
 
-  const targetPosts = props.posts.filter(p => p.mediaList && p.mediaList.length > 0);
+  // Posts whose platform does not archive are excluded up front rather than counted and
+  // then skipped: 「共扫描 290 条」 must mean 290 posts were actually considered, and a
+  // feed's images are the publisher's to serve (see `PlatformAdapter.archivesMedia`).
+  const targetPosts = props.posts.filter(
+    (p) => p.mediaList && p.mediaList.length > 0 && getAdapter(p.platform)?.archivesMedia !== false,
+  );
   if (targetPosts.length === 0) {
-    alert('当前动态列表中没有包含图片的动态');
+    alert('当前动态列表中没有可归档的图文动态');
     return;
   }
 
