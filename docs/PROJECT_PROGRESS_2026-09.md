@@ -501,11 +501,11 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
 
 #### 交接基线（接手前先核对）
 
-- **代码基线**：`master` @ `eee1ca5`（2026-09-12），工作区干净，**与 `origin/master` 同步**。
-  接手第一件事：`git status -sb` 与 `git log origin/master..master --oneline` 核对本地是否领先
-  （推送属需授权操作）。
-  > 本行此前记「领先 3 个提交」并列了三个当时的提交哈希——那些早已推送并成为历史，
-  > 一个会过期的「领先数」写在这里只会误导。**以 `git status -sb` 的实测为准。**
+- **代码基线**：`master`，工作区干净，与 `origin/master` 同步。接手第一件事：`git status -sb`
+  与 `git log -1 --oneline`（此处**不写提交哈希**——它每次提交都变，写死即过期；
+  上一个被写进的交接基线已经因此误导过一次）。
+  > 本行此前记「领先 3 个提交」并列了三个当时的提交哈希——那些早已推送并成为历史。
+  > **以 `git status -sb` 的实测为准。**
 - **门禁全绿**：`npm run typecheck`（tsc + vue-tsc strictTemplates）、`npm run lint`、
   `npm test`、`npm run build`。**具体测试数不写死**（每次提交都变，运行即得；2026-09-12 为
   555 通过 / 6 跳过 / 53 文件）。
