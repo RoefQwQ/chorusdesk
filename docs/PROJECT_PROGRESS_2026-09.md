@@ -13,7 +13,7 @@
 > 历史：[第 1–33 批批次叙述 / 阶段结论 / 最终评价](archive/2026-09-batches.md) ·
 > 规则与案例：[../AGENTS.md](../AGENTS.md) / [AGENTS_CASES.md](AGENTS_CASES.md)
 
-## 现状速览（截至 2026-09-11）
+## 现状速览（截至 2026-09-12）
 
 > **接手本项目**：待办入口是[四.P8 交接队列](#p8交接队列2026-09-11-整理供新会话接手)——
 > 基线、已确认无需重验的项、四个队列与已知陷阱都在那一节。本节只描述状态。
@@ -27,9 +27,13 @@
 |---|---|---|
 | 类型检查 | `npm run typecheck` | `tsc`（TS7 原生）→ `vue-tsc`，含 `strictTemplates`；0 错误 |
 | 静态检查 | `npm run lint` | ESLint flat config；0 问题 |
-| 回归测试 | `npm test` | **495 通过 / 6 跳过，42 个文件** |
+| 回归测试 | `npm test` | 全绿（**具体数字不写死**——它每次提交都变；运行即得。2026-09-12 为 555 通过 / 6 跳过 / 53 文件） |
 | 构建 | `npm run build` | `.output/chrome-mv3/` |
 | 打包 | `npm run zip` | `chorusdesk-1.0.0-chrome.zip` |
+
+> **门禁数字刻意不写死**：本表此前写「495 通过 / 42 文件」，到 2026-09-12 实际已是
+> 555 / 53——`PROJECT_PROGRESS` 因此连续两轮把过期数字交给冷启动的接手者。
+> 能算的不要写死（见 [AUDIT_2026-09-12.md](AUDIT_2026-09-12.md) §7-2）。
 
 CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vitest + build；
 打 `vX.Y.Z` 标签触发 `release.yml`（复跑门禁 + 校验标签与版本号一致 + 生成 Release 资源）。
@@ -491,19 +495,20 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
 连带令 `Runtime.evaluate` 与 `Page.enable` 永久挂起（表现为「页面卡死」而非产品缺陷）。
 需在执行动作**之前**启用 Page 域并应答 `Page.javascriptDialogOpening`。
 
-### P8：交接队列（2026-09-11 整理，供新会话接手）
+### P8：交接队列（2026-09-11 整理，2026-09-12 复核，供新会话接手）
 
 > 本节是**唯一**的待办入口。上面的批次记录是历史，不要从那里推断「现在要做什么」。
 
 #### 交接基线（接手前先核对）
 
-- **代码基线**：`master`，工作区干净。接手第一件事：`git status -sb` 与
-  `git log origin/master..master --oneline` 核对本地领先了哪些提交，需要时推送
-  （推送属需授权操作）。整理本次交接时领先 **3** 个提交：
-  `2ed4ba7`（删除三个死兼容桶 + 零引用脚手架）、`c82fc95`（修正规则 28：CDP 可加载
-  扩展，并补两项 P7 证据），以及本节所在的交接整理提交（含抖音文档纠错）。
-- **门禁全绿（2026-09-11 实测）**：`npm run typecheck`（tsc + vue-tsc strictTemplates）、
-  `npm run lint`、`npm test`（**495 通过 / 6 跳过 / 42 文件**）、`npm run build`。
+- **代码基线**：`master` @ `eee1ca5`（2026-09-12），工作区干净，**与 `origin/master` 同步**。
+  接手第一件事：`git status -sb` 与 `git log origin/master..master --oneline` 核对本地是否领先
+  （推送属需授权操作）。
+  > 本行此前记「领先 3 个提交」并列了三个当时的提交哈希——那些早已推送并成为历史，
+  > 一个会过期的「领先数」写在这里只会误导。**以 `git status -sb` 的实测为准。**
+- **门禁全绿**：`npm run typecheck`（tsc + vue-tsc strictTemplates）、`npm run lint`、
+  `npm test`、`npm run build`。**具体测试数不写死**（每次提交都变，运行即得；2026-09-12 为
+  555 通过 / 6 跳过 / 53 文件）。
 - **读序**：`AGENTS.md`（31 条规则 + Non-goals，**必读**）→ `docs/ARCHITECTURE.md`（当前事实
   与契约）→ 本文件「现状速览」→ 本节。`docs/DEVELOPMENT.md` 是改动流程手册。
 - **历史材料**：`docs/DOUYIN_RESEARCH_2026-09.md`（抖音为何不能走 API）、
