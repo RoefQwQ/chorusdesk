@@ -22,12 +22,12 @@ const base = {
 };
 
 describe('fetchError', () => {
-  it('omits retryable when not passed', () => {
+  it('carries exactly the code and the message', () => {
+    // It used to carry a third field, `retryable`, that nothing ever read — the
+    // sync layer decides on `code` (rate_limit starts a cool-down, not_found means
+    // end-of-history). The assertion is on the whole shape on purpose: a field
+    // reappearing here should be a deliberate decision, not a quiet addition.
     expect(fetchError('auth', 'x')).toEqual({ code: 'auth', message: 'x' });
-  });
-
-  it('keeps retryable when passed', () => {
-    expect(fetchError('network', 'x', true)).toEqual({ code: 'network', message: 'x', retryable: true });
   });
 });
 

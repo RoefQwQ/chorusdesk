@@ -181,8 +181,8 @@ export const fantiaAdapter: PlatformAdapter = {
       return {
         posts: [],
         error: err instanceof Error
-          ? fetchError('network', err.message, true)
-          : fetchError('network', 'Fantia 更新抓取失败 (请确认是否在浏览器中登录过 Fantia)', true),
+          ? fetchError('network', err.message)
+          : fetchError('network', 'Fantia 更新抓取失败 (请确认是否在浏览器中登录过 Fantia)'),
       };
     }
   },

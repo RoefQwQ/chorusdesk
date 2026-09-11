@@ -99,7 +99,6 @@ export async function batchUpdateChannelsInterleaved(
         error: fetchError(
           'rate_limit',
           `${ch.platform} 已触发平台风控，冷却中（剩余约 ${formatCooldown(cooling)}）。期间不再请求该平台，冷却结束后自动恢复。`,
-          true,
         ),
       });
       continue;
@@ -139,7 +138,7 @@ export async function batchUpdateChannelsInterleaved(
       console.warn(`[BatchUpdate] Error on ${ch.id}:`, e);
       options?.onProgress?.(i + 1, total, ch, {
         posts: [],
-        error: fetchError('network', errorMessage(e), true),
+        error: fetchError('network', errorMessage(e)),
       });
     } finally {
       // Recorded on every path, including failure: a failed request still hit the
@@ -177,7 +176,6 @@ export async function updateCreator(
         error: fetchError(
           'rate_limit',
           `${ch.platform} 已触发平台风控，冷却中（剩余约 ${formatCooldown(cooling)}）。期间不再请求该平台。`,
-          true,
         ),
       });
       continue;

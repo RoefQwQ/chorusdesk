@@ -121,7 +121,7 @@ export const pixivAdapter: PlatformAdapter = {
       const message = errorMessage(err);
       return {
         posts: [],
-        error: fetchError('network', message || 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)', true),
+        error: fetchError('network', message || 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)'),
       };
     }
   },

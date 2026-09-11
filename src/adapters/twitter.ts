@@ -160,14 +160,14 @@ export const twitterAdapter: PlatformAdapter = {
       if (!res) {
         return {
           posts: [],
-          error: fetchError('network', '扩展后台服务未响应，请在 chrome://extensions 中重新加载插件后重试', true),
+          error: fetchError('network', '扩展后台服务未响应，请在 chrome://extensions 中重新加载插件后重试'),
         };
       }
 
       if (!res.success) {
         return {
           posts: [],
-          error: fetchError('network', res.error || '获取推文失败', true),
+          error: fetchError('network', res.error || '获取推文失败'),
         };
       }
 
@@ -198,7 +198,7 @@ export const twitterAdapter: PlatformAdapter = {
       const message = errorMessage(err);
       return {
         posts: [],
-        error: fetchError('network', `调用推特同步后台失败: ${message}`, true),
+        error: fetchError('network', `调用推特同步后台失败: ${message}`),
       };
     }
   },

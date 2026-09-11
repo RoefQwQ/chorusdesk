@@ -89,7 +89,7 @@ export const douyinAdapter: PlatformAdapter = {
       });
     } catch (err: unknown) {
       const message = errorMessage(err);
-      return { posts: [], error: fetchError('network', `抖音采集通信异常: ${message}`, true) };
+      return { posts: [], error: fetchError('network', `抖音采集通信异常: ${message}`) };
     }
 
     if (!response?.success) {
@@ -97,7 +97,7 @@ export const douyinAdapter: PlatformAdapter = {
       const message = response?.error || '抖音作品采集失败';
       return {
         posts: [],
-        error: fetchError(code, message, code === 'network' || code === 'rate_limit'),
+        error: fetchError(code, message),
       };
     }
 

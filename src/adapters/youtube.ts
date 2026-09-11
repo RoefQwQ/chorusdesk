@@ -104,7 +104,7 @@ export const youtubeAdapter: PlatformAdapter = {
       const message = errorMessage(err);
       return {
         posts: [],
-        error: fetchError('network', message || 'YouTube 更新抓取失败', true),
+        error: fetchError('network', message || 'YouTube 更新抓取失败'),
       };
     }
   },

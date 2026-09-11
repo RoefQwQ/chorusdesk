@@ -24,7 +24,7 @@ const channels = new Map<string, Channel>();
 const synced: Array<{ id: string; limit: number }> = [];
 /** Set to a FetchResult-shaped value to simulate a failed sync. */
 let failWith: Error | null = null;
-let returnError: { code: string; message: string; retryable: boolean } | null = null;
+let returnError: { code: string; message: string } | null = null;
 
 vi.mock('../src/infrastructure/db/database', () => ({
   db: {
@@ -139,7 +139,7 @@ describe('SYNC_CHANNEL', () => {
     // limit, an auth wall, an unsupported platform — and never throws for any of
     // them. A handler that only catches would call every one of those a success.
     channels.set('bilibili:a', channel('bilibili:a'));
-    returnError = { code: 'unsupported', message: '不支持的平台: nope', retryable: false };
+    returnError = { code: 'unsupported', message: '不支持的平台: nope' };
 
     const res = await run({ channelId: 'bilibili:a', limit: 5 });
 

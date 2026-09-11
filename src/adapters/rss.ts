@@ -216,7 +216,7 @@ export const rssAdapter: PlatformAdapter = {
       const message = errorMessage(err);
       return {
         posts: [],
-        error: fetchError('network', message || 'RSS 订阅源抓取失败', true),
+        error: fetchError('network', message || 'RSS 订阅源抓取失败'),
       };
     }
   },

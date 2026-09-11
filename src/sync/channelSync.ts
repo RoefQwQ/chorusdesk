@@ -523,8 +523,8 @@ export async function updateChannel(
     const structured = err instanceof FetchTimeoutError
       ? fetchError('timeout', err.message)
       : err instanceof Error
-        ? fetchError('network', err.message, true)
-        : fetchError('network', '未知异常', true);
+        ? fetchError('network', err.message)
+        : fetchError('network', '未知异常');
     await db.channels.update(channel.id, {
       status: 'error',
       errorMessage: structured.message,

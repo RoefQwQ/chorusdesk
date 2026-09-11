@@ -170,7 +170,7 @@ export const weiboAdapter: PlatformAdapter = {
       const message = errorMessage(err);
       return {
         posts: [],
-        error: fetchError('network', `获取微博动态异常: ${message}`, true),
+        error: fetchError('network', `获取微博动态异常: ${message}`),
       };
     }
   },
@@ -190,7 +190,7 @@ export const weiboAdapter: PlatformAdapter = {
         if (res.status === 403) {
           return { posts: [], error: fetchError('auth', '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
         }
-        return { posts: [], error: fetchError('network', `微博接口响应异常 HTTP ${res.status}`, true) };
+        return { posts: [], error: fetchError('network', `微博接口响应异常 HTTP ${res.status}`) };
       }
 
       if (typeof res.data === 'string' && (res.data.includes('Sina Visitor System') || res.data.includes('passport.weibo.com') || res.data.trim().startsWith('<'))) {
@@ -262,7 +262,7 @@ export const weiboAdapter: PlatformAdapter = {
       };
     } catch (e: unknown) {
       const message = errorMessage(e);
-      return { posts: [], error: fetchError('network', message || '微博网络连接异常', true) };
+      return { posts: [], error: fetchError('network', message || '微博网络连接异常') };
     }
   },
 };

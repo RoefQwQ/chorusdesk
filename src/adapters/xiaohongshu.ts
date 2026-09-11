@@ -29,7 +29,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       if (!res.ok) {
         return {
           posts: [],
-          error: fetchError('network', `小红书页面访问异常 HTTP ${res.status}`, true),
+          error: fetchError('network', `小红书页面访问异常 HTTP ${res.status}`),
         };
       }
 
@@ -246,7 +246,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       const message = errorMessage(err);
       return {
         posts: [],
-        error: fetchError('network', `获取小红书动态异常: ${message}`, true),
+        error: fetchError('network', `获取小红书动态异常: ${message}`),
       };
     }
   },

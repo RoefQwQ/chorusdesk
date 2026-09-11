@@ -38,12 +38,10 @@ export interface FetchError {
   code: FetchErrorCode;
   /** Human-readable Chinese message, safe to surface in the UI as-is. */
   message: string;
-  /** True when retrying the same request can plausibly succeed. */
-  retryable?: boolean;
 }
 
-export function fetchError(code: FetchErrorCode, message: string, retryable?: boolean): FetchError {
-  return retryable === undefined ? { code, message } : { code, message, retryable };
+export function fetchError(code: FetchErrorCode, message: string): FetchError {
+  return { code, message };
 }
 
 export interface FetchResult {

@@ -17,11 +17,11 @@ function biliCodeError(code: number): FetchError {
     case -101:
       return fetchError('auth', 'B站未登录或登录已过期，请检查登录状态');
     case -352:
-      return fetchError('rate_limit', 'B站风控校验失败，请稍后重试或完成人机验证', true);
+      return fetchError('rate_limit', 'B站风控校验失败，请稍后重试或完成人机验证');
     case -403:
       return fetchError('auth', 'B站接口拒绝访问（权限不足或签名失效），请确认登录状态后重试');
     case -412:
-      return fetchError('rate_limit', 'B站请求被拦截（风控），请稍后重试', true);
+      return fetchError('rate_limit', 'B站请求被拦截（风控），请稍后重试');
     default:
       return fetchError('parse', `B站接口异常 (code ${code})`);
   }
