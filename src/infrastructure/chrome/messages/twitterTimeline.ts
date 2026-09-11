@@ -19,6 +19,7 @@
 // never run. Constants travel through `args`. `tests/twitterTimeline.injected.test.ts`
 // pins this by evaluating the function's SOURCE with no closure.
 import { errorMessage } from '../../../utils/errorMessage';
+import { devLog } from '../../../utils/devLog';
 interface TwitterTimelineMessage {
   type: 'FETCH_TWITTER_TIMELINE';
   username?: unknown;
@@ -140,14 +141,33 @@ export function handleTwitterTimeline(
   return true;
 }
 
-// Prefer direct Service Worker requests. This avoids opening a temporary x.com tab.
+/**
+ * The path a sync actually took has to be observable.
+ *
+ * It was not, and that cost a real diagnosis: the direct attempt calls native
+ * `fetch` in the service worker rather than `bgFetch`, so it writes no `bgFetch:`
+ * line, and its failure warning went to `console.warn` — which the dashboard's
+ * Developer Log does not capture. A user's full sync log therefore showed
+ * `消息 FETCH_TWITTER_TIMELINE` followed immediately by 「同步完成」with no way to
+ * tell whether the page path ran, the direct path ran, or the direct path failed
+ * and the fallback rescued it. Those are three different states of the system and
+ * the fix for one of them (the injected function once referenced module scope and
+ * never ran at all) is exactly what you would want to confirm.
+ *
+ * So: the path is logged. Successes at `debug` (visible with the panel's verbose
+ * switch, silent otherwise — the log is a product surface, rule 20), and any
+ * fallback at `warn`, because that is the branch that used to fail invisibly.
+ */
 async function fetchTwitterTimelineDirect(username: string, limit: number, onlyOriginal: boolean, cursor: string): Promise<{ success: boolean; error?: string; tweetData?: unknown; userData?: unknown } | null> {
   try {
     const [ct0Cookie, authCookie] = await Promise.all([
       chrome.cookies.get({ url: 'https://x.com', name: 'ct0' }).then(value => value || chrome.cookies.get({ url: 'https://twitter.com', name: 'ct0' })),
       chrome.cookies.get({ url: 'https://x.com', name: 'auth_token' }).then(value => value || chrome.cookies.get({ url: 'https://twitter.com', name: 'auth_token' })),
     ]);
-    if (!ct0Cookie?.value || !authCookie?.value) return null;
+    if (!ct0Cookie?.value || !authCookie?.value) {
+      devLog.debug('twitter', '直连跳过：缺少 x.com 会话 Cookie，改走标签页路径');
+      return null;
+    }
     const headers: Record<string, string> = {
       Accept: '*/*',
       Authorization: `Bearer ${TWITTER_BEARER_TOKEN}`,
@@ -198,9 +218,11 @@ async function fetchTwitterTimelineDirect(username: string, limit: number, onlyO
       clearTimeout(tweetTimer);
     }
     if (!tweetResponse.ok) return { success: false, error: `获取推特动态失败 (HTTP ${tweetResponse.status})` };
+    devLog.debug('twitter', '直连请求成功');
     return { success: true, tweetData: await tweetResponse.json(), userData };
   } catch (error: unknown) {
     console.warn('[Background] Direct Twitter request failed; trying tab fallback:', error);
+    devLog.warn('twitter', '直连请求失败，改走标签页路径', errorMessage(error));
     return null;
   }
 }
@@ -213,6 +235,7 @@ async function fetchTwitterTimelineViaTabOrSession(
   cursor: string = ''
 ) {
   if (!chrome.tabs || !chrome.scripting) {
+    devLog.warn('twitter', '标签页路径不可用：缺少 tabs/scripting 能力');
     return { success: false, error: 'Background 缺少标签页访问或脚本注入能力' };
   }
 
@@ -230,7 +253,9 @@ async function fetchTwitterTimelineViaTabOrSession(
 
     if (existingTab && existingTab.id) {
       targetTabId = existingTab.id;
+      devLog.debug('twitter', '标签页路径：复用已打开的 x.com 标签页');
     } else {
+      devLog.debug('twitter', '标签页路径：未找到 x.com 标签页，新建后台临时页');
       // Create an inactive background tab so the user is not disrupted
       const tempTab = await chrome.tabs.create({
         url: 'https://x.com/?ref=cfh_sync',
@@ -462,7 +487,15 @@ async function fetchTwitterTimelineViaTabOrSession(
     });
 
     const res = tabResult?.[0]?.result;
-    return res || { success: false, error: '推特标签页未返回有效数据' };
+    if (!res) {
+      // Resolved with no result: the frame the script ran in is gone. Distinct
+      // from a page that ran and reported a failure (rule 23).
+      devLog.warn('twitter', '标签页注入未返回结果（页面可能发生跳转或重新渲染）', `tab ${targetTabId}`);
+      return { success: false, error: '推特标签页未返回有效数据' };
+    }
+    if (res.success) devLog.debug('twitter', '标签页路径采集成功', `tab ${targetTabId}`);
+    else devLog.warn('twitter', '标签页路径采集失败', String(res.error ?? '未知原因'));
+    return res;
   } catch (err: unknown) {
     // MUST catch rather than let this propagate. `chrome.scripting.executeScript`
     // REJECTS when the frame it was injected into is gone — the tab navigated or
@@ -473,6 +506,7 @@ async function fetchTwitterTimelineViaTabOrSession(
     // Returning a failed result (instead of throwing) is what makes the caller's
     // `pageResult?.success ? … : await fetchTwitterTimelineDirect(…)` reachable.
     // See AGENTS rule 23: an injection that resolved is not an injection that ran.
+    devLog.warn('twitter', '标签页注入抛出异常', errorMessage(err, '推特标签页采集失败'));
     return { success: false, error: errorMessage(err, '推特标签页采集失败') };
   } finally {
     // Clean up temporary tab if created

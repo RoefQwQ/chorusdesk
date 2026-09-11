@@ -36,6 +36,35 @@ interface CapturedInjection {
   args: unknown[];
 }
 
+/**
+ * Developer-log lines, captured so the PATH each sync took can be asserted.
+ *
+ * This is not plumbing for its own sake. The two paths — direct service-worker
+ * `fetch` versus an injected page script — were previously indistinguishable from
+ * the outside: the direct attempt used native `fetch` (no `bgFetch:` line) and its
+ * failure message went to `console.warn`, which the Developer Log panel does not
+ * capture. A real user sync log showed `消息 FETCH_TWITTER_TIMELINE` immediately
+ * followed by 「同步完成」and could not say which one ran, so the fix for the
+ * injected path (it referenced module scope and never executed at all) had no
+ * observable confirmation. These two tests keep that distinction from being lost
+ * again.
+ */
+// `vi.hoisted` because `vi.mock` factories are lifted above every other
+// statement: capturing a plain `const` declared here closes over the temporal
+// dead zone and the mocked module silently never installs (which is how this
+// first showed up — the assertions saw zero log lines).
+const { logLines } = vi.hoisted(() => ({ logLines: [] as string[] }));
+vi.mock('../src/utils/devLog', () => ({
+  devLog: {
+    record: () => {},
+    flush: async () => {},
+    debug: (scope: string, message: string, detail?: string) => logLines.push(`debug ${scope}: ${message}${detail ? ' | ' + detail : ''}`),
+    info: (scope: string, message: string, detail?: string) => logLines.push(`info ${scope}: ${message}${detail ? ' | ' + detail : ''}`),
+    warn: (scope: string, message: string, detail?: string) => logLines.push(`warn ${scope}: ${message}${detail ? ' | ' + detail : ''}`),
+    error: (scope: string, message: string, detail?: string) => logLines.push(`error ${scope}: ${message}${detail ? ' | ' + detail : ''}`),
+  },
+}));
+
 let captured: CapturedInjection | null = null;
 let fetchedUrls: string[] = [];
 let respondWith: (url: string) => { ok: boolean; status: number; json: () => Promise<unknown> };
@@ -65,6 +94,7 @@ async function callInjectedSerialized(): Promise<Record<string, unknown>> {
 
 beforeEach(() => {
   captured = null;
+  logLines.length = 0;
   fetchedUrls = [];
   respondWith = (url) => {
     if (url.includes('UserByScreenName')) {
@@ -252,3 +282,55 @@ async function runHandlerWithCookiesOnly(): Promise<Record<string, unknown>> {
   });
   return await runHandler();
 }
+
+/**
+ * Which path ran must be observable — and so must the ORDER.
+ *
+ * The handler's priority is `fetchTwitterTimelineViaTabOrSession` first, with the
+ * service-worker `fetch` only as a fallback when the page path fails. That order
+ * was not spelled out anywhere a test could see it, and it is the thing that
+ * decides what a user's log means: both paths previously produced an identical
+ * `FETCH_TWITTER_TIMELINE` → 「同步完成」pair, with the direct attempt writing no
+ * `bgFetch:` line and its failure message going to `console.warn`, which the
+ * Developer Log does not capture. So a sync log could not distinguish "the page
+ * path worked" from "the page path failed and the fallback rescued it" — the
+ * second being exactly the state this module was in for as long as the injected
+ * function referenced module scope.
+ */
+describe('twitter timeline — the path taken is logged, in priority order', () => {
+  it('uses the page path first, and never touches the fallback when it succeeds', async () => {
+    await runHandler();
+
+    expect(logLines.some((l) => l.includes('标签页路径采集成功'))).toBe(true);
+    // The decisive half: reaching the direct path at all would mean the page path
+    // failed. Asserting only the success line would pass even if the fallback had
+    // silently taken over.
+    expect(logLines.some((l) => l.includes('直连'))).toBe(false);
+  });
+
+  it('falls back to the direct request, and says so, when the page path fails', async () => {
+    // An injection that resolves WITHOUT a value: the frame it ran in is gone
+    // (AGENTS rule 23 — "resolved" is not "ran").
+    const exec = chrome.scripting.executeScript as unknown as ReturnType<typeof vi.fn>;
+    exec.mockImplementation(async () => [{ result: undefined }]);
+    const get = chrome.cookies.get as unknown as ReturnType<typeof vi.fn>;
+    get.mockImplementation(async () => ({ value: 'cookie-value' }));
+
+    const response = await runHandler();
+
+    expect(logLines.some((l) => l.includes('标签页注入未返回结果'))).toBe(true);
+    expect(logLines.some((l) => l.includes('直连请求成功'))).toBe(true);
+    expect(response.success).toBe(true);
+  });
+
+  it('reports the fallback as skipped when there is no session either', async () => {
+    // Both paths unavailable: the direct attempt declines on missing cookies, and
+    // that reason has to be in the log rather than inferred from a bare failure.
+    const exec = chrome.scripting.executeScript as unknown as ReturnType<typeof vi.fn>;
+    exec.mockImplementation(async () => [{ result: undefined }]);
+
+    await runHandler();
+
+    expect(logLines.some((l) => l.includes('直连跳过'))).toBe(true);
+  });
+});
