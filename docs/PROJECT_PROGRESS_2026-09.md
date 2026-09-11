@@ -42,10 +42,10 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 
 - **结构性不足**：见[二、仍然存在的不足](#二仍然存在的不足) —— `FetchError` 分类精度、
   备份校验未达完整 schema、新增平台的配置点仍多、Twitter/抖音路径的固有脆弱性。
-- **已知技术债**：`CreatorsView.vue` 需要继续拆分（**行数与进展见四.P4**；切片 1 已完成，
-  还剩三套主模板）。三个迁移期兼容桶（`src/adapters/index.ts`、`src/db/index.ts`、
-  `src/platform/index.ts`）与零引用脚手架 `components/DashboardSection.vue`
-  **已于 2026-09-11 删除**。
+- **已知技术债**：`CreatorsView.vue` 已由 1481 行收敛到 617 行（四.P4 四刀，三套主模板已移出，
+  **行数与进展见四.P4**）；剩余为非阻塞的进一步收敛。三个迁移期兼容桶
+  （`src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts`）与零引用脚手架
+  `components/DashboardSection.vue` **已于 2026-09-11 删除**。
 - **待真机确认**：见[四.P7](#四后续优先级) —— 仅剩「alarm 跨浏览器重启的长期行为」
   （同 profile 内的备份导出导入往返已于 2026-09-11 实测通过，见四.P7 补记）。
 - **未排期**：四.P6 整体 UI 风格重设计。
@@ -91,11 +91,12 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 > 说明「无影响使用的异常」只覆盖日常路径，不能替代逐项走查。备份全量导出导入与 alarm
 > 跨浏览器重启的长期行为仍未专项演练。
 
-### 2. `CreatorsView.vue` 仍然较大
+### 2. `CreatorsView.vue` 仍然较大 — 已大幅收敛（2026-09-11，四.P4）
 
 文件从 1420 行缩减到约 1100 行，主要重复块已提取，但仍同时承担：
-（第三批新增拖拽排序、账号类型筛选与独立标签列，第十六批又加平台指示器，拆分目标持续变远。
-**当前行数与拆分进展只记在四.P4**，本节不再重复数字——两处各记一个数字正是本文档此前失准的原因。）
+
+（**行数与进展只记在四.P4**，本节不重复数字——两处各记一个数字正是本文档此前失准的原因。
+四.P4 的四刀已把三套主模板、工具条与筛选/排序状态全部移出，该文件现为「目录控制器」。）
 
 - 搜索与排序。
 - 标签三态过滤。
@@ -104,13 +105,14 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 - Grid/List/Detailed 三种主模板。
 - 同步状态聚合。
 
-后续合理拆分方向：
+拆分方向（前两项与三项主模板均已完成，见四.P4）：
 
-- ~~`useCreatorDirectoryFilters`~~ — 已完成（四.P4 切片 1）
-- ~~`CreatorDirectoryToolbar`~~ — 已完成（四.P4 切片 1）
-- `CreatorGridView`
-- `CreatorListView`
-- `CreatorDetailedView`
+- ~~`useCreatorDirectoryFilters`~~ — 已完成（切片 1）
+- ~~`CreatorDirectoryToolbar`~~ — 已完成（切片 1）
+- ~~`CreatorListView`~~ — 已完成（切片 2）
+- ~~`CreatorGridView`~~ — 已完成（切片 3）
+- ~~`CreatorDetailedView`~~ — 已完成（切片 4）
+- 交互状态（展开/勾选/拖拽/头像失败 + masonry 分列）可再进一个 composable；两类空态可各成一个组件
 
 ### 3. UI 拆分可能存在轻微视觉差异
 
@@ -320,32 +322,42 @@ v3→v4 布尔转 `0|1` 契约（含墓碑快照与索引命中）被永久钉�
 Rplay 平台整体移除（`389b007`）后，`rplay_auth_token` 路径不复存在，
 token 在 `onInstalled` 时被幂等清除，本项无对象。
 
-### P4：继续拆分 CreatorsView — 切片 1、2 已完成（2026-09-11），其余待做
+### P4：继续拆分 CreatorsView — 切片 1–4 已完成（2026-09-11），三套主模板全部提取
 
 按 toolbar、grid、list 和 detailed 布局继续拆分。
 
-**验收方式（两刀共用，可复用）**：`e2e/creators-render.mjs` 在**真实 Chrome** 里加载构建产物、
+**验收方式（四刀共用）**：`e2e/creators-render.mjs` 在**真实 Chrome** 里加载构建产物、
 经真实导入路径播种固定 fixture（4 创作者 / 6 账号 / 6 动态），逐步驱动交互并记录创作者区块的
 `outerHTML`，改动前后各拍一次再 `diff`。每步带后置条件断言（「N/M 位创作者」计数、`aria-sort`、
-全选计数），防止「点了但没点到」让对比失去意义。
+全选计数、拖拽后的落库顺序），防止「点了但没点到」让对比失去意义。
 
 | 切片 | 移出到 | 视图行数 | 对比结果 |
 |---|---|---|---|
-| 1 | `composables/useCreatorDirectoryFilters.ts`（318）+ `components/creator/CreatorDirectoryToolbar.vue`（355） | 1481 → 1060 | 三视图模板逐字节相同；唯一差异是搜索框多一个 `value` 属性（`v-model` 只写 DOM property，`:value` 另写 attribute） |
-| 2 | `components/creator/CreatorListView.vue`（410）+ 共享契约 `types/creatorDirectory.ts`（`CreatorDirectoryActions` / `CreatorSyncSummary`） | 1060 → 820 | **22 步全部逐字节相同**（740710 B，含手动排序拖拽重排后的 DOM 与落库 `sortOrder`） |
+| 1 | `composables/useCreatorDirectoryFilters.ts`（310）+ `components/creator/CreatorDirectoryToolbar.vue`（355） | 1481 → 1060 | 三视图模板逐字节相同；唯一差异是搜索框多一个 `value` 属性（`v-model` 只写 DOM property，`:value` 另写 attribute） |
+| 2 | `components/creator/CreatorListView.vue`（415）+ 共享契约 `types/creatorDirectory.ts` | 1060 → 814 | **22 步全部逐字节相同**（740710 B） |
+| 3 | `components/creator/CreatorGridView.vue`（153）；契约抽成 `CreatorDirectoryPresentation` / `CreatorDirectoryInteraction` / `CreatorCardViewContext` | 814 → 751 | **22 步全部逐字节相同**（740710 B） |
+| 4 | `components/creator/CreatorDetailedView.vue`（158） | 751 → **617** | **22 步全部逐字节相同**（740710 B） |
 
-切片 1 明细：搜索 / 平台 / 角色 / 标签三态筛选、排序键与方向、`filteredCreatorsList`、
-`allTags`、`creatorCountByRole`、`creatorChannelMap` 进 composable（依赖以 getter 注入，
-否则 computed 失去响应式追踪）；标题行 + 视图切换 + 批量开关 + 筛选栏 + 批量工具条进工具条组件。
+切片 1：筛选与排序状态进 composable（依赖以 getter 注入，否则 computed 失去响应式追踪）；
+标题行 + 视图切换 + 批量开关 + 筛选栏 + 批量工具条进工具条组件。
+切片 2：紧凑列表（5 个可排序表头 + 行内展开区 + 批量勾选列 + 手动排序拖拽）整块移出，
+**不持有状态**；三处内联的拖拽处理收成具名回调后经上下文传入，拖拽链路由探针端到端验证
+（DOM 顺序 + IndexedDB 里的 `sortOrder` 都变）。
+切片 3：网格整块移出；`types/creatorDirectory.ts` 收拢三套视图共用的契约——`CreatorSortKey`
+从 composable 迁来（类型属于使用它的契约，且不再让 `types/` 依赖 `composables/`），
+`CreatorDirectoryPresentation`（channels/postCountMap/分组账号/同步聚合/相对时间/主头像/
+头像失败）与 `CreatorDirectoryInteraction`（批量勾选/展开/拖拽/标签三态）由各视图 `extends`
+组合，不再各自重declare 约 20 个字段；网格与详细卡片共用一个 `CreatorCardViewContext`，
+不各起别名。视图构建一份 `cardViewContext` 再展开给两套卡片视图，因此「给一套加了辅助函数
+忘了另一套」不可能发生。
+切片 4：详细卡片移出（多一项本视图专属的 `failedAvatarUrls`，账号行靠它回退首字母）。
 
-切片 2 明细：紧凑列表（表头 5 个可排序列 + 行内展开区 + 批量勾选列 + 手动排序拖拽）整块进
-`CreatorListView`，**不持有状态**；`CreatorDirectoryActions` 定义了三套视图共用的 9 个动作，
-避免同一个接口被复制三遍。三处原先内联在模板里的拖拽处理（`dragleave` / `dragend` / `drop`）
-收成视图里的具名回调后由上下文传入，拖拽链路由探针端到端验证（DOM 顺序 + IndexedDB 里的
-`sortOrder` 都变）。
+**现状**：三套主模板、工具条与筛选状态均已移出，`CreatorsView.vue` 剩 617 行，职责收敛为
+「目录控制器」——视图模式与 localStorage、展开/勾选/拖拽/头像失败等交互状态、masonry 分列、
+`cardViewContext`/`listContext` 的组装、两类空态、以及向上抛出的 emits。
 
-**剩余切片**：`CreatorGridView` 与 `CreatorDetailedView`（现为本文件主体），以及 masonry
-分列、展开行与同步状态聚合可继续下沉。行数记录只保留在本文，`二.2` 不重复数字。
+**还可继续**（非阻塞，尚未做）：交互状态（展开/勾选/拖拽/头像失败 + 分列）可再进一个
+composable，两类空态可各成一个组件。行数记录只保留在本文，`二.2` 不重复数字。
 
 ### P5：单独引入 ESLint — 已完成（2026-09-10）
 
@@ -550,16 +562,12 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
   所以一直没人报。已改为 `await` 落库后再通知，写失败则只警告不通知；不变量补进
   `AGENTS.md` 规则 7。
 
-3. **P4 `CreatorsView` 拆分** —— **切片 1、2 已完成（2026-09-11）**，其余待做。
-   视图 **1481 → 820 行**：
-   切片 1 移出 `useCreatorDirectoryFilters`（318）+ `CreatorDirectoryToolbar`（355）；
-   切片 2 移出 `CreatorListView`（410）+ 共享契约 `types/creatorDirectory.ts`。
-   验收用 `e2e/creators-render.mjs`（真实 Chrome，22 步逐字节对比，含拖拽落库）：
-   切片 2 **22 步全部逐字节相同**。原条目要求的「问题位置 / 最小方案 / 需保持的行为 /
-   验证方式」四项均已按此执行，明细见四.P4。
-   剩余切片：`CreatorGridView` 与 `CreatorDetailedView`（现为本文件主体）、masonry 分列、
-   展开行与同步状态聚合。下一刀建议 `CreatorGridView`（它与 detailed 共用
-   `CreatorCardHeader` 与 masonry 分列，两刀可以一起做）。
+3. **P4 `CreatorsView` 拆分** —— **四刀全部完成（2026-09-11）**：视图 **1481 → 617 行**，
+   三套主模板（list / grid / detailed）、工具条与筛选排序状态均已移出，明细见四.P4。
+   验收用 `e2e/creators-render.mjs`（真实 Chrome，22 步逐字节对比；切片 2/3/4 均**完全不同**，
+   即每一步、每一字节都一致，含拖拽重排后的 DOM 与落库 `sortOrder`）。
+   剩余为非阻塞的进一步收敛（交互状态进 composable、空态成组件），**不再作为队列项**，
+   需要时从四.P4 取。
 4. **开成本账**（手册 13.3）：每平台两列——修复提交数 / 人工介入次数。先记一个月，
    用于决定小红书 / Twitter / 抖音这三条高 churn 路径是否降级为「尽力而为」。
    当前这笔账是隐形的。

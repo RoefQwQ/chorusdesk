@@ -26,26 +26,19 @@ export interface CreatorsViewContext {
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
-  PLATFORM_REGISTRY,
   type AccountRole,
-  type Platform,
   type Creator,
   type Channel,
 } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
-import {
-  Plus,
-  Search,
-  Edit3,
-  AlertCircle,
-  Users,
-} from 'lucide-vue-next';
-import ChannelRow from '../components/creator/ChannelRow.vue';
-import CreatorCardHeader from '../components/creator/CreatorCardHeader.vue';
+import { Search, Users } from 'lucide-vue-next';
 import CreatorListView, {
   type CreatorListViewContext,
 } from '../components/creator/CreatorListView.vue';
 import CreatorGridView from '../components/creator/CreatorGridView.vue';
+import CreatorDetailedView, {
+  type CreatorDetailedViewContext,
+} from '../components/creator/CreatorDetailedView.vue';
 import type { CreatorCardViewContext, CreatorSyncSummary } from '../types/creatorDirectory';
 import CreatorDirectoryToolbar, {
   type CreatorDirectoryToolbarContext,
@@ -474,6 +467,12 @@ const gridContext = computed<CreatorCardViewContext>(() => ({
   columns: gridColumns.value,
 }));
 
+const detailedContext = computed<CreatorDetailedViewContext>(() => ({
+  ...cardViewContext.value,
+  columns: detailedColumns.value,
+  failedAvatarUrls: failedAvatarUrls.value,
+}));
+
 // Account role labels/badge classes live in ChannelRow (single source).
 
 function getCreatorGroupedChannels(creatorId: string): Record<string, Channel[]> {
@@ -610,132 +609,9 @@ function loadDemoData() {
     <CreatorListView v-else-if="viewMode === 'list'" :context="listContext" />
 
 
-    <!-- 3. Detailed Cards View (The complete accordion layout) -->
-    <div v-else class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 xl:gap-5 items-start">
-      <div
-        v-for="(colCreators, colIdx) in detailedColumns"
-        :key="'detail-col-' + colIdx"
-        class="flex flex-col gap-4 xl:gap-5 min-w-0"
-      >
-        <div
-          v-for="c in colCreators"
-          :key="c.id"
-          :draggable="creatorSortBy === 'manual'"
-          @dragstart="onCreatorDragStart(c.id)"
-          @dragover="(e: DragEvent) => onCreatorDragOver(e, c.id)"
-          @dragleave="dragOverCreatorId === c.id && (dragOverCreatorId = null)"
-          @drop="onCreatorDrop(c.id)"
-          @dragend="dragCreatorId = null; dragOverCreatorId = null"
-          class="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 shadow-sm space-y-3 relative overflow-hidden"
-          :class="[
-            selectedCreatorIds.has(c.id) ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md',
-            dragOverCreatorId === c.id ? 'ring-2 ring-indigo-400 border-dashed' : '',
-          ]"
-        >
-        <!-- Top Row: Avatar, Name, Stats & Actions -->
-        <CreatorCardHeader
-          :creator="c"
-          variant="detailed"
-          :post-count="context.creatorPostCountMap[c.id] || 0"
-          :avatar-url="getCreatorAvatar(c)"
-          :is-batch-mode="isBatchMode"
-          :is-selected="selectedCreatorIds.has(c.id)"
-          :is-updating="getCreatorSyncSummary(c.id).isUpdating"
-          @toggle-select="toggleSelectCreator"
-          @avatar-picker="openAvatarPicker"
-          @avatar-error="handleAvatarError"
-          @refresh="handleRefreshCreator"
-          @deep-sync="openDeepSyncModal"
-          @edit-tags="openEditCreatorTags"
-          @delete="deleteCreator"
-        />
+    <!-- 3. Detailed Cards View — rendered by CreatorDetailedView: stateless, driven
+         entirely by `detailedContext`. -->
+    <CreatorDetailedView v-else :context="detailedContext" />
 
-        <!-- Inline tag chips (detailed variant) -->
-        <div class="flex flex-wrap items-center gap-1 mt-1">
-          <span
-            v-for="t in c.tags"
-            :key="t"
-            class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-            @click="cycleTagFilter(t)"
-            :title="'点击过滤标签 #' + t"
-          >
-            #{{ t }}
-          </span>
-          <span v-if="!c.tags?.length" class="text-[10px] text-slate-400">未分类</span>
-          <button
-            type="button"
-            @click.stop="openEditCreatorTags(c)"
-            title="编辑修改创作者标签"
-            class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 cursor-pointer transition-colors"
-          >
-            <Edit3 class="w-3 h-3" />
-            <span>编辑标签</span>
-          </button>
-        </div>
-
-        <!-- Attached Channels Grouped by Platform -->
-        <div class="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-          <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pb-1">
-            <span class="font-semibold text-slate-700 dark:text-slate-300">已绑定账号</span>
-            <button @click="openAddModal('channel', c)" class="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-semibold flex items-center gap-1 cursor-pointer bg-indigo-50 dark:bg-indigo-950/60 px-2 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900 transition-colors">
-              <Plus class="w-3 h-3" />
-              <span>+ 绑定新账号</span>
-            </button>
-          </div>
-
-          <!-- Grouped Platform Sections -->
-          <div class="space-y-2">
-            <div
-              v-for="(chs, platform) in getCreatorGroupedChannels(c.id)"
-              :key="platform"
-              class="rounded-xl border border-slate-200/70 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-800/60 p-2.5 space-y-1.5"
-            >
-              <!-- Platform Header within Creator -->
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-1.5">
-                  <span :class="PLATFORM_REGISTRY[platform as Platform]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'" class="px-2 py-0.5 rounded text-[10px] font-bold border">
-                    {{ PLATFORM_REGISTRY[platform as Platform]?.name || platform }}
-                  </span>
-                  <span class="text-[11px] text-slate-400">
-                    {{ chs.length > 1 ? `绑定了 ${chs.length} 个账号 (同平台多账号互通)` : '1 个账号' }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Account Rows within this Platform -->
-              <div class="space-y-1">
-                <ChannelRow
-                  v-for="ch in chs"
-                  :key="ch.id"
-                  :channel="ch"
-                  :creator-id="c.id"
-                  :is-syncing="ch.status === 'updating' || context.syncingChannelIds?.has(ch.id)"
-                  :failed-avatar-urls="failedAvatarUrls"
-                  @deep-sync="() => openDeepSyncModal(c, ch.id)"
-                  @refresh="payload => handleRefreshChannel(payload.channel, payload.force)"
-                  @delete="deleteChannel"
-                  @cycle-role="cycleChannelRole"
-                  @avatar-error="handleAvatarError"
-                />
-
-                <div
-                  v-for="ch in chs.filter(c => c.errorMessage)"
-                  :key="'err-' + ch.id"
-                  class="text-[10px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 p-1.5 rounded-md border border-rose-200 dark:border-rose-900/60 flex items-start gap-1"
-                >
-                  <AlertCircle class="w-3 h-3 shrink-0 mt-0.5 text-rose-500" />
-                  <span class="break-all">{{ ch.displayName || ch.accountId }}: {{ ch.errorMessage }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="context.channels.filter(ch => ch.creatorId === c.id).length === 0" class="text-center py-4 text-xs text-slate-400">
-              暂无绑定账号，点击上方 + 绑定新账号
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    </div>
   </section>
 </template>
