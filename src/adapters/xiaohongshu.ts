@@ -1,14 +1,19 @@
 import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
-import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { toSecureMediaUrl } from '../utils/media';
-import type { JsonRecord, JsonValue } from '../utils/json';
-import { asRecord, firstFilled } from '../utils/json';
 import { errorMessage } from '../utils/errorMessage';
+import type { JsonRecord } from '../utils/json';
+import { asRecord } from '../utils/json';
+import {
+  collectRawNotes,
+  extractInitialState,
+  firstInfoListUrl,
+  mapProfileNote,
+  resolveAuthorMeta,
+} from './xiaohongshu/profileState';
 
-const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 export const xiaohongshuAdapter: PlatformAdapter = {
   platform: 'xiaohongshu',
@@ -34,7 +39,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       }
 
       const html = res.data;
-      const state = extractXhsInitialState(html);
+      const state = extractInitialState(html);
 
       if (!state) {
         return {
@@ -43,149 +48,15 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         };
       }
 
-      // Extract notes list (can be column array or flat list)
-      const rawNotes: JsonValue[] = [];
-      const stateUser = asRecord(state.user);
-      const stateNote = asRecord(state.note);
-      const notesContainer =
-        stateUser.notes || asRecord(stateUser.userPageData).notes || stateNote.notes;
-
-      if (Array.isArray(notesContainer)) {
-        for (const item of notesContainer) {
-          if (Array.isArray(item)) {
-            rawNotes.push(...item);
-          } else if (item && typeof item === 'object') {
-            rawNotes.push(item);
-          }
-        }
-      }
-
-      // Check noteDetailMap if it's a single note / explore page
-      if (rawNotes.length === 0 && stateNote.noteDetailMap) {
-        const noteDetailMap = asRecord(stateNote.noteDetailMap);
-        for (const [nid, detail] of Object.entries(noteDetailMap)) {
-          const detailRecord = asRecord(detail);
-          if (detail && typeof detail === 'object') {
-            rawNotes.push({ id: nid, ...asRecord(detailRecord.note) } as JsonRecord);
-          }
-        }
-      }
-
-      // Extract author meta with fallback to note items
-      const basicInfo =
-        asRecord(asRecord(stateUser.userPageData).basicInfo) ||
-        asRecord(asRecord(stateUser.userProfile).basicInfo);
-      const noteRecords = rawNotes.map((n) => asRecord(n));
-      const sampleUserRaw = noteRecords.find((n) => str(asRecord(asRecord(n.noteCard).user).nickname) || str(asRecord(n.user).nickname));
-      const sampleUser = asRecord(asRecord(sampleUserRaw?.noteCard).user) || asRecord(sampleUserRaw?.user);
-      const authorName = str(basicInfo.nickname) || str(basicInfo.name) || str(sampleUser.nickname) || channel.displayName || `小红书用户_${userId.slice(0, 6)}`;
-      const rawAvatar = str(basicInfo.imageb) || str(basicInfo.images) || str(sampleUser.avatar) || str(sampleUser.avatarUrl) || channel.avatarUrl;
-      const authorAvatar = toSecureMediaUrl(rawAvatar);
-
+      const rawNotes = collectRawNotes(state);
+      const { name: authorName, avatar: authorAvatar } = resolveAuthorMeta(state, rawNotes, channel);
       const allPosts: Post[] = [];
       const seenIds = new Set<string>();
 
       for (const rawItem of rawNotes) {
-        const item = asRecord(rawItem);
-        const noteCard = asRecord(item.noteCard);
-        const noteId = str(item.id) || str(item.noteId) || str(noteCard.noteId);
-        if (!noteId || seenIds.has(noteId)) continue;
-        seenIds.add(noteId);
-
-        // `asRecord(item.noteCard) || item` was dead: an empty record is truthy.
-        const card = firstFilled(asRecord(item.noteCard), item);
-        const displayTitle = str(card.displayTitle) || str(card.title) || '小红书精选笔记';
-        const isVideo = card.type === 'video';
-
-        // Media Cover & Images
-        const mediaList: MediaItem[] = [];
-        const cover = asRecord(card.cover);
-        const coverInfoList = Array.isArray(cover.infoList) ? cover.infoList : [];
-        const coverUrl =
-          str(cover.urlDefault) ||
-          str(cover.urlPre) ||
-          str(asRecord(coverInfoList[0]).url) ||
-          str(asRecord(card.image).url);
-        const noteUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
-
-        // Support multiple images if present in card (e.g. imageList, imagesList)
-        const imageListSource = card.imageList || card.imagesList || item.imageList || item.imagesList;
-        const imageList = Array.isArray(imageListSource) ? imageListSource : [];
-        if (imageList.length > 0) {
-          for (const rawImg of imageList) {
-            const img = asRecord(rawImg);
-            const imgInfoList = Array.isArray(img.infoList) ? img.infoList : [];
-            const imgUrl = str(img.urlDefault) || str(img.urlPre) || str(img.url) || str(asRecord(imgInfoList[0]).url);
-            if (imgUrl) {
-              const secureUrl = toSecureMediaUrl(imgUrl);
-              mediaList.push({
-                type: 'image',
-                previewUrl: secureUrl,
-                originalUrl: secureUrl,
-              });
-            }
-          }
-        }
-
-        if (mediaList.length === 0 && coverUrl) {
-          const secureCover = toSecureMediaUrl(coverUrl);
-          mediaList.push({
-            type: isVideo ? 'video' : 'image',
-            previewUrl: secureCover,
-            originalUrl: isVideo ? noteUrl : secureCover,
-          });
-        }
-
-        const likedCount = str(asRecord(card.interactInfo).likedCount);
-        const noteContent = likedCount
-          ? `${displayTitle}\n\n❤️ ${likedCount} 次赞同`
-          : displayTitle;
-
-        // Calculate accurate publication time
-        let pubTime = 0;
-        const timeCandidates = [
-          card.time,
-          card.createTime,
-          card.timestamp,
-          card.pubTime,
-          item.time,
-          item.createTime,
-          item.timestamp,
-        ];
-        for (const tc of timeCandidates) {
-          if (typeof tc === 'number' && tc > 0) {
-            pubTime = tc > 1e11 ? tc : tc * 1000;
-            break;
-          }
-        }
-
-        // Xiaohongshu noteId is a 24-hex ObjectId; first 8 hex characters represent the creation timestamp in seconds
-        if (!pubTime && noteId && /^[0-9a-fA-F]{8}/.test(noteId)) {
-          try {
-            const sec = parseInt(noteId.slice(0, 8), 16);
-            if (sec > 1400000000 && sec < 2500000000) {
-              pubTime = sec * 1000;
-            }
-          } catch {
-            // Malformed ObjectId prefix: fall through to Date.now().
-          }
-        }
-
-        if (!pubTime) {
-          pubTime = Date.now();
-        }
-
-        allPosts.push(buildPost(channel, {
-          id: `xiaohongshu_${noteId}`,
-          title: displayTitle,
-          content: noteContent,
-          mediaList,
-          originalUrl: noteUrl,
-          publishedAt: pubTime,
-          isRepost: false,
-        }));
+        const post = mapProfileNote(rawItem, channel, seenIds);
+        if (post) allPosts.push(post);
       }
-
       // CRITICAL: Sort strictly descending by publication time (newest first)
       // This fixes the random-order bug caused by multiple columns in waterfall layout
       allPosts.sort((a, b) => b.publishedAt - a.publishedAt);
@@ -365,12 +236,4 @@ async function enrichImageNoteMedia(channel: Channel, posts: Post[]): Promise<vo
   }
 }
 
-function firstInfoListUrl(infoList: unknown): string | undefined {
-  if (!Array.isArray(infoList) || infoList.length === 0) return undefined;
-  const first = infoList[0];
-  if (typeof first === 'object' && first !== null) {
-    const url = (first as Record<string, unknown>).url;
-    if (typeof url === 'string') return url;
-  }
-  return undefined;
-}
+

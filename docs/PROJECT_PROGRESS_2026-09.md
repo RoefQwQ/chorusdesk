@@ -785,7 +785,16 @@ B33. **平台评估的三条落地项**（2026-09-12）：
     **等价性证据**：提纯前后 `tests/bilibili.parse.test.ts` 的 7 例全部保持通过——这就是先建
     fixture 的意义，否则这次改动是盲改。两处原有差异（`Date.now()` 兜底、水位线提前 break）
     改为**显式参数**而非隐藏分支。
-    剩余：xiaohongshu 同法（先 fixture，再提纯）。
+    **xiaohongshu 同法完成**：`tests/fixtures/xiaohongshu/profile-state.ts`（1.5 KB，按解析路径裁剪）
+    ＋ `tests/xiaohongshu.parse.test.ts`（9 例，含「零笔记必须报 parse 错误而非成功空同步」这条规则 13 契约），
+    再提纯出 `src/adapters/xiaohongshu/profileState.ts`（250 行，纯函数：`extractInitialState` /
+    `collectRawNotes` / `resolveAuthorMeta` / `mapProfileNote`），`xiaohongshu.ts` **390 → 239 行**，
+    **9 例在提纯前后保持全绿**即等价性证据。
+    该文件原先的 `console.warn`（解析失败）也改为 `devLog.warn`——与 bilibili 同一处缺陷（用户日志看不到）。
+    fixture 过程中修掉三个我自己的错误，其中一个有数据价值：真实载荷里
+    **`noteCard.time`(ms) 恰等于 `parseInt(id.slice(0,8),16) * 1000`**（实测 `0x6aa3c910*1000` 正是卡上的值），
+    我改了 id 却留了真实 time，破坏了这个关系，于是适配器落到 `Date.now()`——fixture 现已保留该不变量并断言它。
+    本轮总计：两个平台从**零测试**变成有真机载荷 fixture ＋ 提纯＋等价性证明；测试 525 → **541**。
 B32. **占位名前缀清单与 `urlParser` 系统性脱节**（2026-09-12，B30 的同类问题查全的结果）——
     **部分完成（提交 `c9b97e8`）：缺失的 8 个前缀已补齐，复核 15/16；根治（改为单一来源＋守卫测试）未做**——
     拿 `urlParser` **实际生成**的 16 个 `suggestedName` 前缀，逐个对 channelSync 的两份手写清单判：
