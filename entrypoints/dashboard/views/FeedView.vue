@@ -4,6 +4,7 @@ import { Search, LayoutGrid, Repeat2, Image as ImageIcon, ImageOff, Tag, Users,
   ChevronDown, Eye, EyeOff, RefreshCw, CheckCircle2,
 } from 'lucide-vue-next';
 import PostCard from '../components/PostCard.vue';
+import LoopScroll from '../components/LoopScroll.vue';
 import type { PlatformMeta, Creator, Channel, Post } from '../../../src/types';
 
 type LightboxMedia = { url: string; originalUrl?: string; type: string; title?: string } | null;
@@ -234,6 +235,17 @@ onUnmounted(() => {
         <span class="text-[10px] font-mono font-normal text-slate-400 dark:text-slate-500">{{ Object.keys(context.PLATFORM_REGISTRY).length }} 个平台</span>
       </div>
 
+      <!-- The list is capped and scrolls; it deliberately does NOT loop. The
+           left column feeds the tag filter below it, and an uncapped list grew
+           without bound as platforms were added, pushing that section down. -->
+      <LoopScroll
+        :loop="false"
+        :item-count="orderedPlatformKeys.length + 1"
+        :rows="6"
+        :min-rows="4"
+        :max-rows="8"
+        aria-label="平台列表"
+      >
       <!-- All Platforms Button -->
       <button
         @click="emit('update:selectedPlatform', 'all')"
@@ -278,6 +290,7 @@ onUnmounted(() => {
           {{ context.platformPostCounts[key] }}
         </span>
       </button>
+      </LoopScroll>
     </div>
 
     <!-- Content Preferences & Tag Filter -->
@@ -488,8 +501,19 @@ onUnmounted(() => {
         当前暂无匹配创作者
       </div>
 
-      <!-- Creator Cards List in Right Sidebar -->
-      <div v-else class="space-y-2 max-h-[calc(100vh-210px)] overflow-y-auto pr-0.5 scrollbar-thin">
+      <!-- Creator Cards List: rows loop seamlessly and the height is draggable:
+           the list used to be a plain capped scroller that simply ended, and its
+           height was fixed at `100vh - 210px` with no way to change it. -->
+      <LoopScroll
+        v-else
+        :item-count="context.visibleCreatorsForFilter.length"
+        storage-key="cfh_feed_creator_list_rows"
+        :min-rows="4"
+        :max-rows="8"
+        :cap-to-viewport="210"
+        resizable
+        aria-label="创作者列表"
+      >
         <div
           v-for="c in context.visibleCreatorsForFilter"
           :key="c.id"
@@ -620,7 +644,7 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-      </div>
+      </LoopScroll>
     </div>
   </aside>
 </section>
