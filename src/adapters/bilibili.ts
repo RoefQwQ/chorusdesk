@@ -2,7 +2,7 @@ import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions, FetchError } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
-import { bgFetch } from '../utils/http';
+import { bgFetch } from '../infrastructure/chrome/http';
 import { toSecureMediaUrl } from '../utils/media';
 import type { JsonRecord } from '../utils/json';
 import { asRecord } from '../utils/json';

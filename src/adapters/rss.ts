@@ -2,7 +2,7 @@ import type { Channel, Post, MediaItem } from '../types';
 import type { PlatformAdapter, FetchResult } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
-import { bgFetch } from '../utils/http';
+import { bgFetch } from '../infrastructure/chrome/http';
 import { hasArticleMarkup, sanitizeArticleHtml } from '../utils/sanitizeHtml';
 
 /**

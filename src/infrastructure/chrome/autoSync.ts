@@ -38,7 +38,7 @@ export async function setupAutoSync() {
  * Uses the same interleaved, per-platform-paced batch routine as the dashboard's
  * manual refresh rather than a bare serial loop: this path previously issued
  * back-to-back requests with no delay, which now matters because the requests
- * actually reach the network (see `src/utils/http.ts`).
+ * actually reach the network (see `src/infrastructure/chrome/http.ts`).
  */
 async function syncAllChannels() {
   try {

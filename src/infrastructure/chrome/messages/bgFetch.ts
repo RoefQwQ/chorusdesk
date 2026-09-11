@@ -3,7 +3,7 @@ import { devLog } from '../../../utils/devLog';
 
 // Minimal local types for the BG_FETCH runtime-message contract. They only
 // describe what this handler reads / replies with — the protocol shape itself
-// is unchanged (see src/utils/http.ts bgFetch() for the caller side).
+// is unchanged (see src/infrastructure/chrome/http.ts bgFetch() for the caller side).
 interface BgFetchMessage {
   type: 'BG_FETCH';
   url?: string;

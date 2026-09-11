@@ -48,7 +48,7 @@ const channel = {
  */
 async function fetchFirst(feed: string = FEED) {
   vi.resetModules();
-  vi.doMock('../src/utils/http', () => ({
+  vi.doMock('../src/infrastructure/chrome/http', () => ({
     bgFetch: async () => ({ ok: true, status: 200, data: feed }),
   }));
   const { rssAdapter } = await import('../src/adapters/rss');
@@ -158,6 +158,6 @@ describe('rssAdapter article structure', () => {
 });
 
 afterEach(() => {
-  vi.doUnmock('../src/utils/http');
+  vi.doUnmock('../src/infrastructure/chrome/http');
   vi.resetModules();
 });

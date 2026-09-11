@@ -51,7 +51,7 @@
 1. 在 `src/adapters/` 新建 `<platform>.ts`，实现 `PlatformAdapter` 契约（`src/adapters/types.ts`）：
    - 必实现 `fetchLatest(channel, limit, options)` → 归一化 `FetchResult`（`posts[]`、`authorMeta?`、`nextCursor?`、`hasMore?`、`error?`、`totalFetched?`）。
    - 需要历史翻页 → `fetchHistory?`；需要第二请求通道 → `fetchAjaxFallback?`；需要页内 GraphQL/JSON 归一化 → `parseGraphQLResult?`；需要登录探测 → `checkAuthStatus?`（返回 `{ loggedIn, username? }`）。
-2. 请求统一走 `src/utils/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
+2. 请求统一走 `src/infrastructure/chrome/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
 3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base64(guid) 32位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。
 4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册；不要改 `getAdapter` 的 rss 回退语义。
 5. 在 `src/types/index.ts` 增加 `Platform` 字面量、`PLATFORM_REGISTRY` 元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
@@ -91,7 +91,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 
 协议总表见 ARCHITECTURE.md §6。改动步骤：
 
-1. 先全局搜索该 type 的**发送方**与**接收方**（现网发送方：`utils/http.ts`、`utils/media.ts`、`popup/App.vue`、`dashboard/App.vue`；接收方：`entrypoints/background.ts` 路由 + `src/infrastructure/chrome/messages/*.ts` handler）。
+1. 先全局搜索该 type 的**发送方**与**接收方**（现网发送方：`infrastructure/chrome/http.ts`、`utils/media.ts`、`popup/App.vue`、`dashboard/App.vue`；接收方：`entrypoints/background.ts` 路由 + `src/infrastructure/chrome/messages/*.ts` handler）。
 2. 同步修改五件套：
    - type 名称（涉及两端字符串字面量）；
    - 入参解析与校验（handler 内局部接口 + `typeof` 收窄；外部数据用 `unknown` 收窄，不用 `any`）；

@@ -209,7 +209,7 @@ export interface PlatformAdapter {
 | `youtube.ts` | 官方 RSS `www.youtube.com/feeds/videos.xml?channel_id=`（先尝试抓频道页解析 `channel_id`） | — |
 | `rss.ts` | 任意 RSS/Atom 源，`bgFetch` 拉取后 DOMParser 解析 | — |
 
-规则：adapter 只做“请求 + 归一化”，**不直接写 Dexie、不修改 Vue 状态**；跨域请求一律经 `src/utils/http.ts bgFetch()`（见 §5.4）。
+规则：adapter 只做“请求 + 归一化”，**不直接写 Dexie、不修改 Vue 状态**；跨域请求一律经 `src/infrastructure/chrome/http.ts bgFetch()`（见 §5.4）。
 
 ### 4.3 同步应用层 `src/sync/`
 
@@ -346,7 +346,7 @@ getAdapter(channel.platform)（缺失回退 rss）
 ### 5.4 跨域请求
 
 ```text
-adapter → src/utils/http.ts bgFetch(url, options)
+adapter → src/infrastructure/chrome/http.ts bgFetch(url, options)
  → runtime.sendMessage({ type: 'BG_FETCH', url, options })
  → background 路由 → handleBgFetch(message, sendResponse)（返回 true 保持通道）
      - 非扩展环境：bgFetch 直连 fetch 兜底
@@ -385,7 +385,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 |---|---|---|---|---|---|
 | `UPDATE_AUTO_SYNC` | Dashboard 设置开关 | background 内联 | — | `{ success: true }` | 否 |
 | `OPEN_DASHBOARD` | **当前仓库无调用方**（Popup 直接 `chrome.tabs.create` 开 `dashboard.html`）；作为契约保留 | background 内联 | — | `{ success: true }` | 否 |
-| `BG_FETCH` | `src/utils/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ url, options: { method, headers, credentials } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
+| `BG_FETCH` | `src/infrastructure/chrome/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ url, options: { method, headers, credentials } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit, deep }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`；`deep=true` 时先滚动作品网格再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |

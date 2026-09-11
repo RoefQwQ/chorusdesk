@@ -2,7 +2,7 @@ import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
-import { bgFetch } from '../utils/http';
+import { bgFetch } from '../infrastructure/chrome/http';
 
 export const pixivAdapter: PlatformAdapter = {
   platform: 'pixiv',

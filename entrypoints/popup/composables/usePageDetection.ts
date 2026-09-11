@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { parseProfileUrl, type ParsedProfile } from '../../../src/utils/urlParser';
 import { toSecureMediaUrl } from '../../../src/utils/media';
-import { bgFetch } from '../../../src/utils/http';
+import { bgFetch } from '../../../src/infrastructure/chrome/http';
 import { collectDouyinSnapshot } from '../../../src/adapters/douyin/collector';
 
 export interface AuthorMeta {

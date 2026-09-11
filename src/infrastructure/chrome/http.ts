@@ -1,5 +1,5 @@
-import { performBgFetch } from '../infrastructure/chrome/messages/bgFetch';
-import { IS_SERVICE_WORKER } from './runtime';
+import { performBgFetch } from './messages/bgFetch';
+import { IS_SERVICE_WORKER } from '../../utils/runtime';
 
 export interface HttpResponse {
   ok: boolean;
@@ -10,7 +10,19 @@ export interface HttpResponse {
 }
 
 /**
- * Universal cross-origin GET for Chrome Extension MV3.
+ * Universal cross-origin GET for Chrome Extension MV3 — the network port every
+ * adapter fetches through.
+ *
+ * **Why this file is in `infrastructure/chrome/` rather than `utils/`.** It used
+ * to live in `utils/http.ts`, which made a leaf layer depend on this one
+ * (`utils/http.ts` → `messages/bgFetch.ts` → `utils/devLog.ts`) — the only
+ * cross-layer cycle in the repo. The cycle was not the real problem; the address
+ * was. This module's direct mode calls `performBgFetch`, which reads
+ * `chrome.cookies` for Bilibili, so it genuinely cannot live below the chrome
+ * layer. Adapters already depended on it transitively; moving it here makes that
+ * dependency explicit instead of laundering it through `utils`, and removes the
+ * layer cycle. The alternative — injecting the fetch implementation — would add
+ * indirection to hide a dependency that is real.
  *
  * Two execution modes:
  *  - Inside the service worker (alarms / auto-sync): calls `performBgFetch`
