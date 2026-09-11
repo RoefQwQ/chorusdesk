@@ -587,6 +587,53 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
    第 3.5 步过滤永不生效。删掉它会改变筛选管线的形状（虽然结果不变），
    所以没混进拆分提交。可作为一次独立的小清理（连同 `include`/`exclude` 已覆盖同等能力）。
 
+#### 队列 B 补：2026-09-11 可维护性审计的产出（详见 `docs/REVIEW_2026-09.md`）
+
+审计在 `4c89bb2` 上完成，五个只读切片并行，结论**未动手**。按「收益/风险」排序：
+
+B9. **`__END__` 游标终态语义有三份实现**（最高价值）：`historySync.ts:16-46`（提前返回 +
+   抖音特判）、`historySync.ts:110-115`（同一规则在挖矿循环里再写一遍，注释逐字重复）、
+   `channelSync.ts:194,:394`（写入侧）。今天改「完成」的含义必须改三处。
+B10. **Twitter GraphQL `features` 在同一个文件里有两份逐字拷贝**：
+    `twitterTimeline.ts:76-141` 与 `:277-345`（后者是给注入脚本重新声明的一份）。
+    X 改一个 flag 要改相隔 200 行的两处。
+B11. **三态标签过滤器两份**：`useFeedFilters.ts:82-118` 与
+    `useCreatorDirectoryFilters.ts:133-155` 逻辑逐字等价（两份原本就在同一个文件里，
+    拆分只是让它可见）。可提 `createTagTriState()` 工厂 + 队列 B 第 8 条的 `selectedTag`/
+    `creatorTagFilter` 一起清掉。
+B12. **`err instanceof Error ? err.message : String(err)` 至少三种写法**：两个几乎一样的具名
+    `errorMessage()`（`bgFetch.ts:26`、`proxyImage.ts:21`）+ 约 10 处内联三元。
+    提到 `src/utils/` 一个函数即可。
+B13. **死代码，约 30 行**：`postRepository.ts:63` `restoreDeletedPostId`（是 `restoreDeletedPost`
+    的纯别名）、`:70` `restoreDeletedPostIds`（与在用的 `restoreAllDeletedPostIds` 同体，
+    只差范围）、`registry.ts:34` `registerAdapter`（适配器实际静态注册）。
+B14. **`postService.deleteToRecycleBin` 为什么死，有明确原因**：`useDeletedPosts.ts:6` 直接 import
+    `deletePostAndTombstone` 绕过门面。把这一处调用改走 service，既复活该方法，
+    又消掉 AGENTS 规则 8 那 9 处直连中的一处——**这是该笔债里唯一有名字成因的一处**。
+B15. **adapter 直接调 `chrome.*`（5 个文件，不在任何已有规则里）**：`bilibili.ts:426-429`、
+    `weibo.ts:269-274`、`xiaohongshu.ts:254-259`（`chrome.cookies.get` 登录检测）与
+    `douyin.ts:68-82`、`twitter.ts:146-154`（`chrome.runtime.sendMessage`）。
+    **已核实不是正确性/安全问题**：两处 `sendMessage` 都先判 `IS_SERVICE_WORKER`，
+    规则 6 的自发自收不可能发生；cookie 只读存在性，凭据仍只在 `bgFetch` 里按
+    `PLATFORM_HOSTS` 附加。代价是 adapter 在扩展之外不可测 + 5 处手写
+    `typeof chrome === 'undefined'` 守卫。要不要收拢请用户定（改的是分层口径，不只是代码）。
+B16. **`e2e/README.md:97` 承诺了一个不存在的样例文件**：它说 `e2e/probe-result.json` 是探针的
+    输出样例，但该文件被 `e2e/.gitignore:2` 正确忽略（已核实未跟踪），新克隆的人拿不到。
+    要么提交一份脱敏样例，要么删掉这句话。
+B17. **测试缺口（已核实）**：`channelSync.clearStaleUpdatingStatus` 与 `tco.isTcoUrl` 无测试；
+    更要紧的是 `tco.ts` 的测试**只**寄生在 `twitter.emptyTimeline.test.ts` 里（20 处引用），
+    按模块名 grep 会误判为「无测试」。另有 7 个 >150 行模块零测试引用，
+    负载最重的：`twitterTimeline.ts`(486)、`bilibili.ts`(435)、`xiaohongshu.ts`(389)、
+    `weibo.ts`(323)、`postRepository.ts`(212)。唯一该拆的大测试文件是
+    `twitter.emptyTimeline.test.ts`(756，四个不相关关注点)。
+B18. **零成本清理**：空目录 `src/db/`；`.gitignore:9` 的 `!.env.example`（文件不存在）、
+    `:39` 的 `.e2e-profile/`（无脚本写它）、`:40` 的 `bun.lock`（无 bun 痕迹）。
+    `public/icons/icon.svg` 全仓零引用，但**可能是 WXT 的图标源，删前须验 build**。
+B19. **`FeedView.vue` 的两块可拆**（审计里唯一「纯收益」的拆分）：平台侧栏拖拽排序（约
+    `FeedView.vue:62-110`）与 masonry 分列 + 高度估算（约 `:162-197`），两者自包含、
+    与 context 无共享状态。其余 7 个大文件**审计判定不该拆**（「一个东西的很多方面」，
+    或受注入序列化/清理不变量约束），理由见评审文件。
+
 #### 队列 C — 需要用户决定
 
 8. **发布范围**（二.10）：代码侧权限已收窄（去 `tabs`、DNR WithHostAccess、RSS 按站点授权），
