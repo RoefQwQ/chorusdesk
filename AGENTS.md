@@ -733,23 +733,63 @@ Two traps when reacting to what it finds:
   as `string | number` and accept the hole.
 ---
 
-## 28. A full extension E2E is unavailable here — `--load-extension` is ignored
+## 28. A full extension E2E IS available — but only via CDP, and only within one browser session
 
 Checking a real render is still the right instinct, but know the ceiling before planning around
-it: **this machine's Chrome 152 ignores `--load-extension`.** Since Chrome 137 the switch is
-disabled for regular Chrome. Evidence gathered, so nobody re-derives it:
+it. Two halves, both measured:
+
+**`--load-extension` is ignored (Chrome 152, no CDP).** Since Chrome 137 the switch is disabled for
+regular Chrome:
 
 |Check|Result|
 |---|---|
 |`chrome://version/` command line|`--load-extension=…` **is present** — the flag is delivered|
 |profile `Secure Preferences` → `extensions.settings`|only the 3 built-ins; the unpacked extension is **absent**|
-|CDP `Extensions.loadUnpacked`|`ProtocolError: Method not available`|
 
-So a full extension E2E — load the build, drive the dashboard — is **not available from the
-command line here**. Do not spend five launches rediscovering it: two probes are enough, then
-stop and say so.
+**But CDP `Extensions.loadUnpacked` does work — with `--enable-unsafe-extension-debugging`.**
+Re-measured 2026-09-11 on `Chrome/152.0.7977.83` (protocol 1.3), throwaway profile:
 
-What to do instead, in order of value:
+```js
+hub({ op: 'start', name: '<name>', application: '<chrome>', args: [
+  '--user-data-dir=<temp>', '--remote-debugging-port=<port>', '--remote-allow-origins=*',
+  '--enable-unsafe-extension-debugging',   // ← the flag that decides this
+  '--window-position=-2400,-2400',         // off-screen: the user is not disturbed
+], ready: { port: <port> } });
+await cdp('Extensions.loadUnpacked', { path: '<repo>/.output/chrome-mv3' });  // → { id }
+```
+
+The earlier `ProtocolError: Method not available` was measured **without** that flag. With it:
+
+- the extension's **service worker** appears as a target (`background.js`) and can be evaluated
+  in, so `chrome.alarms`, `chrome.tabs`, message handlers and the router are all drivable;
+- **extension pages render for real** — `dashboard.html` reports `chrome.runtime.id`, mounts the
+  app, and accepts synthetic clicks;
+- **downloads** can be captured (`Browser.setDownloadBehavior` → read the file) and **file
+  inputs** can be fed (`DOM.setFileInputFiles` → the page's `change` handler runs);
+- **IndexedDB persists in the profile** across a browser restart (a seeded row and an imported
+  backup both survived it).
+
+Worked verifications from that session (2026-09-11), all against the built extension:
+
+| Claim | Method | Result |
+|---|---|---|
+| Backup export produces a real file | click 「下载 JSON 备份」 with a download dir set | `creator-feed-hub-backup-*.json`, 1204 B, `version: '1.0'`, all four sections |
+| …and imports back | destroy the rows, then `DOM.setFileInputFiles` the export | creator/channel/post restored, content and bookmark intact |
+| Opening the popup does not reset the alarm | read `alarms.getAll()` before and after 3 popup opens | `scheduledTime` identical in all 4 readings (Δ 0 ms) |
+
+Two caveats, both hit:
+
+- **A native `alert()` blocks the whole renderer, and CDP with it.** The import success path calls
+  `alert(...)`; afterwards `Runtime.evaluate` and even `Page.enable` hang forever on that target.
+  Enable the Page domain *before* the action and answer `Page.javascriptDialogOpening` (or close
+  the target and reopen — the state is already committed). A hang here is the dialog, not a hang
+  in the product.
+- **The unpacked extension does not survive a browser restart.** `loadUnpacked` after a restart is
+  a fresh install, so anything the profile would have carried (alarm existence, `onInstalled`
+  timing) is recreated rather than restored. Cross-restart behaviour therefore stays unverifiable
+  here — say that plainly instead of inferring it from a single reading.
+
+What is still better done the cheap way, in order of value:
 
 1. **Component-level render with the real built stylesheet.** Build, then feed the actual
    `assets/main-*.css` into a page and mount the markup — geometry (`getBoundingClientRect()`)
@@ -759,16 +799,16 @@ What to do instead, in order of value:
    measurement said the button was there).
 2. **jsdom assertions on behaviour** — click handling, propagation, ordering. These are the tests
    that mutation-verify cheaply; use them for anything that is not layout.
-3. If a change genuinely needs the extension host, say the harness cannot provide it rather than
-   approximating silently.
+3. Reach for the CDP host when the *extension host itself* is the subject (storage, alarms,
+   messaging, permission gates) — not for layout, where rule 30 is faster to iterate.
 
 And on the process point: **two launches without the intended result means the approach is wrong,
-not the parameters.** Cycling `--user-data-dir`, a path without spaces, `--disable-features=…`
-and an `--enable-unsafe-extension-debugging` escape hatch was five chances to stop and report.
-Each wasted launch is also a window opening on the user's screen.
+not the parameters** — with one addition: before declaring a capability absent, check the flag
+that governs it. The negative result above was correct about `--load-extension` and wrong about
+CDP, and everything below it was written as if the ceiling were lower than it is.
 
-`--load-extension` is still fine for spawning a *plain* Chrome to view non-extension URLs, which
-rule 25's isolated-browser recipe uses.
+`--load-extension` remains fine for spawning a *plain* Chrome to view non-extension URLs (rule 25's
+recipe) — though with a CDP-loaded extension available, that is now mostly a fallback.
 
 ---
 

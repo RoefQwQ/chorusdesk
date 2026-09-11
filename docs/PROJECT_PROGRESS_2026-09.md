@@ -45,7 +45,8 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 - **已知技术债**：`CreatorsView.vue` **1481 行**（四.P4，持续增长）。
   三个迁移期兼容桶（`src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts`）
   与零引用脚手架 `components/DashboardSection.vue` **已于 2026-09-11 删除**。
-- **待真机确认**：见[四.P7](#四后续优先级) —— 备份全量导入导出、alarm 跨浏览器重启的长期行为。
+- **待真机确认**：见[四.P7](#四后续优先级) —— 仅剩「alarm 跨浏览器重启的长期行为」
+  （同 profile 内的备份导出导入往返已于 2026-09-11 实测通过，见四.P7 补记）。
 - **未排期**：四.P6 整体 UI 风格重设计。
 
 **已决的非目标（不要再提议）**
@@ -53,11 +54,15 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 见 `AGENTS.md` 的 *Non-goals* 一节：RSS 卡片不显示配图；视频缩略图不加角标/播放图标
 （页脚「视频动态」已是静态标识）。
 
-**验证方法上的两条硬约束**
+**验证方法上的三条硬约束**
 
 - 真实浏览器验证**只开独立 profile 的专用实例**，绝不驱动用户正在浏览的窗口（`AGENTS.md` 规则 25）。
-- 本机 Chrome 152 起 `--load-extension` 被忽略，**无法用命令行加载未打包扩展**；
-  组件级渲染需打包成单文件 HTML 在普通页面中验证（`AGENTS.md` 规则 28/30）。
+- **完整扩展 E2E 可用**：`--load-extension` 在 Chrome 152 被忽略，但
+  `--enable-unsafe-extension-debugging` + CDP `Extensions.loadUnpacked` 可以加载构建产物，
+  并在扩展自己的 Service Worker / 页面里取证（存储、alarm、消息、真实点击与文件导入）。
+  见 `AGENTS.md` 规则 28 与四.P7 补记。
+- 该 E2E **不跨浏览器重启留存**（重启后重新加载等于全新安装），故跨重启行为仍需真实安装验证。
+- 组件级布局验证走单文件 HTML 打包（`AGENTS.md` 规则 30），jsdom 不做布局。
 
 ---
 
@@ -2458,6 +2463,32 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
    故与当前的抓取风控同源）。冷却机制生效后再观察。
 
 **长期项**（与既有遗留合并）：备份全量导入导出（二.1 注记）、alarm 跨浏览器重启的长期行为。
+
+### P7 补记：独立 profile 的全扩展 E2E（2026-09-11）
+
+发现 `--load-extension` 在 Chrome 152 被忽略（见 AGENTS.md 规则 28）之后，项目一直把
+「完整扩展 E2E 不可用」当作既定天花板。本次复核推翻了其中一半：
+**`--enable-unsafe-extension-debugging` + CDP `Extensions.loadUnpacked` 可以完整加载构建产物**，
+并能在该扩展自己的 Service Worker 与页面里取证。规则 28 已按实测改写，此处记录由此完成的
+三项验证（均为真实构建产物、独立 profile、测毕删除）：
+
+| 待验项 | 方法 | 结果 |
+|---|---|---|
+| 备份导出产生真实文件 | 设下载目录后点「下载 JSON 备份」 | `creator-feed-hub-backup-*.json`，1204 B，`version: '1.0'`，四个 section 齐全 |
+| 备份导入还原数据 | 先删三张表的探针行，再用 `DOM.setFileInputFiles` 交回导出文件 | 创作者/频道/动态全部还原，正文与收藏位保持 |
+| **打开 popup 不重置 alarm**（P0 清单第 9 项） | 连开 3 次 popup，前后各读 `alarms.getAll()` | 4 次 `scheduledTime` 完全一致（Δ 0 ms） |
+
+因此：**P0 清单第 9 项在真实扩展环境中确认通过**（此前只有代码层推断）；
+**备份全量导入导出**在「本机同 profile」范围内验证通过，长期项收缩为
+「跨浏览器重启后的行为」一项。
+
+**仍不可验的具体原因**（而非笼统的「无法验证」）：`Extensions.loadUnpacked` 加载的扩展
+**不跨浏览器重启留存**——重启后重新加载等同于一次全新安装，alarm 是否存在、
+`onInstalled` 何时触发都被重建而非延续，故跨重启结论无法从此环境得出。
+
+**一处 harness 陷阱**（供后续复跑者）：导入成功路径调用 `alert()`，它会阻塞渲染进程主线程，
+连带令 `Runtime.evaluate` 与 `Page.enable` 永久挂起（表现为「页面卡死」而非产品缺陷）。
+需在执行动作**之前**启用 Page 域并应答 `Page.javascriptDialogOpening`。
 
 ### P8：下一步待办（2026-09-10 收口时整理）
 

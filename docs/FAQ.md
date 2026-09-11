@@ -35,10 +35,14 @@
 - **说明**：
   - 扩展完全运行在本地浏览器的沙箱进程中。当浏览器彻底关闭后，后台 Service Worker 会休眠，不会在后台单独占用系统内存。
   - 浏览器处于运行状态时，定时的 Chrome Alarm 会按设定间隔唤醒 Service Worker 执行增量同步。
+  - **已验证（2026-09-11，独立 profile 实测）**：反复打开 Popup 不会重置定时的倒计时——
+    连续开 3 次 Popup，前后 4 次读取 `chrome.alarms.getAll()` 的 `scheduledTime` 完全一致。
+    这正是它曾经失效的方式（无条件 `create` 会重启倒计时，导致定时器永不触发）。
   - **跨浏览器重启的行为尚不保证**：Chrome 对 alarm 是否随重启保留并无承诺。扩展在
     **每次 Service Worker 启动**时都会检查并补建缺失的 alarm（`setupAutoSync` 中的
     `alarms.get` 守卫），因此只要 Service Worker 被任意事件唤醒就会自我修复；但若重启后
     alarm 已被清除且没有任何事件唤醒 worker，该次同步可能要等到你下次使用扩展才会发生。
+    （本机无法实测这一条：调试方式加载的扩展不跨重启留存，重启后重新加载等同全新安装。）
     长期行为仍列在待验证清单（`PROJECT_PROGRESS_2026-09.md` 四.P7）。
   - 需要一直同步，可保持浏览器在后台运行。
 
