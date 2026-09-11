@@ -175,6 +175,23 @@
   background-color: var(--color-slate-800);
 }
 
+/**
+ * Scroller with no visible scrollbar.
+ *
+ * Asked for explicitly (2026-09-11) on the feed's two sidebars: 「这两个滑块都不要右侧的
+ * 滑动把手」. The bar is hidden, not disabled — wheel, trackpad and keyboard still scroll,
+ * and the viewport keeps `tabindex="0"` so the list stays reachable without a mouse.
+ */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* Custom scrollbars for clean UI */
 ::-webkit-scrollbar {
   width: 6px;

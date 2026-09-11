@@ -211,6 +211,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  endDrag();
   window.removeEventListener('resize', measureCap);
   observer?.disconnect();
   observer = null;
@@ -228,24 +229,52 @@ const dragging = ref(false);
 let dragStartY = 0;
 let dragStartRows = 0;
 
+/**
+ * The move/up listeners live on `window`, not on the grip.
+ *
+ * Reported 2026-09-11: 「按着拖动的时候互动元素不能互动了，然后就可以在点击其他内容的
+ * 同时继续拖动这个高度」. Listening on the grip meant that any `pointerup` it did not
+ * receive left `dragging` true forever — so the height kept following the mouse while
+ * the user tried to click other things. `setPointerCapture` is *supposed* to guarantee
+ * delivery, but it is released implicitly on re-render and does not survive the pointer
+ * leaving the window, and a drag handle that can get stuck is worse than one that needs
+ * a belt-and-braces listener. `window` cannot miss it.
+ */
 function onGripPointerDown(event: PointerEvent) {
-  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  // Left button only: a right-click must not start a resize.
+  if (event.button !== 0) return;
+  // Stops the drag from selecting text or starting a native drag image.
+  event.preventDefault();
   dragging.value = true;
   dragStartY = event.clientY;
   dragStartRows = visibleRows.value;
+  window.addEventListener('pointermove', onWindowPointerMove);
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
 }
 
-function onGripPointerMove(event: PointerEvent) {
+function onWindowPointerMove(event: PointerEvent) {
   if (!dragging.value) return;
+  // Backstop for the release the page never hears about (let go outside the window,
+  // or the browser swallows the `up`). No button held means the drag is over, however
+  // we got here — without this the resize would follow the mouse indefinitely.
+  if (event.buttons === 0) {
+    endDrag();
+    return;
+  }
   const pitch = rowPitch.value > 0 ? rowPitch.value : 1;
-  // Dragging up grows the list: the grip follows the pointer's edge.
-  setRows(dragStartRows + (dragStartY - event.clientY) / pitch);
+  // Dragging DOWN grows the list: the grip sits at the list's bottom edge, so the
+  // bottom edge should follow the pointer. This was inverted — each step moved the
+  // edge the opposite way to the hand, and the row readout ran backwards with it.
+  setRows(dragStartRows + (event.clientY - dragStartY) / pitch);
 }
 
-function onGripPointerUp(event: PointerEvent) {
+function endDrag() {
   if (!dragging.value) return;
-  (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
   dragging.value = false;
+  window.removeEventListener('pointermove', onWindowPointerMove);
+  window.removeEventListener('pointerup', endDrag);
+  window.removeEventListener('pointercancel', endDrag);
 }
 
 /** A window splitter, so it is keyboard-operable per that pattern. */
@@ -268,7 +297,7 @@ function onGripKeydown(event: KeyboardEvent) {
   <div class="min-w-0">
     <div
       ref="viewport"
-      class="overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-thin pr-0.5"
+      class="no-scrollbar overflow-y-auto overflow-x-hidden overscroll-contain"
       :style="{ height: heightPx > 0 ? `${heightPx}px` : undefined, scrollBehavior: 'auto' }"
       :aria-label="ariaLabel"
       role="group"
@@ -296,12 +325,9 @@ function onGripKeydown(event: KeyboardEvent) {
       :aria-valuenow="visibleRows"
       aria-label="拖动调整显示数量"
       :title="`拖动调整高度（${minRows}–${maxRows} 行），也可用方向键`"
-      class="mt-1.5 -mb-0.5 flex w-full cursor-ns-resize items-center justify-center gap-1 rounded-lg py-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+      class="mt-1.5 -mb-0.5 flex w-full cursor-ns-resize touch-none select-none items-center justify-center gap-1 rounded-lg py-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
       :class="{ 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300': dragging }"
       @pointerdown="onGripPointerDown"
-      @pointermove="onGripPointerMove"
-      @pointerup="onGripPointerUp"
-      @pointercancel="onGripPointerUp"
       @keydown="onGripKeydown"
     >
       <GripHorizontal class="h-3.5 w-3.5" aria-hidden="true" />

@@ -302,6 +302,32 @@ describe('LoopScroll — row count', () => {
     expect(g.getAttribute('aria-valuenow')).toBe('4');
   });
 
+  it('grows when the grip is dragged DOWN and shrinks when dragged UP', async () => {
+    // Reported 2026-09-11: 「右边的这个创作者下面的拉动互动方向反了」. The grip sits at the
+    // list's bottom edge, so dragging down must move that edge down — more rows. This
+    // was inverted, so the list shrank as the pointer pulled away and the row readout
+    // ran backwards.
+    mountHarness({ items: 10 });
+    await flush();
+    stubGeometry(host!, 10, 6);
+    await remeasure();
+
+    const g = grip();
+    const pitch = ITEM_H + GAP;
+
+    g.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, clientY: 300, buttons: 1 }));
+
+    // Down by one pitch ⇒ one more row.
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 + pitch, buttons: 1 }));
+    await flush();
+    expect(g.getAttribute('aria-valuenow')).toBe('7');
+
+    // Up by two pitches from the start ⇒ one fewer than the start.
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 - 2 * pitch, buttons: 1 }));
+    await flush();
+    expect(g.getAttribute('aria-valuenow')).toBe('4');
+  });
+
   it('clamps a drag that goes past the bounds', async () => {
     mountHarness({ items: 10 });
     await flush();
@@ -309,21 +335,79 @@ describe('LoopScroll — row count', () => {
     await remeasure();
 
     const g = grip();
-    g.setPointerCapture = () => undefined;
-    g.releasePointerCapture = () => undefined;
+    g.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, clientY: 300, buttons: 1 }));
 
-    // A huge upward drag asks for far more than 8 rows.
-    g.dispatchEvent(Object.assign(new Event('pointerdown'), { clientY: 500, pointerId: 1 }));
-    g.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 0, pointerId: 1 }));
+    // Far below asks for far more than 8 rows.
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 5000, buttons: 1 }));
     await flush();
     expect(g.getAttribute('aria-valuenow')).toBe('8');
 
-    g.dispatchEvent(Object.assign(new Event('pointerup'), { clientY: 0, pointerId: 1 }));
-    // And far downward asks for fewer than 4.
-    g.dispatchEvent(Object.assign(new Event('pointerdown'), { clientY: 0, pointerId: 2 }));
-    g.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 5000, pointerId: 2 }));
+    // Far above asks for fewer than 4.
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: -5000, buttons: 1 }));
     await flush();
     expect(g.getAttribute('aria-valuenow')).toBe('4');
+  });
+
+  it('stops resizing when the pointer is released over other content', async () => {
+    // The reported bug: 「按着拖动的时候互动元素不能互动了，然后就可以在点击其他内容的
+    // 同时继续拖动这个高度」. The up event was only handled on the grip, so a release it
+    // never received left the drag active — and the height then followed the mouse
+    // while the user tried to click something else.
+    mountHarness({ items: 10 });
+    await flush();
+    stubGeometry(host!, 10, 6);
+    await remeasure();
+
+    const g = grip();
+    const pitch = ITEM_H + GAP;
+    g.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, clientY: 300, buttons: 1 }));
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 + pitch, buttons: 1 }));
+    await flush();
+    expect(g.getAttribute('aria-valuenow')).toBe('7');
+
+    // Released on the window, not on the grip.
+    window.dispatchEvent(Object.assign(new Event('pointerup'), { clientY: 300 + pitch, buttons: 0 }));
+    await flush();
+
+    // Further movement must change nothing.
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 + 9 * pitch, buttons: 0 }));
+    await flush();
+    expect(g.getAttribute('aria-valuenow')).toBe('7');
+  });
+
+  it('ends the drag when a move arrives with no button held', async () => {
+    // Backstop for a release the page never hears about (let go outside the window).
+    mountHarness({ items: 10 });
+    await flush();
+    stubGeometry(host!, 10, 6);
+    await remeasure();
+
+    const g = grip();
+    const pitch = ITEM_H + GAP;
+    g.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, clientY: 300, buttons: 1 }));
+    // No `pointerup` at all — just a move reporting no buttons pressed.
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 + pitch, buttons: 0 }));
+    await flush();
+    expect(g.getAttribute('aria-valuenow')).toBe('6');
+
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 + 9 * pitch, buttons: 1 }));
+    await flush();
+    expect(g.getAttribute('aria-valuenow')).toBe('6');
+  });
+
+  it('ignores a right-click on the grip', async () => {
+    mountHarness({ items: 10 });
+    await flush();
+    stubGeometry(host!, 10, 6);
+    await remeasure();
+
+    const g = grip();
+    const pitch = ITEM_H + GAP;
+    g.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 2, clientY: 300, buttons: 2 }));
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 300 + 2 * pitch, buttons: 2 }));
+    await flush();
+
+    expect(g.getAttribute('aria-valuenow')).toBe('6');
   });
 
   it('persists the chosen row count', async () => {
@@ -338,18 +422,16 @@ describe('LoopScroll — row count', () => {
     expect(localStorage.getItem('rows-key')).toBe('8');
   });
 
-  it('does not respond to a drag before it starts', async () => {
-    // A pointermove with no preceding pointerdown must be ignored, otherwise merely
-    // moving the mouse across the grip would resize the list.
+  it('does not respond to a move before any pointerdown', async () => {
+    // Merely moving the mouse across the grip must not resize the list.
     mountHarness({ items: 10 });
     await flush();
     stubGeometry(host!, 10, 6);
     await remeasure();
 
-    const g = grip();
-    g.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 0, pointerId: 1 }));
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientY: 0, buttons: 1 }));
     await flush();
 
-    expect(g.getAttribute('aria-valuenow')).toBe('6');
+    expect(grip().getAttribute('aria-valuenow')).toBe('6');
   });
 });
