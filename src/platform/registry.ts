@@ -30,13 +30,3 @@ export function getAdapter(platform: Platform): PlatformAdapter | undefined {
   // fetching the channel's URL as RSS.
   return ADAPTER_MAP[platform];
 }
-
-export function registerAdapter(platformKey: string, adapter: PlatformAdapter): void {
-  if (!platformKey.trim()) {
-    throw new Error('Adapter platform key must not be empty');
-  }
-  if (!adapter || typeof adapter.fetchLatest !== 'function') {
-    throw new Error(`Adapter '${platformKey}' must implement fetchLatest`);
-  }
-  ADAPTER_MAP[platformKey] = adapter;
-}

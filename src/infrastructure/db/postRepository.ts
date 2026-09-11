@@ -58,31 +58,6 @@ export async function restoreDeletedPost(id: string): Promise<Post | null> {
 }
 
 /**
- * Restore a single deleted post id so it can be re-fetched via network sync.
- */
-export async function restoreDeletedPostId(id: string): Promise<void> {
-  await restoreDeletedPost(id);
-}
-
-/**
- * Restore multiple deleted posts directly back into `posts` table.
- */
-export async function restoreDeletedPostIds(ids: string[]): Promise<Post[]> {
-  const records = await db.deletedPostIds.where('id').anyOf(ids).toArray();
-  const restored: Post[] = [];
-  for (const r of records) {
-    if (r.postData) {
-      restored.push(r.postData);
-    }
-  }
-  if (restored.length > 0) {
-    await db.posts.bulkPut(restored);
-  }
-  await db.deletedPostIds.bulkDelete(ids);
-  return restored;
-}
-
-/**
  * Clear all deleted post tombstone records and restore all snapshot posts back to feed.
  */
 export async function restoreAllDeletedPostIds(): Promise<number> {

@@ -1,14 +1,6 @@
 import { computed, ref } from 'vue';
 import type { Channel, Post, DeletedPostRecord } from '../../../src/types';
-import {
-  getDeletedPostCount,
-  getDeletedPostRecords,
-  deletePostAndTombstone,
-  restoreDeletedPost,
-  restoreAllDeletedPostIds,
-  permanentlyDeletePost,
-  clearDeletedPostRecords,
-} from '../../../src/infrastructure/db/postRepository';
+import { postService } from '../../../src/application';
 import type { updateChannel as UpdateChannelFn } from '../../../src/sync/channelSync';
 import { notifyBadgeRefresh } from '../../../src/utils/badge';
 
@@ -47,7 +39,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
 
   async function refreshDeletedCount() {
     try {
-      deletedPostCount.value = await getDeletedPostCount();
+      deletedPostCount.value = await postService.recycleBinCount();
     } catch {
       deletedPostCount.value = 0;
     }
@@ -55,7 +47,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
 
   /** Reload both the tombstone records list and the total count. */
   async function refreshDeletedPostsList() {
-    deletedPostsList.value = await getDeletedPostRecords();
+    deletedPostsList.value = await postService.recycleBinRecords();
     await refreshDeletedCount();
   }
 
@@ -64,7 +56,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
     if (!confirm(`确定要删除此条动态吗？\n\n“${snippet}”\n\n提示：该动态ID将记录到本地数据库黑名单中。后续点击“同步全部”默认不会重新拉取此动态；您可在设置或同步选项中随时查看与恢复。`)) {
       return;
     }
-    await deletePostAndTombstone(post);
+    await postService.deleteToRecycleBin(post);
     actions.removePostFromFeed(post.id);
     await refreshDeletedCount();
     // Deleting a post can remove it from the unread set the badge shows.
@@ -72,14 +64,14 @@ export function useDeletedPosts(actions: RecycleBinActions) {
   }
 
   async function openDeletedPostsModal() {
-    deletedPostsList.value = await getDeletedPostRecords();
+    deletedPostsList.value = await postService.recycleBinRecords();
     await refreshDeletedCount();
     deletedPostsSearchQuery.value = '';
     showDeletedPostsModal.value = true;
   }
 
   async function handleRestoreSingleDeleted(record: DeletedPostRecord) {
-    const restoredPost = await restoreDeletedPost(record.id);
+    const restoredPost = await postService.restoreFromRecycleBin(record.id);
     deletedPostsList.value = deletedPostsList.value.filter(r => r.id !== record.id);
     await actions.reloadData();
     await refreshDeletedCount();
@@ -98,7 +90,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
   async function handleRestoreAllAndSync() {
     if (deletedPostCount.value === 0) return;
     if (!confirm(`确定要将回收站中全部 ${deletedPostCount.value} 条已删除动态定向找回并还原到动态列表中吗？`)) return;
-    await restoreAllDeletedPostIds();
+    await postService.restoreAllFromRecycleBin();
     await actions.reloadData();
     await refreshDeletedCount();
     deletedPostsList.value = [];
@@ -109,7 +101,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
 
   async function handlePermanentlyDelete(record: DeletedPostRecord) {
     if (!confirm(`确定要从回收站彻底删除该记录吗？彻底删除后将无法在此定向找回。`)) return;
-    await permanentlyDeletePost(record.id);
+    await postService.permanentlyDelete(record.id);
     deletedPostsList.value = deletedPostsList.value.filter(r => r.id !== record.id);
     await refreshDeletedCount();
   }
@@ -117,7 +109,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
   async function handleEmptyRecycleBin() {
     if (deletedPostCount.value === 0) return;
     if (!confirm(`确定要彻底清空回收站中全部 ${deletedPostCount.value} 条记录吗？清空后将无法在此定向找回。`)) return;
-    await clearDeletedPostRecords();
+    await postService.emptyRecycleBin();
     deletedPostsList.value = [];
     await refreshDeletedCount();
     alert('回收站已彻底清空。');
