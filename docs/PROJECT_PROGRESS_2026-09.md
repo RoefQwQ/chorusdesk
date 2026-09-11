@@ -597,7 +597,15 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
 
 审计在 `4c89bb2` 上完成，五个只读切片并行，结论**未动手**。按「收益/风险」排序：
 
-B9. **`__END__` 游标终态语义有三份实现**（最高价值）：`historySync.ts:16-46`（提前返回 +
+B9. ~~**`__END__` 游标终态语义有三份实现**（最高价值）~~ —— **已完成（2026-09-11，提交 `2f3fe7f`）**：
+    新增 `src/sync/cursorState.ts` 独占该策略（哨兵值、哪些平台是「单发采集」因而其标记只是猜测、
+    两个消费点各自要问的谓词、两种「这就是终点」的形态、以及用户文案）；`historySync` 与
+    `channelSync` 只消费，**字面量 `'__END__'` 全仓只剩 1 处**（已 grep 核实）。
+    两个既有回归测试（`douyin.endcursor` / `douyin.loophead`，4 用例）**未改动即通过**——它们就是规格。
+    变异验证：清空 `SINGLE_SHOT_ACQUISITION`（一处、一文件）会让**两个**测试套件同时失败；
+    改造前同样的改动要改两处 `platform !== 'douyin'`，漏一处正是 loophead 那次事故。
+    未加新单测：谓词只能经这两个入口观察，直接调它属于测接线。原条目留存：
+    `historySync.ts:16-46`（提前返回 +
    抖音特判）、`historySync.ts:110-115`（同一规则在挖矿循环里再写一遍，注释逐字重复）、
    `channelSync.ts:194,:394`（写入侧）。今天改「完成」的含义必须改三处。
 B10. **Twitter GraphQL `features` 在同一个文件里有两份逐字拷贝**：
@@ -610,10 +618,14 @@ B11. **三态标签过滤器两份**：`useFeedFilters.ts:82-118` 与
 B12. **`err instanceof Error ? err.message : String(err)` 至少三种写法**：两个几乎一样的具名
     `errorMessage()`（`bgFetch.ts:26`、`proxyImage.ts:21`）+ 约 10 处内联三元。
     提到 `src/utils/` 一个函数即可。
-B13. **死代码，约 30 行**：`postRepository.ts:63` `restoreDeletedPostId`（是 `restoreDeletedPost`
+B13. ~~**死代码，约 30 行**~~ —— **已完成（2026-09-11，提交 `b0c3e19`）**：三个零引用导出已删并
+    各自核实过全仓（含 tests/e2e）无引用。原条目：`postRepository.ts:63` `restoreDeletedPostId`（是 `restoreDeletedPost`
     的纯别名）、`:70` `restoreDeletedPostIds`（与在用的 `restoreAllDeletedPostIds` 同体，
     只差范围）、`registry.ts:34` `registerAdapter`（适配器实际静态注册）。
-B14. **`postService.deleteToRecycleBin` 为什么死，有明确原因**：`useDeletedPosts.ts:6` 直接 import
+B14. ~~**`postService.deleteToRecycleBin` 为什么死，有明确原因**~~ —— **已完成（2026-09-11，提交 `b0c3e19`）**：
+    修法比条目预估的大一档——`useDeletedPosts` 直连的是**七个**仓储函数（整个回收站生命周期），
+    不是一处。已按规则 8 的口径把生命周期整体纳入 `postService`（新增 6 个方法），
+    该组合式现只从 `src/application` 导入，规则 8 台账漂移的那一格已归位。原条目：`useDeletedPosts.ts:6` 直接 import
     `deletePostAndTombstone` 绕过门面。把这一处调用改走 service，既复活该方法，
     又消掉 AGENTS 规则 8 那 9 处直连中的一处——**这是该笔债里唯一有名字成因的一处**。
 B15. **adapter 直接调 `chrome.*`（5 个文件，不在任何已有规则里）**：`bilibili.ts:426-429`、
@@ -646,7 +658,11 @@ B20. **popup 会加载全部 10 个平台 adapter**（已核实，非分层违�
     adapter 字符串，而 popup 自己的 31 KB chunk 一个都没有）。后果只是体积与冷启动，
     不是正确性；修法（registry 懒加载 / 给 popup 一条更窄的同步入口）是对同步取 adapter
     方式的真改动，不是一行。
-B21. **`src/utils/http.ts` 应归位到 infrastructure/chrome/**（已核实为全仓唯一跨层环）：
+B21. ~~**`src/utils/http.ts` 应归位到 infrastructure/chrome/**~~ —— **已完成（2026-09-11，提交 `0af1016`）**：
+    已移为 `src/infrastructure/chrome/http.ts`，10 处 import 与文档/注释一并更新。
+    **实测核实**：`utils → chrome` 现为 **0 条边**（环已消），`adapters → chrome` 为 8 条边、
+    全部指向该文件——这条边**本来就在**（每个 adapter 都经 `utils/http.ts` 到达 chrome 层），
+    移动只是不再掩盖它；规则 8 已补上这条边的说明。原条目：
     它 import `bgFetch`（`:1`），`bgFetch` 又 import `utils/devLog`（闭合成环）。成因正当
     （规则 6 要求 SW 直调 `performBgFetch`），但那只解释**这条边**、不解释**它该住在 utils**：
     `http.ts` 是全部 adapter 取数经过的网络端口（fan-in 9）。把文件挪进
