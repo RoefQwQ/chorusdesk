@@ -2,6 +2,12 @@ import type { Channel } from '../types';
 import type { FetchError, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { db } from '../infrastructure/db/database';
+import {
+  END_OF_HISTORY_MESSAGE,
+  hasStaleTerminalCursor,
+  isEndOfHistoryCursor,
+  terminalCursorIsStated,
+} from './cursorState';
 import { updateChannel } from './channelSync';
 
 /**
@@ -13,23 +19,19 @@ export async function fetchChannelHistory(
   onlyOriginal: boolean = false,
   maxNewPosts?: number,
 ): Promise<FetchResult> {
-  if (channel.nextCursor === '__END__') {
-    // Page-driven platforms (Douyin) have no real pagination cursor — their
-    // "__END__" is a completeness GUESS recorded by an earlier dig, not a fact
-    // the platform itself stated. When the guess was wrong (grid was actually
-    // login-truncated), it permanently blocked works the page can serve today.
-    // The fix commit (ea6e539) stopped recording new wrong guesses; this path
-    // recovers channels already parked there: clear the stale marker and let
-    // the dig run. A genuine end gets re-recorded on this very round if the
-    // page truly has nothing more (adapter returns hasMore:false again), so
-    // the loop still terminates.
-    if (channel.platform === 'douyin') {
+  if (isEndOfHistoryCursor(channel.nextCursor)) {
+    // A marker this platform never stated is a guess from an older build, and it
+    // permanently blocks works the page can serve today. Clear it and let the dig
+    // run; a genuine end is re-recorded on this very round, so the loop still
+    // terminates. See `cursorState.ts` for why the two ways of being wrong are
+    // not symmetric, and `tests/douyin.endcursor.test.ts` for the regression.
+    if (hasStaleTerminalCursor(channel)) {
       await db.channels.update(channel.id, { nextCursor: undefined });
       channel = { ...channel, nextCursor: undefined };
     } else {
       return {
         posts: [],
-        error: fetchError('not_found', '已到达该账号历史作品最底部，暂无更多更早内容。'),
+        error: fetchError('not_found', END_OF_HISTORY_MESSAGE),
         hasMore: false,
       };
     }
@@ -107,12 +109,10 @@ export async function deepSyncChannel(
       });
       return { totalNew, reachEnd: true, rounds };
     }
-    // A douyin channel sitting at __END__ is a recorded completeness GUESS
-    // from an older build, not platform-stated fact (douyin has no real
-    // pagination cursor). fetchChannelHistory clears it and re-runs; a
-    // genuine end is re-recorded this round. Cursor-paginated platforms keep
-    // the early return — their __END__ came from the platform itself.
-    if (currentCh.nextCursor === '__END__' && currentCh.platform !== 'douyin') {
+    // Same policy as `fetchChannelHistory`, asked once more here because this gate
+    // runs FIRST: an unconditional short-circuit on the sentinel would make the
+    // recovery below unreachable (regression: tests/douyin.loophead.test.ts).
+    if (isEndOfHistoryCursor(currentCh.nextCursor) && terminalCursorIsStated(currentCh.platform)) {
       options.onProgress?.({
         channelId: channel.id,
         displayName: channel.displayName || channel.accountId,

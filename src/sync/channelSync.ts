@@ -5,6 +5,11 @@ import { fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
 import { db } from '../infrastructure/db/database';
 import { devLog } from '../utils/devLog';
+import {
+  END_OF_HISTORY_CURSOR,
+  shouldRecordHistoryEnd,
+  statesEndOfHistory,
+} from './cursorState';
 
 /**
  * Resets any channels that were left in 'updating' status due to browser restart or crash.
@@ -187,11 +192,13 @@ export async function updateChannel(
 
     if (result.error && result.posts.length === 0) {
       // End-of-history is signalled by hasMore === false or a not_found code,
-      // never by message wording.
-      if (result.hasMore === false || result.error.code === 'not_found') {
+      // never by message wording. The predicate lives in `cursorState.ts` with the
+      // rest of the policy, because writing this sentinel wrongly is the one
+      // mistake in this file the user cannot undo.
+      if (statesEndOfHistory(result)) {
         await db.channels.update(channel.id, {
           status: 'success',
-          nextCursor: '__END__',
+          nextCursor: END_OF_HISTORY_CURSOR,
           errorMessage: undefined,
           lastCheckAt: Date.now(),
           lastSuccessAt: Date.now(),
@@ -390,8 +397,8 @@ export async function updateChannel(
     if (options?.isHistory || options?.cursor !== undefined) {
       if (result.nextCursor) {
         updates.nextCursor = result.nextCursor;
-      } else if (result.hasMore === false) {
-        updates.nextCursor = '__END__';
+      } else if (shouldRecordHistoryEnd(result)) {
+        updates.nextCursor = END_OF_HISTORY_CURSOR;
       }
     } else if (options?.forceRefresh) {
       // On force-refresh, update nextCursor to whatever fresh state was returned
