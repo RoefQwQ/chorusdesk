@@ -1,6 +1,8 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions, FetchError } from './types';
 import { buildPost } from './buildPost';
+import { devLog } from '../utils/devLog';
+import { errorMessage } from '../utils/errorMessage';
 import { mapSpaceDynamicItem } from './bilibili/spaceDynamic';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
@@ -78,7 +80,15 @@ export const bilibiliAdapter: PlatformAdapter = {
         const json = JSON.parse(res.data) as JsonRecord;
         if (json.code !== 0) {
           lastDynamicCode = json.code as number;
-          console.warn('[Bilibili] dynamic feed returned code', json.code, json.message);
+          // The Developer Log panel does not capture `console`, and this code is the
+          // ONLY explanation for a bilibili channel that reports nothing: -412 is
+          // risk control, -404 a deleted account, and so on. Logging it to the console
+          // alone made the reason invisible in the one surface users can send us.
+          devLog.warn(
+            'bilibili',
+            `动态接口返回业务码 ${String(json.code)}`,
+            `${String(json.message ?? '')}（频道 ${channel.displayName || channel.accountId}）`,
+          );
         } else if (json.data) {
           const data = asRecord(json.data);
           const items = Array.isArray(data.items) ? data.items : [];
@@ -119,7 +129,7 @@ export const bilibiliAdapter: PlatformAdapter = {
         }
       }
     } catch (e) {
-      console.warn('[Bilibili] dynamic feed fetch failed:', e);
+      devLog.warn('bilibili', '动态接口请求失败', errorMessage(e));
     }
 
     // SUPPLEMENT: medialist API for pure video uploads that may have no dynamic post entry
@@ -138,7 +148,11 @@ export const bilibiliAdapter: PlatformAdapter = {
           const json = JSON.parse(res.data);
           if (json.code !== 0) {
             lastMediaCode = json.code;
-            console.warn('[Bilibili] medialist returned code', json.code, json.message);
+            devLog.warn(
+              'bilibili',
+              `投稿列表接口返回业务码 ${String(json.code)}`,
+              `${String(json.message ?? '')}（频道 ${channel.displayName || channel.accountId}）`,
+            );
           } else {
             // code 0 is authoritative, even when media_list is null/empty
             // ("account has no videos") — do not surface a dynamic-feed error then.
@@ -176,7 +190,7 @@ export const bilibiliAdapter: PlatformAdapter = {
           }
         }
       } catch (e) {
-        console.warn('[Bilibili] medialist supplement failed:', e);
+        devLog.warn('bilibili', '投稿列表补充请求失败', errorMessage(e));
       }
     }
 
@@ -273,7 +287,7 @@ export const bilibiliAdapter: PlatformAdapter = {
         }
       }
     } catch (e) {
-      console.warn('[Bilibili] historical dynamic fetch failed:', e);
+      devLog.warn('bilibili', '回溯动态接口请求失败', errorMessage(e));
     }
 
     return {
