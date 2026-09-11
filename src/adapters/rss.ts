@@ -4,6 +4,7 @@ import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { hasArticleMarkup, sanitizeArticleHtml } from '../utils/sanitizeHtml';
+import { errorMessage } from '../utils/errorMessage';
 
 /**
  * Storage ceiling for one RSS body.
@@ -212,7 +213,7 @@ export const rssAdapter: PlatformAdapter = {
         },
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', message || 'RSS 订阅源抓取失败', true),

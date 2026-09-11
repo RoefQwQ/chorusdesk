@@ -4,6 +4,7 @@ import { Folder, FolderCheck, HardDrive, DownloadCloud, RefreshCw, XCircle } fro
 import { imageCacheService } from '../../../src/services/imageCache';
 import { devLog } from '../../../src/utils/devLog';
 import type { AppSettings, Post, Creator } from '../../../src/types';
+import { errorMessage } from '../../../src/utils/errorMessage';
 
 const props = defineProps<{
   settings: AppSettings;
@@ -51,7 +52,7 @@ async function handleSelectDirectory() {
       alert('绑定失败: ' + res.error);
     }
   } catch (err: unknown) {
-    alert('操作异常: ' + (err instanceof Error ? err.message : String(err)));
+    alert('操作异常: ' + (errorMessage(err)));
   } finally {
     isBinding.value = false;
     checkStatus();
@@ -146,7 +147,7 @@ async function handleBatchCacheExisting() {
     }
     alert(`【离线归档完成】${summary.join('，')}。归档目录: "${boundDirName.value}"`);
   } catch (err: unknown) {
-    alert('批量缓存异常: ' + (err instanceof Error ? err.message : String(err)));
+    alert('批量缓存异常: ' + (errorMessage(err)));
   } finally {
     isBatchCaching.value = false;
   }

@@ -11,6 +11,7 @@ import {
   readCooldowns,
   remainingCooldown,
 } from './rateLimit';
+import { errorMessage } from '../utils/errorMessage';
 
 /**
  * Groups channels by platform and interleaves them round-robin across platforms.
@@ -138,7 +139,7 @@ export async function batchUpdateChannelsInterleaved(
       console.warn(`[BatchUpdate] Error on ${ch.id}:`, e);
       options?.onProgress?.(i + 1, total, ch, {
         posts: [],
-        error: fetchError('network', e instanceof Error ? e.message : String(e), true),
+        error: fetchError('network', errorMessage(e), true),
       });
     } finally {
       // Recorded on every path, including failure: a failed request still hit the

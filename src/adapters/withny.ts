@@ -5,6 +5,7 @@ import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { asRecord } from '../utils/json';
 import type { JsonValue } from '../utils/json';
+import { errorMessage } from '../utils/errorMessage';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -86,7 +87,7 @@ export const withnyAdapter: PlatformAdapter = {
         hasMore,
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', message || 'Withny 抓取失败 (请确认当前浏览器是否登录 Withny)', true),

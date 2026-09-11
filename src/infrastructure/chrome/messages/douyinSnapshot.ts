@@ -20,6 +20,7 @@ import type { CollectedSnapshot } from '../../../adapters/douyin/collector';
 import { MAX_ITEMS_PER_SNAPSHOT } from '../../../adapters/douyin/contract';
 import { hostMatches } from './hosts';
 import { devLog } from '../../../utils/devLog';
+import { errorMessage } from '../../../utils/errorMessage';
 
 interface DouyinSnapshotMessage {
   type: 'FETCH_DOUYIN_SNAPSHOT';
@@ -220,7 +221,7 @@ export function handleDouyinSnapshot(
     try {
       response = await scrape();
     } catch (err: unknown) {
-      const messageText = err instanceof Error ? err.message : String(err);
+      const messageText = errorMessage(err);
       response = fail('network', `抖音页面采集异常: ${messageText}`);
     } finally {
       // Close the throwaway tab BEFORE responding. `sendResponse` closes the
@@ -416,7 +417,7 @@ async function injectAndAwait<T>(
     // arrives is the awaited value (this is how the grid probe reports at all).
     return { ran: true, value: first.result };
   } catch (err: unknown) {
-    return { ran: false, error: err instanceof Error ? err.message : String(err) };
+    return { ran: false, error: errorMessage(err) };
   }
 }
 

@@ -1,4 +1,5 @@
 import { toSecureMediaUrl } from '../../../utils/media';
+import { errorMessage } from '../../../utils/errorMessage';
 import { hostMatches, isPlatformHost, parseFetchableUrl, resolveMediaReferer } from './hosts';
 
 /**
@@ -17,15 +18,6 @@ interface ProxyImageMessage {
 
 type SendResponse = (response?: unknown) => void;
 
-/** Error-message extraction mirroring `err?.message || 'Proxy image error'`. */
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'object' && err !== null && 'message' in err) {
-    const message = (err as { message?: unknown }).message;
-    if (typeof message === 'string' && message) return message;
-  }
-  return 'Proxy image error';
-}
 
 /**
  * Handles PROXY_IMAGE messages: fetches the requested image through the
@@ -153,7 +145,7 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
       sendResponse({ ok: true, dataUrl });
     } catch (err: unknown) {
       console.error('[Background] PROXY_IMAGE error:', err);
-      sendResponse({ ok: false, error: errorMessage(err) });
+      sendResponse({ ok: false, error: errorMessage(err, 'Proxy image error') });
     }
   })();
   return true;

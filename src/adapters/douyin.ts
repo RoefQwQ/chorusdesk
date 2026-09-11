@@ -5,6 +5,7 @@ import { buildPost } from './buildPost';
 import { IS_SERVICE_WORKER } from '../utils/runtime';
 import type { DouyinItem, DouyinSnapshot } from './douyin/contract';
 import { normalizeSnapshot } from './douyin/contract';
+import { errorMessage } from '../utils/errorMessage';
 
 /**
  * Douyin adapter — public creator works (short video + image gallery) only.
@@ -87,7 +88,7 @@ export const douyinAdapter: PlatformAdapter = {
         );
       });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { posts: [], error: fetchError('network', `抖音采集通信异常: ${message}`, true) };
     }
 

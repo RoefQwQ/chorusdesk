@@ -1,5 +1,6 @@
 import { hostMatches, isPlatformHost, parseFetchableUrl } from './hosts';
 import { devLog } from '../../../utils/devLog';
+import { errorMessage } from '../../../utils/errorMessage';
 
 // Minimal local types for the BG_FETCH runtime-message contract. They only
 // describe what this handler reads / replies with — the protocol shape itself
@@ -22,17 +23,6 @@ export interface BgFetchResult {
   error?: string;
 }
 
-/** Error-message extraction mirroring `err?.message || 'Background fetch error'`. */
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message || 'Background fetch error';
-  }
-  if (typeof err === 'object' && err !== null && 'message' in err) {
-    const message = err.message;
-    if (typeof message === 'string' && message) return message;
-  }
-  return 'Background fetch error';
-}
 
 /**
  * Performs the CORS-exempt cross-origin GET. Callable directly — the service
@@ -105,8 +95,8 @@ export async function performBgFetch(
     };
   } catch (err) {
     console.error('[Background] Fetch error:', err);
-    devLog.error('bgFetch', `${hostname} 请求失败`, errorMessage(err));
-    return { ok: false, status: 0, data: '', error: errorMessage(err) };
+    devLog.error('bgFetch', `${hostname} 请求失败`, errorMessage(err, 'Background fetch error'));
+    return { ok: false, status: 0, data: '', error: errorMessage(err, 'Background fetch error') };
   }
 }
 

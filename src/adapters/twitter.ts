@@ -7,6 +7,7 @@ import type { JsonRecord, JsonValue } from '../utils/json';
 import { asRecord, firstFilled } from '../utils/json';
 import { devLog } from '../utils/devLog';
 import { stripAppendedLinks, stripTrailingTcoLink } from '../utils/tco';
+import { errorMessage } from '../utils/errorMessage';
 
 // Re-exported so the strip stays pinned on its own, away from the parser.
 export { stripAppendedLinks };
@@ -197,7 +198,7 @@ export const twitterAdapter: PlatformAdapter = {
         error: fetchError('parse', '推特未返回有效数据'),
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', `调用推特同步后台失败: ${message}`, true),

@@ -4,6 +4,7 @@ import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { asRecord } from '../utils/json';
+import { errorMessage } from '../utils/errorMessage';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -166,7 +167,7 @@ export const weiboAdapter: PlatformAdapter = {
         hasMore,
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', `获取微博动态异常: ${message}`, true),
@@ -260,7 +261,7 @@ export const weiboAdapter: PlatformAdapter = {
         hasMore: list.length > 0,
       };
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errorMessage(e);
       return { posts: [], error: fetchError('network', message || '微博网络连接异常', true) };
     }
   },

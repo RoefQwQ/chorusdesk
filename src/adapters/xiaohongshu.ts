@@ -6,6 +6,7 @@ import { bgFetch } from '../infrastructure/chrome/http';
 import { toSecureMediaUrl } from '../utils/media';
 import type { JsonRecord, JsonValue } from '../utils/json';
 import { asRecord, firstFilled } from '../utils/json';
+import { errorMessage } from '../utils/errorMessage';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -242,7 +243,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         totalFetched: allPosts.length,
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', `获取小红书动态异常: ${message}`, true),

@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { healBrokenPostMedia, cleanupOldPosts } from '../../../src/infrastructure/db/postRepository';
+import { errorMessage } from '../../../src/utils/errorMessage';
 
 export interface MediaMaintenanceDependencies {
   reloadData: () => Promise<void>;
@@ -27,7 +28,7 @@ export function useMediaMaintenance(deps: MediaMaintenanceDependencies) {
         alert(`【检测完成】本地所有小红书动态与图片的 CDN 地址均已为最新兼容格式。`);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       alert('修复异常: ' + message);
     } finally {
       isHealingMedia.value = false;
@@ -46,7 +47,7 @@ export function useMediaMaintenance(deps: MediaMaintenanceDependencies) {
       await deps.reloadData();
       alert(`【存储空间已释放】成功清理了 ${deletedCount} 条历史动态！`);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       alert('清理失败: ' + message);
     } finally {
       isCleaningStorage.value = false;

@@ -3,6 +3,7 @@ import type { PlatformAdapter, FetchResult } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
+import { errorMessage } from '../utils/errorMessage';
 
 export const youtubeAdapter: PlatformAdapter = {
   platform: 'youtube',
@@ -100,7 +101,7 @@ export const youtubeAdapter: PlatformAdapter = {
         },
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', message || 'YouTube 更新抓取失败', true),

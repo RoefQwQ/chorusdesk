@@ -4,6 +4,7 @@ import { ACCOUNT_ROLE_LABELS, ACCOUNT_ROLE_ORDER } from '../../../src/types';
 import { creatorService, channelService } from '../../../src/application';
 import { updateChannel } from '../../../src/sync';
 import { parseProfileUrl } from '../../../src/utils/urlParser';
+import { errorMessage } from '../../../src/utils/errorMessage';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import type { AddModalOpenRequest, AddModalSubmitPayload } from '../types/modal';
 
@@ -17,9 +18,6 @@ export interface CreatorsManagerDependencies {
   clearTagFromFilters: (tag: string) => void;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /**
  * Creator entity lifecycle controller for the Dashboard: add/bind channel,

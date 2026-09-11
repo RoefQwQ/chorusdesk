@@ -3,6 +3,7 @@ import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
+import { errorMessage } from '../utils/errorMessage';
 
 export const pixivAdapter: PlatformAdapter = {
   platform: 'pixiv',
@@ -117,7 +118,7 @@ export const pixivAdapter: PlatformAdapter = {
         hasMore,
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         posts: [],
         error: fetchError('network', message || 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)', true),
