@@ -690,19 +690,23 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
     />
 
     <!-- Floating Actions: Scroll to top, mark reading position, jump to mark.
-         动态 ONLY. This was mounted unconditionally, so it also floated over
+         动态 ONLY. This is mounted conditionally because it also floated over
          关注管理 and 设置 — and over 收藏, where a white bookmark button with no
          context sitting on top of a post card reads as an artifact. The user's
-         wording was 「动态内才有的位置记录标签」: the feed is where it belongs, and
-         the 收藏 page is still a list being read, but it is not the feed.
+         wording was 「动态内才有的位置记录标签」: the feed is where it belongs.
          Narrowed to the feed on that basis (2026-09-11). -->
-    <!-- Aligns with the right-hand creator filter card column (lg:w-64 xl:w-68) -->
+    <!-- Aligned to the right-hand creator card column (lg:w-64 xl:w-68).
+         The reserved column has the same width as that sidebar and is right-aligned
+         in the same container, so the two share a right edge — which makes their LEFT
+         edges coincide too. `lg:justify-start` is therefore all it takes to line the
+         widget up with the creator card's left edge; it used to be `justify-center`,
+         which floated it in the middle of the column (2026-09-11). -->
     <div
       v-if="activeTab === 'feed'"
       class="fixed bottom-6 inset-x-0 pointer-events-none z-40"
     >
       <div class="w-full max-w-[98%] 2xl:max-w-[96%] mx-auto px-3 sm:px-6 flex justify-end">
-        <div class="w-auto lg:w-64 xl:w-68 flex justify-end lg:justify-center pointer-events-auto">
+        <div class="w-auto lg:w-64 xl:w-68 flex justify-end lg:justify-start pointer-events-auto">
           <ScrollActionToolbar />
         </div>
       </div>

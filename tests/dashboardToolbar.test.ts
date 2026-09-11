@@ -124,6 +124,37 @@ describe('dashboard — floating reading toolbar', () => {
     expect(toolbar()).toBeNull();
   });
 
+  it('is left-aligned with the right sidebar, not centred in it', async () => {
+    // Asked for 2026-09-11: 「把这个右下角的挪动到和上面的创作者卡片的左侧对齐」. Before,
+    // the reserved column centred the widget, which put it 115px right of the card's
+    // left edge (measured at 1568px: column 272px, widget 42px, (272-42)/2 = 115).
+    //
+    // The alignment is pure layout, so jsdom cannot measure it. What it CAN hold is the
+    // one fact the layout depends on: the reserved column and the right sidebar declare
+    // the same widths at the breakpoints where they sit side by side. They are declared
+    // in two different files, so changing one silently drifts the widget in the browser
+    // and nowhere else. Verified in a real browser at 1568px: both edges at x=1225,
+    // delta 0.
+    await openTab('动态');
+    const reserved = toolbar()!.parentElement as HTMLElement;
+    expect(reserved).not.toBeNull();
+
+    const sidebar = [...host!.querySelectorAll('aside')].find((a) =>
+      a.className.includes('lg:sticky') && a.className.includes('lg:w-64'),
+    ) as HTMLElement;
+    expect(sidebar, 'the right sidebar').toBeDefined();
+
+    // Only the breakpoint-prefixed widths: below `lg` the two columns are not side by
+    // side (the sidebar goes full width and the widget right-aligns), so the unprefixed
+    // widths are deliberately different.
+    const breakpointWidths = (el: HTMLElement) =>
+      [...el.classList].filter((c) => /^(lg|xl):w-/.test(c)).sort();
+
+    expect(breakpointWidths(reserved)).toEqual(breakpointWidths(sidebar));
+    // And the widget is pinned to that column's leading edge.
+    expect(reserved.className).toContain('lg:justify-start');
+  });
+
   it('comes back when the feed is reopened', async () => {
     // Guards against the condition being evaluated once instead of reactively.
     await openTab('设置');

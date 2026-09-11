@@ -317,6 +317,82 @@ describe('PostCard reader entry', () => {
   });
 });
 
+describe('PostCard — where a video is opened from', () => {
+  const videoPost: Post = {
+    id: 'bilibili_视频',
+    creatorId: 'creator_1',
+    channelId: 'bilibili:42',
+    platform: 'bilibili',
+    title: '走向灭亡！AI日报0909',
+    content: '正文简介',
+    mediaList: [{ type: 'video', previewUrl: 'https://example.com/cover.jpg', originalUrl: 'https://example.com/v' }],
+    originalUrl: 'https://www.bilibili.com/video/BV1xx',
+    publishedAt: Date.UTC(2026, 8, 9),
+    fetchedAt: Date.now(),
+    isRead: 0,
+  };
+
+  async function renderCard(post: Post) {
+    return render(PostCard, { post, creators: [creator], channels: [] });
+  }
+
+  it('labels the footer link 视频动态 for a video, not 原文', async () => {
+    // Asked for 2026-09-11: the always-visible 「视频动态」 badge sat inside the
+    // thumbnail and did the same job as the hover prompt, which appears directly over
+    // it. The label moved to the footer's link: 「把视频动态放到右下角的原文替换原文这个按钮」.
+    const html = await renderCard(videoPost);
+
+    expect(html).toContain('视频动态');
+    expect(html).not.toContain('<span>原文</span>');
+  });
+
+  it('no longer puts a 视频动态 badge over the thumbnail', async () => {
+    // The duplication itself. The hover prompt is the thumbnail's affordance and the
+    // user confirmed it reads well; the badge on top of it was the problem.
+    const html = await renderCard(videoPost);
+
+    const badgeOnThumbnail = /absolute bottom-2\.5 right-2\.5[^>]*>[\s\S]{0,200}视频动态/.test(html);
+    expect(badgeOnThumbnail).toBe(false);
+  });
+
+  it('keeps the hover prompt on the video', async () => {
+    const html = await renderCard(videoPost);
+    expect(html).toContain('在源站观看完整视频');
+  });
+
+  it('leaves 原文 on a non-video post', async () => {
+    // Only a video's link changes: for an image or text post 「原文」 is accurate, and
+    // relabelling it would be worse than the duplication being fixed.
+    const html = await renderCard({
+      ...videoPost,
+      mediaList: [{ type: 'image', previewUrl: 'https://example.com/a.jpg', originalUrl: 'https://example.com/a.jpg' }],
+    });
+
+    expect(html).toContain('<span>原文</span>');
+    expect(html).not.toContain('视频动态');
+  });
+
+  it('leaves 原文 on a text-only post', async () => {
+    const html = await renderCard({ ...videoPost, mediaList: [] });
+    expect(html).toContain('<span>原文</span>');
+  });
+
+  it('leaves 原文 when a video is mixed with images', async () => {
+    // Not a video *post* — the gallery is the content, and the footer link should not
+    // claim otherwise.
+    const html = await renderCard({
+      ...videoPost,
+      mediaList: [
+        { type: 'image', previewUrl: 'https://example.com/a.jpg', originalUrl: 'https://example.com/a.jpg' },
+        { type: 'video', previewUrl: 'https://example.com/v.jpg', originalUrl: 'https://example.com/v' },
+      ],
+    });
+
+    expect(html).toContain('<span>原文</span>');
+    expect(html).not.toContain('视频动态');
+  });
+});
+
 describe('DevLogModal renders', () => {
   it('renders inside a dialog with its filters and empty state', async () => {
     const html = await render(DevLogModal, {});

@@ -64,6 +64,15 @@ const fullBody = computed(() => showsFullBody(props.post.platform));
 const cardMedia = computed(() => standaloneMedia(props.post));
 
 /**
+ * A post whose only media is a video.
+ *
+ * Extracted because two places need the same answer — the thumbnail and the footer
+ * link — and they must not drift: for a video the footer's 「原文」 becomes 「视频动态」,
+ * which is only correct if the post really is one (2026-09-11).
+ */
+const isSingleVideo = computed(() => props.post.mediaList.length === 1 && props.post.mediaList[0].type === 'video');
+
+/**
  * The card shows a preview; long text opens in the reader.
  *
  * `bodyOverflows` is measured rather than guessed from a character count: the
@@ -459,7 +468,7 @@ function toggleBookmark() {
       <div v-if="cardMedia.length" class="pt-1">
         <!-- Single Video -->
         <div
-          v-if="post.mediaList.length === 1 && post.mediaList[0].type === 'video'"
+          v-if="isSingleVideo"
           @click.stop="openVideoPost(post.originalUrl)"
           class="relative aspect-video rounded-xl overflow-hidden bg-slate-900 cursor-pointer group/vid flex items-center justify-center shadow-xs hover:shadow-md transition-shadow"
           title="在新标签页中打开并观看原视频"
@@ -472,13 +481,6 @@ function toggleBookmark() {
             class="w-full h-full object-cover opacity-95 group-hover/vid:scale-103 transition-transform duration-300"
             @error="handleMediaError($event, post.mediaList[0].previewUrl)"
           />
-
-          <!-- Elegant Corner Video Indicator Badge -->
-          <div class="absolute bottom-2.5 right-2.5 px-2 py-1 rounded-lg bg-black/65 backdrop-blur-md text-white text-[11px] font-medium flex items-center gap-1.5 shadow-sm border border-white/10 group-hover/vid:bg-black/80 transition-all">
-            <Video class="w-3.5 h-3.5 text-indigo-400" />
-            <span>视频动态</span>
-            <ExternalLink class="w-3 h-3 text-white/70 group-hover/vid:text-white transition-colors" />
-          </div>
 
           <!-- Subtle Hover Overlay Prompt -->
           <div class="absolute inset-0 bg-black/25 opacity-0 group-hover/vid:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
@@ -580,8 +582,17 @@ function toggleBookmark() {
     </div>
     <div class="px-4 py-2.5 bg-slate-50/80 dark:bg-slate-950/50 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-400 dark:text-slate-400 flex items-center justify-between">
       <span>{{ formatTime(post.fetchedAt) }} 同步</span>
-      <a :href="post.originalUrl" target="_blank" class="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium group/link transition-colors">
-        <span>原文</span>
+      <a
+        :href="post.originalUrl"
+        target="_blank"
+        class="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium group/link transition-colors"
+      >
+        <!-- For a video the entry point lives here, always visible, instead of as a
+             badge on top of the thumbnail where it overlapped the hover prompt. Same
+             destination (`originalUrl`); the label differs because 「原文」 understates
+             what the click does for a video. -->
+        <Video v-if="isSingleVideo" class="w-3 h-3" />
+        <span>{{ isSingleVideo ? '视频动态' : '原文' }}</span>
         <ChevronRight class="w-3 h-3 group-hover/link:translate-x-0.5 transition-transform" />
       </a>
     </div>
