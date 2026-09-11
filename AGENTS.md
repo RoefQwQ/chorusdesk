@@ -686,6 +686,79 @@ And the assertion has to be on something the edit changes:
 - **The general rule:** an edit that reports no failure is not an edit that succeeded. Confirm
   the tree changed, then judge the result. This applies to mutations, "quick" fixes, and
   codemods equally, and it is cheap: one `assert` or one re-read.
+---
+
+## 27. A component used in a template but never imported renders as NOTHING, silently
+
+`<PlatformBadge>` and `<Trash2>` were both used in `CreatorsView.vue`'s template with no
+import. Vue compiled them to empty placeholders **without a warning**: the entire 已绑平台账号
+column was blank on every row in all three views, and the delete button was a bare square with no
+icon. Both shipped through four commits and a real-Chrome review.
+
+`vue-tsc` does not catch this by default, because `vueCompilerOptions.strictTemplates` is off.
+It is **on** now (2026-09-11). With it on, the missing import produces:
+
+```
+error TS2339: Property 'PlatformBadge' does not exist on type '{}'.
+```
+
+That setting is what makes the gate able to see component-level mistakes at all. Do not turn it
+off; when it errors on an `aria-*` attribute, the fix is the `ComponentCustomProps` augmentation
+in `types/vue-augment.d.ts`, not reverting the setting and not renaming the attribute.
+
+Two traps when reacting to what it finds:
+
+- **`aria-*` is an attribute namespace, not a prop.** `strictTemplates` rejects
+  `aria-label="…"` on a component as an unknown prop while accepting `menu-placement` →
+  `menuPlacement` on the same component. `.vue`'s `inheritAttrs: false` + `v-bind="$attrs"` on
+  the real interactive element is the working shape; the augmentation is only namespacing.
+  Declaring an `ariaLabel` prop also silences it, but then the **tooling** dictates the API — and
+  camelCase props render as lowercase garbage (`ariaLabel` → `arialabel`), which is a real bug
+  the SSR test caught.
+- **A generic component's `v-model` cannot be secretly narrow.** `AppSelect` declared
+  `modelValue: string | number` while call sites bound it to `CreatorSortKey`, `number`, and
+  `DevLogLevel | 'all'`. Every one of those could receive a value outside its type and nothing
+  flagged it. `<script setup generic="T extends string | number">` is what makes the compiler
+  check the pair; a single-call-site dropdown is small enough that the temptation is to leave it
+  as `string | number` and accept the hole.
+---
+
+## 28. A full extension E2E is unavailable here — `--load-extension` is ignored
+
+Checking a real render is still the right instinct, but know the ceiling before planning around
+it: **this machine's Chrome 152 ignores `--load-extension`.** Since Chrome 137 the switch is
+disabled for regular Chrome. Evidence gathered, so nobody re-derives it:
+
+|Check|Result|
+|---|---|
+|`chrome://version/` command line|`--load-extension=…` **is present** — the flag is delivered|
+|profile `Secure Preferences` → `extensions.settings`|only the 3 built-ins; the unpacked extension is **absent**|
+|CDP `Extensions.loadUnpacked`|`ProtocolError: Method not available`|
+
+So a full extension E2E — load the build, drive the dashboard — is **not available from the
+command line here**. Do not spend five launches rediscovering it: two probes are enough, then
+stop and say so.
+
+What to do instead, in order of value:
+
+1. **Component-level render with the real built stylesheet.** Build, then feed the actual
+   `assets/main-*.css` into a page and mount the markup — geometry (`getBoundingClientRect()`)
+   from that is trustworthy. Confirm the replica matches the real component by dumping the
+   component's rendered HTML (mount it and read `innerHTML`); a hand-written replica can be
+   wrong in exactly the way that matters (a `<svg>` with no `<path>` rendered no icon while the
+   measurement said the button was there).
+2. **jsdom assertions on behaviour** — click handling, propagation, ordering. These are the tests
+   that mutation-verify cheaply; use them for anything that is not layout.
+3. If a change genuinely needs the extension host, say the harness cannot provide it rather than
+   approximating silently.
+
+And on the process point: **two launches without the intended result means the approach is wrong,
+not the parameters.** Cycling `--user-data-dir`, a path without spaces, `--disable-features=…`
+and an `--enable-unsafe-extension-debugging` escape hatch was five chances to stop and report.
+Each wasted launch is also a window opening on the user's screen.
+
+`--load-extension` is still fine for spawning a *plain* Chrome to view non-extension URLs, which
+rule 25's isolated-browser recipe uses.
 
 ---
 
@@ -706,4 +779,4 @@ from.
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 423 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`; `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 450 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
