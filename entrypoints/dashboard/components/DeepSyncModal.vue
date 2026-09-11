@@ -265,7 +265,7 @@ function start() {
           <div class="flex items-center justify-between text-xs">
             <span class="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
               <span v-if="running" class="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span>
-              <span>{{ currentStatus || '回溯中...' }}</span>
+              <span>{{ currentStatus || '回溯中…' }}</span>
             </span>
             <span class="font-bold text-indigo-600 dark:text-indigo-400">
               已获取 {{ totalNew }} 条

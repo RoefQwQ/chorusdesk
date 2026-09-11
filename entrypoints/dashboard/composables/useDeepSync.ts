@@ -58,7 +58,7 @@ export function useDeepSync(deps: DeepSyncDependencies) {
       if (deepSyncAbortRequested.value) break;
 
       const chName = `${PLATFORM_REGISTRY[ch.platform]?.name || ch.platform} (@${ch.displayName || ch.accountId})`;
-      deepSyncCurrentStatus.value = `正在深度回溯：${chName}...`;
+      deepSyncCurrentStatus.value = `正在深度回溯：${chName}…`;
       deepSyncLogs.value.unshift(`[开始回溯] ${chName}`);
 
       const res = await deepSyncChannel(ch, {
@@ -69,7 +69,7 @@ export function useDeepSync(deps: DeepSyncDependencies) {
         shouldStop: () => deepSyncAbortRequested.value,
         onProgress: (info) => {
           if (info.status === 'fetching' && info.fetchedThisRound > 0) {
-            deepSyncLogs.value.unshift(`[${info.platform}] 第 ${info.round} 轮翻页抓取到 ${info.fetchedThisRound} 条更早动态 (累计 +${info.totalNewPosts})`);
+            deepSyncLogs.value.unshift(`[${info.platform}] 第 ${info.round} 轮翻页抓取到 ${info.fetchedThisRound} 条更早动态（累计 +${info.totalNewPosts}）`);
             if (deepSyncLogs.value.length > 50) deepSyncLogs.value.pop();
           }
           if (info.error) {
@@ -91,7 +91,7 @@ export function useDeepSync(deps: DeepSyncDependencies) {
 
   function stopDeepSync() {
     deepSyncAbortRequested.value = true;
-    deepSyncCurrentStatus.value = '正在安全停止当前请求...';
+    deepSyncCurrentStatus.value = '正在安全停止当前请求…';
   }
 
   return {

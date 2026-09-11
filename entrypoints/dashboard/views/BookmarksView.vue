@@ -172,7 +172,7 @@ const bookmarkColumns = computed(() => {
           <input
             v-model="bookmarkSearchQuery"
             type="text"
-            placeholder="搜索内容 / 创作者 / #标签..."
+            placeholder="搜索内容 / 创作者 / #标签…"
             class="w-full pl-9 pr-8 py-2 bg-slate-100 dark:bg-slate-800 border-none rounded-xl text-xs outline-none focus:ring-2 focus:ring-amber-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
           />
           <button

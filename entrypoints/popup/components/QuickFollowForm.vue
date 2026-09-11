@@ -215,7 +215,7 @@ function toggleTag(tag: string) {
               :value="creatorSearchQuery"
               @input="emit('update:creatorSearchQuery', ($event.target as HTMLInputElement).value)"
               type="text"
-              placeholder="输入姓名 / 拼音 / 标签关键词搜索..."
+              placeholder="输入姓名 / 拼音 / 标签关键词搜索…"
               class="w-full pl-7.5 pr-7 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500"
               autofocus
             />
@@ -334,7 +334,7 @@ function toggleTag(tag: string) {
       class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
     >
       <PlusCircle class="w-3.5 h-3.5" />
-      <span>{{ saving ? '添加中...' : '确认关注' }}</span>
+      <span>{{ saving ? '添加中…' : '确认关注' }}</span>
     </button>
   </div>
 </template>

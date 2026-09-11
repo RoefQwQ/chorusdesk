@@ -345,7 +345,7 @@ const context = computed(() => props.context);
                   </button>
                   <button
                     @click.stop="context.onDeepSync(c)"
-                    title="回溯历史作品"
+                    title="回溯该创作者更早的历史动态"
                     class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                   >
                     <History class="w-3.5 h-3.5" />

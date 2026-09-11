@@ -111,7 +111,7 @@ onMounted(async () => {
     <div class="my-3 flex-1">
       <!-- Loading -->
       <div v-if="loading" class="py-12 text-center text-slate-400">
-        正在识别...
+        正在识别…
       </div>
 
       <!-- Detected Platform Card -->

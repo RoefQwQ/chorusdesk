@@ -22,7 +22,7 @@ const meta = computed(() => PLATFORM_REGISTRY[props.platform as Platform]);
   <span
     :class="meta?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'"
     class="px-1.5 py-0.5 rounded border flex items-center gap-0.5"
-    :title="`${meta?.name || platform}${count !== undefined ? ` (${count}个账号)` : ''}`"
+    :title="`${meta?.name || platform}${count !== undefined ? `（${count} 个账号）` : ''}`"
   >
     <span :class="[compact ? 'text-[9px] font-bold' : 'text-[10px] font-medium']">
       {{ meta?.name || platform }}

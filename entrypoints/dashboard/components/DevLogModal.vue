@@ -98,7 +98,7 @@ async function handleCopy() {
           <input
             v-model="textFilter"
             type="text"
-            placeholder="搜索 scope / 消息 / 详情..."
+            placeholder="搜索 scope / 消息 / 详情…"
             class="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder-slate-400"
           />
         </div>

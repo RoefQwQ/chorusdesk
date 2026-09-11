@@ -112,7 +112,7 @@ function save() {
                 type="button"
                 @click="removeTagFromEditingList(t)"
                 class="w-3.5 h-3.5 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-800 flex items-center justify-center text-indigo-500 hover:text-indigo-800 dark:hover:text-white transition-colors cursor-pointer"
-                title="移除此标签"
+                title="移除该标签"
               >
                 <X class="w-2.5 h-2.5" />
               </button>
@@ -135,7 +135,7 @@ function save() {
                 v-model="newTagInput"
                 @keydown.enter.prevent="addTagToEditingList()"
                 type="text"
-                placeholder="输入标签名..."
+                placeholder="输入标签名…"
                 class="w-full pl-7 pr-3.5 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
               />
             </div>
@@ -179,7 +179,7 @@ function save() {
               type="button"
               @click.stop="deleteGlobalTag(t)"
               class="px-1.5 py-1 text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors border-l border-slate-200/60 dark:border-slate-700/60 cursor-pointer"
-              title="删除此标签"
+              title="移除该标签"
             >
               <Trash2 class="w-2.5 h-2.5" />
             </button>

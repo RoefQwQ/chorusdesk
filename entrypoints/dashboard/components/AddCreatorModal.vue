@@ -232,7 +232,7 @@ function submit() {
               <input
                 v-model="creatorSearchQuery"
                 type="text"
-                placeholder="搜索创作者..."
+                placeholder="搜索创作者…"
                 class="w-full pl-8.5 pr-8 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-1 focus:ring-indigo-500"
                 autofocus
               />
@@ -492,7 +492,7 @@ function submit() {
           :disabled="submitting || !url.trim()"
           class="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-xs cursor-pointer"
         >
-          {{ submitting ? '添加中...' : '确认添加' }}
+          {{ submitting ? '添加中…' : '确认添加' }}
         </button>
       </div>
     </div>

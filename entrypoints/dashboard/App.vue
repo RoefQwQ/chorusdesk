@@ -562,7 +562,7 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
                 >
                   <div class="flex items-center gap-2">
                     <RefreshCw class="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span class="font-semibold text-slate-800 dark:text-slate-200">一键同步全部 (常规)</span>
+                    <span class="font-semibold text-slate-800 dark:text-slate-200">一键同步全部（常规）</span>
                   </div>
                   <span class="text-[10px] text-slate-400">跳过已删除</span>
                 </button>
@@ -584,7 +584,7 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
                   class="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Trash2 class="w-3.5 h-3.5 text-slate-400" />
-                  <span>管理已删除动态记录 ({{ deletedPostCount }})...</span>
+                  <span>管理已删除动态记录 ({{ deletedPostCount }})…</span>
                 </button>
               </div>
             </div>

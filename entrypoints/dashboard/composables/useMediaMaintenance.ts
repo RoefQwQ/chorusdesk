@@ -29,7 +29,7 @@ export function useMediaMaintenance(deps: MediaMaintenanceDependencies) {
       }
     } catch (err: unknown) {
       const message = errorMessage(err);
-      alert('修复异常: ' + message);
+      alert('修复异常：' + message);
     } finally {
       isHealingMedia.value = false;
     }
@@ -48,7 +48,7 @@ export function useMediaMaintenance(deps: MediaMaintenanceDependencies) {
       alert(`【存储空间已释放】成功清理了 ${deletedCount} 条历史动态！`);
     } catch (err: unknown) {
       const message = errorMessage(err);
-      alert('清理失败: ' + message);
+      alert('清理失败：' + message);
     } finally {
       isCleaningStorage.value = false;
     }

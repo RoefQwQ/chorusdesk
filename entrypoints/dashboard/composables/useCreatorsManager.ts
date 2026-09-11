@@ -159,7 +159,7 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
       addModalOpenRequest.value = null;
       await reloadData();
     } catch (err: unknown) {
-      alert('添加失败: ' + errorMessage(err));
+      alert('添加失败：' + errorMessage(err));
     } finally {
       isSubmittingAdd.value = false;
     }
@@ -209,7 +209,7 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
       await reloadData();
       editingTagCreator.value = null;
     } catch (err: unknown) {
-      alert('修改标签失败: ' + errorMessage(err));
+      alert('修改标签失败：' + errorMessage(err));
     }
   }
 
@@ -224,7 +224,7 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
       clearTagFromFilters(tagToDelete);
       await reloadData();
     } catch (err: unknown) {
-      alert('移除标签失败: ' + errorMessage(err));
+      alert('移除标签失败：' + errorMessage(err));
     }
   }
 
@@ -232,7 +232,7 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
   async function loadDemoData() {
     const demoCreator: Creator = {
       id: 'demo_alice',
-      name: '爱丽丝 (演示博主)',
+      name: '爱丽丝（演示博主）',
       avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Alice',
       tags: ['ASMR', '插画', '多账号示范'],
       note: '跨平台与同平台多账号归集样例',

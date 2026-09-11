@@ -53,7 +53,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
 
   async function handleDeletePost(post: Post) {
     const snippet = post.title || (post.content ? post.content.slice(0, 35) : '该动态');
-    if (!confirm(`确定要删除此条动态吗？\n\n“${snippet}”\n\n提示：该动态ID将记录到本地数据库黑名单中。后续点击“同步全部”默认不会重新拉取此动态；您可在设置或同步选项中随时查看与恢复。`)) {
+    if (!confirm(`确定要删除此条动态吗？\n\n“${snippet}”\n\n提示：该动态ID将记录到本地数据库黑名单中。后续点击“同步全部”默认不会重新拉取此动态；可在设置或同步选项中随时查看与恢复。`)) {
       return;
     }
     await postService.deleteToRecycleBin(post);

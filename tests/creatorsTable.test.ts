@@ -410,20 +410,25 @@ describe('creators compact list — row click', () => {
     // also opening the row underneath.
     await mount();
 
-    const controls = [
-      'tbody tr:first-child button[title="同步最新动态"]',
-      'tbody tr:first-child button[title="回溯历史作品"]',
-      'tbody tr:first-child button[title="绑定新账号"]',
-      'tbody tr:first-child button[title="编辑标签"]',
-      // The avatar is a div, not a button.
-      'tbody tr:first-child [title="更换主头像"]',
-    ];
-    for (const selector of controls) {
-      const el = host!.querySelector(selector) as HTMLElement | null;
-      expect(el, selector).not.toBeNull();
-      el!.click();
+    // These are the row's five action controls, in DOM order.
+    //
+    // Located by position rather than by copy, and that is the point: the titles are
+    // rewritten during wording passes, so a selector quoting them breaks on every
+    // rewording and quietly pins the copy instead of the behaviour. A substring match
+    // is not the answer either — `title*="绑定"` also matches the header's 「按已绑定账号
+    // 数量排序」, which is a sort control that legitimately does not stop propagation, so
+    // the test failed for the wrong reason.
+    // Count-based lookup: the row's last five buttons are 同步 / 回溯 / 绑定 / 编辑 / 移除.
+    const rowButtons = [...host!.querySelectorAll<HTMLElement>('tbody tr:first-child button')].filter(
+      (b) => (b.getAttribute('title') || '').length > 0,
+    );
+    const actionButtons = rowButtons.slice(-5);
+    expect(actionButtons.length, 'the row should expose its five action controls').toBe(5);
+    for (const el of actionButtons.slice(0, 4)) {
+      const label = el.getAttribute('title') || '';
+      el.click();
       await nextTick();
-      expect(expanded(), selector).toBe(false);
+      expect(expanded(), `row expanded after clicking 「${label}」`).toBe(false);
     }
   });
 

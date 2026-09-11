@@ -115,7 +115,7 @@ const context = computed(() => props.context);
                   {{ PLATFORM_REGISTRY[platform as Platform]?.name || platform }}
                 </span>
                 <span class="text-[11px] text-slate-400">
-                  {{ chs.length > 1 ? `绑定了 ${chs.length} 个账号 (同平台多账号互通)` : '1 个账号' }}
+                  {{ chs.length > 1 ? `绑定了 ${chs.length} 个账号（同平台多账号互通）` : '1 个账号' }}
                 </span>
               </div>
             </div>

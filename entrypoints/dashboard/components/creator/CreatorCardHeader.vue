@@ -107,14 +107,14 @@ function relativeTime(timestamp?: number): string {
       <template v-if="variant === 'grid'">
         <button
           @click="emit('refresh', creator.id)"
-          :title="isUpdating ? '正在同步中...' : '同步该创作者所有账号'"
+          :title="isUpdating ? '正在同步中…' : '同步该创作者所有账号'"
           class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isUpdating }" />
         </button>
         <button
           @click="emit('deep-sync', creator)"
-          title="回溯更早历史作品"
+          title="回溯该创作者更早的历史动态"
           class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
         >
           <History class="w-3.5 h-3.5" />
@@ -137,7 +137,7 @@ function relativeTime(timestamp?: number): string {
       <template v-else>
         <button
           @click="emit('deep-sync', creator)"
-          title="回溯更早的历史动态"
+          title="回溯该创作者更早的历史动态"
           class="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 text-xs font-semibold transition-colors cursor-pointer border border-indigo-200/60 dark:border-indigo-800/60 shadow-2xs"
         >
           <History class="w-3.5 h-3.5" />
@@ -145,7 +145,7 @@ function relativeTime(timestamp?: number): string {
         </button>
         <button
           @click="emit('refresh', creator.id)"
-          :title="isUpdating ? '正在同步中...' : '同步最新动态'"
+          :title="isUpdating ? '正在同步中…' : '同步最新动态'"
           class="p-2 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
         >
           <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': isUpdating }" />

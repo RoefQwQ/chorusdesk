@@ -113,7 +113,7 @@ const context = computed(() => props.context);
           @click="context.onViewMode('grid')"
           :class="context.viewMode === 'grid' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
           class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-          title="网格磁贴视图 (中等密度，清晰直观)"
+          title="网格磁贴视图（中等密度，清晰直观）"
         >
           <LayoutGrid class="w-3.5 h-3.5" />
           <span class="hidden md:inline">网格</span>
@@ -123,7 +123,7 @@ const context = computed(() => props.context);
           @click="context.onViewMode('list')"
           :class="context.viewMode === 'list' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
           class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-          title="紧凑列表视图 (超高密度，一屏容纳 20+ 位创作者)"
+          title="紧凑列表视图（超高密度，一屏容纳 20+ 位创作者）"
         >
           <List class="w-3.5 h-3.5" />
           <span class="hidden md:inline">紧凑列表</span>
@@ -133,7 +133,7 @@ const context = computed(() => props.context);
           @click="context.onViewMode('detailed')"
           :class="context.viewMode === 'detailed' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
           class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-          title="详细卡片视图 (完全展开全部账号与角色管理)"
+          title="详细卡片视图（展开全部账号与角色管理）"
         >
           <LayoutList class="w-3.5 h-3.5" />
           <span class="hidden md:inline">详细卡片</span>
@@ -169,7 +169,7 @@ const context = computed(() => props.context);
           :value="context.search"
           @input="context.onSearch(($event.target as HTMLInputElement).value)"
           type="text"
-          placeholder="快速搜索创作者名称、标签或账号..."
+          placeholder="快速搜索创作者名称、标签或账号…"
           class="w-full pl-8 pr-8 py-1.5 bg-slate-100 dark:bg-slate-800 border-none rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
         />
         <button

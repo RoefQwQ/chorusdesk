@@ -165,7 +165,7 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
             class="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5 transition-colors"
           >
             <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': context.isCheckingLogins }" />
-            <span>{{ context.isCheckingLogins ? '检测中...' : '检测登录状态' }}</span>
+            <span>{{ context.isCheckingLogins ? '检测中…' : '检测登录状态' }}</span>
           </button>
         </div>
       </div>
@@ -202,7 +202,7 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
               <span
                 class="w-2.5 h-2.5 rounded-full shrink-0 mt-0.5"
                 :class="context.platformLoginStatus[key] ? 'bg-emerald-500 shadow-xs shadow-emerald-500/50' : 'bg-amber-400'"
-                :title="context.platformLoginStatus[key] ? '就绪 (可同步)' : '未检测到会话'"
+                :title="context.platformLoginStatus[key] ? '就绪（可同步）' : '未检测到会话'"
               ></span>
             </div>
             <!-- The description is clamped to two lines for even card heights, so
@@ -226,7 +226,7 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
               class="w-full py-1.5 px-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
             >
               <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': context.isCheckingLogins }" />
-              <span>{{ context.isCheckingLogins ? '检测中...' : '检测 X/Twitter 登录' }}</span>
+              <span>{{ context.isCheckingLogins ? '检测中…' : '检测 X/Twitter 登录' }}</span>
             </button>
 
             <!-- RSS specific action -->
@@ -432,7 +432,7 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
             title="自动扫描并纠正本地数据库中小红书受限 CDN 域名，恢复旧笔记正常显示"
           >
             <Sparkles class="w-3.5 h-3.5" :class="{ 'animate-spin': context.isHealingMedia }" />
-            <span>{{ context.isHealingMedia ? '修复中...' : '一键修复小红书图裂' }}</span>
+            <span>{{ context.isHealingMedia ? '修复中…' : '一键修复小红书图裂' }}</span>
           </button>
           <button
             type="button"
@@ -528,7 +528,7 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
             :value="context.deletedPostsSearchQuery"
             @input="handleDeletedSearchInput"
             type="text"
-            placeholder="搜索已删除动态关键词、标题或 ID..."
+            placeholder="搜索已删除动态关键词、标题或 ID…"
             class="w-full pl-8.5 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-white placeholder-slate-400"
           />
         </div>

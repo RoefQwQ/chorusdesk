@@ -103,7 +103,7 @@ function handleSearchInput(event: Event) {
           :value="context.searchQuery"
           @input="handleSearchInput"
           type="text"
-          placeholder="搜索内容或创作者..."
+          placeholder="搜索内容或创作者…"
           class="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
         />
       </div>

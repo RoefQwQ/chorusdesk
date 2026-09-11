@@ -101,7 +101,7 @@ const emit = defineEmits<{
       <!-- Role Badge with Quick Cycle -->
       <button
         @click="emit('cycle-role', channel)"
-        :title="compact ? '点击切换账号角色' : '点击切换账号角色分类 (主号 / 小号 / 里号 / 自定义)'"
+        :title="compact ? '点击切换账号角色' : '切换账号类型：主账号 / 小号 / 里号 / 自定义'"
         class="rounded text-[10px] font-medium border cursor-pointer shrink-0 transition-colors"
         :class="[
           compact ? 'px-1 py-0.2' : 'px-1.5 py-0.5',
@@ -169,7 +169,7 @@ const emit = defineEmits<{
     <div class="flex items-center gap-0.5 shrink-0" :class="{ 'ml-2': !compact }">
       <button
         @click="emit('deep-sync', { creatorId, channelId: channel.id })"
-        :title="compact ? '深度挖掘该账号历史动态' : '针对该账号深度回溯更早历史动态'"
+        :title="compact ? '回溯该账号更早的历史动态' : '回溯该账号更早的历史动态'"
         class="p-1 text-slate-400 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 rounded cursor-pointer"
         :class="!compact && 'rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors'"
       >
@@ -178,7 +178,7 @@ const emit = defineEmits<{
       <button
         @click.exact="emit('refresh', { channel, force: false })"
         @click.shift.stop="emit('refresh', { channel, force: true })"
-        :title="compact ? '同步最新 (按住 Shift 强制覆盖)' : '同步最新动态 (按住 Shift 点击可强制重新刷新覆盖已有内容与图片)'"
+        :title="compact ? '同步最新动态（按住 Shift 强制覆盖）' : '同步最新动态（按住 Shift 点击可强制覆盖已有内容与图片）'"
         class="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
         :class="!compact && 'rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors'"
       >

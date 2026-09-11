@@ -49,10 +49,10 @@ async function handleSelectDirectory() {
       });
       alert(`【本地目录绑定成功】已选定文件夹 "${res.dirName}"。此后图片将分类归档至该目录下！`);
     } else if (res.error && res.error !== '已取消选择目录') {
-      alert('绑定失败: ' + res.error);
+      alert('绑定失败： ' + res.error);
     }
   } catch (err: unknown) {
-    alert('操作异常: ' + (errorMessage(err)));
+    alert('操作异常： ' + (errorMessage(err)));
   } finally {
     isBinding.value = false;
     checkStatus();
@@ -60,7 +60,7 @@ async function handleSelectDirectory() {
 }
 
 async function handleUnbindDirectory() {
-  if (!confirm('确定要解绑当前的本地图片缓存目录吗？\n（已保存在您电脑上的物理图片文件不会被删除）')) {
+  if (!confirm('确定要解绑当前的本地图片缓存目录吗？\n（已下载到本机的图片文件不会被删除）')) {
     return;
   }
   await imageCacheService.unbindDirectory();
@@ -147,7 +147,7 @@ async function handleBatchCacheExisting() {
     }
     alert(`【离线归档完成】${summary.join('，')}。归档目录: "${boundDirName.value}"`);
   } catch (err: unknown) {
-    alert('批量缓存异常: ' + (errorMessage(err)));
+    alert('批量缓存异常： ' + (errorMessage(err)));
   } finally {
     isBatchCaching.value = false;
   }
@@ -161,7 +161,7 @@ async function handleBatchCacheExisting() {
       <div>
         <h3 class="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
           <HardDrive class="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          <span>本地磁盘图片缓存 (分博主/渠道归档)</span>
+          <span>本地磁盘图片缓存（按博主 / 渠道归档）</span>
           <span
             class="px-2 py-0.5 rounded-full text-[10px] font-semibold border"
             :class="isReady ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800' : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400'"
@@ -191,7 +191,7 @@ async function handleBatchCacheExisting() {
               {{ boundDirName ? `当前绑定的物理目录: ${boundDirName}` : '尚未选择图片本地保存目录' }}
             </div>
             <div class="text-[11px] text-slate-400 mt-0.5">
-              {{ isReady ? '扩展已获得该文件夹的写入权限，浏览时将自动沉淀图片。' : '基于浏览器官方 File System Access API，由您自主决定图片存在哪个磁盘分区。' }}
+              {{ isReady ? '扩展已获得该文件夹的写入权限，浏览时将自动沉淀图片。' : '使用浏览器原生的文件系统能力，图片存放在哪个磁盘分区由选择决定。' }}
             </div>
           </div>
         </div>
@@ -234,7 +234,7 @@ async function handleBatchCacheExisting() {
           <span v-if="isBatchCaching" class="text-[10px] text-slate-400 font-mono">
             （新 {{ batchProgress.success }} · 跳过 {{ batchProgress.skipped }}<template v-if="batchProgress.failed"> · 失败 {{ batchProgress.failed }}</template>）
           </span>
-          <span>{{ isBatchCaching ? `正在归档 ${batchProgress.current}/${batchProgress.total}...` : '一键离线当前全部图片（增量）' }}</span>
+          <span>{{ isBatchCaching ? `正在归档 ${batchProgress.current}/${batchProgress.total}…` : '一键离线当前全部图片（增量）' }}</span>
         </button>
       </div>
     </div>

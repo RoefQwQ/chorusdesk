@@ -53,7 +53,7 @@ const secure = toSecureMediaUrl;
           :value="searchQuery"
           @input="emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
           type="text"
-          placeholder="搜索已删除动态标题或 ID..."
+          placeholder="搜索已删除动态标题或 ID…"
           class="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-white placeholder-slate-400"
         />
       </div>

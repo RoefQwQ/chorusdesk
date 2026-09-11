@@ -37,7 +37,7 @@ export function useBackupManager(deps: BackupManagerDependencies) {
     if (!file) return;
     const parsed = await readBackupFile(file);
     if (!parsed.ok) {
-      alert('解析备份失败: ' + parsed.error);
+      alert('备份文件无法读取：' + parsed.error);
       return;
     }
     try {
@@ -46,7 +46,7 @@ export function useBackupManager(deps: BackupManagerDependencies) {
       alert('备份恢复成功！创作者档案、各平台账号及历史动态已全部恢复。');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '未知错误';
-      alert('解析备份失败: ' + message);
+      alert('备份文件无法读取：' + message);
     }
   }
 
