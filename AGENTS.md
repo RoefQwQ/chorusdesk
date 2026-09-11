@@ -638,6 +638,44 @@ The user's browser is the one place in this project where a mistake is not recov
 
 ---
 
+## 26. A mutation/edit script that matches nothing produces a green suite, and the green suite is a lie
+
+Two separate edits this session appeared to succeed and changed nothing. One of them was a
+mutation whose whole purpose was to prove a test could fail: it printed nothing, the suite
+stayed green, and the honest reading of that result would have been "the test has no teeth" —
+the exact opposite of the truth. The other silently skipped the fix it was supposed to apply.
+
+The failure is silent because the tooling's normal contract is "replace it if you find it":
+
+```python
+s = open(p).read()
+s = s.replace(old, new)          # 0 replacements: no error, no output
+open(p, 'w').write(s)            # writes the file back, unchanged
+```
+
+Nothing distinguishes "replaced once" from "found nothing". So every scripted edit must assert
+its own application before its result means anything:
+
+```python
+assert s.count(old) == 1, s.count(old)   # or == expected count, or print the delta
+```
+
+And the assertion has to be on something the edit changes:
+
+- **Mutations.** After editing, re-read the file and confirm the mutated string is present (or
+  the original gone) *before* running the suite. A mutation test's output is only evidence if
+  the mutation is known to be in the tree. If a mutation run reports `no tests`, the file failed
+  to parse — that is a broken mutation, not a passing test.
+- **Line endings.** These files have been both CRLF and LF; a multi-line anchor written with
+  `\n` matches nothing in a CRLF file. Prefer single-line anchors, or read and write with
+  `newline=''`, or assert the count. `git config core.autocrlf` is `true` here, so the checked-in
+  form is LF and the working tree may be either — never assume.
+- **The general rule:** an edit that reports no failure is not an edit that succeeded. Confirm
+  the tree changed, then judge the result. This applies to mutations, "quick" fixes, and
+  codemods equally, and it is cheap: one `assert` or one re-read.
+
+---
+
 ## Fix queue
 
 All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
