@@ -248,6 +248,25 @@ class Target {
   /** Enable the domains every page session needs; the SW target has no Page domain. */
   async init({ page = true } = {}) {
     await this.send('Runtime.enable');
+    // Record page-side errors. Without this a JS exception in the app is
+    // completely invisible: the symptom is only that some later probe never
+    // becomes true, which reads like a UI bug rather than a thrown error.
+    this.pageErrors = [];
+    this.cdp.onEvent((msg) => {
+      if (msg.sessionId !== this.sessionId) return;
+      if (msg.method === 'Runtime.exceptionThrown') {
+        const d = msg.params.exceptionDetails;
+        const text = d.exception?.description ?? d.text ?? 'unknown exception';
+        this.pageErrors.push(text);
+        detail(`page exception: ${String(text).split('\n')[0]}`);
+      } else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
+        const text = (msg.params.args || [])
+          .map((a) => a.value ?? a.description ?? a.type ?? '')
+          .join(' ');
+        this.pageErrors.push(text);
+        detail(`page console.error: ${text}`);
+      }
+    });
     if (page) {
       await this.cdp.send('Page.enable', {}, this.sessionId);
       // The import success path calls alert(); an unanswered dialog blocks this
@@ -409,11 +428,20 @@ async function killChrome(child, cdp) {
  */
 async function clickLocated(target, locator, label) {
   const MARK = 'data-e2e-gate-click';
+  // Arm one-shot listeners on the target element so delivery is observable.
+  // Without this, a click that never reached the page is indistinguishable from
+  // an app that received it and did nothing — and on a machine with no real
+  // display those are very different diagnoses.
   const marked = await target.eval(`(() => {
     document.querySelectorAll('[${MARK}]').forEach((el) => el.removeAttribute('${MARK}'));
     const el = (${locator})();
     if (!el) return null;
     el.setAttribute('${MARK}', '1');
+    window.__gateClick = { down: 0, up: 0, click: 0 };
+    const bump = (k) => () => { window.__gateClick[k] += 1; };
+    el.addEventListener('mousedown', bump('down'), { once: true });
+    el.addEventListener('mouseup', bump('up'), { once: true });
+    el.addEventListener('click', bump('click'), { once: true });
     return (el.textContent || '').trim().slice(0, 40);
   })()`);
   assert(marked !== null, `could not find the element for: ${label}`);
@@ -435,7 +463,19 @@ async function clickLocated(target, locator, label) {
   await target.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
   await target.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
   await target.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+  const delivered = await target.eval(`window.__gateClick || { down: 0, up: 0, click: 0 }`);
   await target.eval(`document.querySelector('[${MARK}]')?.removeAttribute('${MARK}')`);
+  if (!delivered.click) {
+    // Deliberately a different message from "the control was not found" and
+    // from "the app ignored the click": this is the environment, not the code.
+    throw new Error(
+      `the click at (${Math.round(x)},${Math.round(y)}) for ${label} was never delivered to the page ` +
+        `(mousedown=${delivered.down} mouseup=${delivered.up} click=${delivered.click}). ` +
+        'Synthetic input reached nothing — check the display/occlusion of the browser window ' +
+        '(e.g. a window positioned outside the X screen), not the view under test.',
+    );
+  }
+  detail(`${label}: click delivered (down=${delivered.down} up=${delivered.up} click=${delivered.click})`);
 }
 
 /** Locator bodies: each returns one element or null. */
