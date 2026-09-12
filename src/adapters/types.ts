@@ -68,6 +68,13 @@ export interface FetchResult {
   authorMeta?: {
     name?: string;
     avatar?: string;
+    /**
+     * The platform's own id, when this run resolved it (see
+     * `Channel.resolvedAccountId`). Persisted by `channelSync` so a platform
+     * whose id must be discovered from a page — YouTube, where that page is
+     * 1.16 MB — pays for it once instead of on every sync.
+     */
+    resolvedAccountId?: string;
   };
   nextCursor?: string;
   /** False when the adapter knows there is nothing older to fetch. */

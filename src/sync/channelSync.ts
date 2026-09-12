@@ -664,6 +664,24 @@ async function runChannelUpdate(
     if (result.authorMeta?.avatar) {
       updates.avatarUrl = result.authorMeta.avatar;
     }
+    // Persist a freshly discovered platform id, so the platform can skip the
+    // page it had to read to find it.
+    //
+    // Only written when the adapter actually resolved something THIS run (it
+    // reports `undefined` when the channel already carried an id), so the fast
+    // path performs no write at all. That is what makes this converge: the
+    // expensive discovery happens once per channel, not once per sync. Measured
+    // motivation — YouTube's profile page is 1.16 MB with the id at byte ~750k,
+    // and it was being re-downloaded on every sync because the value was
+    // computed and thrown away.
+    if (result.authorMeta?.resolvedAccountId) {
+      updates.resolvedAccountId = result.authorMeta.resolvedAccountId;
+      devLog.info(
+        'channelSync',
+        `${channel.platform}/${channel.displayName || channel.accountId} 已记录平台账号 ID`,
+        `后续同步将直接使用 ${result.authorMeta.resolvedAccountId}，不再重新解析页面`,
+      );
+    }
 
     await db.channels.update(channel.id, updates);
 

@@ -12,9 +12,11 @@ export const youtubeAdapter: PlatformAdapter = {
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     const signal = options?.signal;
     try {
-      let channelId = channel.accountId;
+      let channelId = channel.resolvedAccountId || channel.accountId;
       let pageAuthorTitle = '';
       let pageAuthorAvatar = '';
+      /** Set when this run resolves `@handle` → `UC…` and it should be stored. */
+      let resolvedChannelId: string | undefined;
 
       // Handle @handles by fetching page to extract channel ID if not yet resolved
       if (channelId.startsWith('@') || !channelId.startsWith('UC')) {
@@ -41,6 +43,10 @@ export const youtubeAdapter: PlatformAdapter = {
             if (resolvedId) {
               channelId = resolvedId;
               resolved = true;
+              // Reported upward so the next sync can skip this page entirely.
+              // Without it the megabyte above is paid on every sync (the value
+              // never changes, and nothing was storing it).
+              resolvedChannelId = resolvedId;
             }
 
             // 2. Extract real channel title (avoid pure handle)
@@ -142,6 +148,11 @@ export const youtubeAdapter: PlatformAdapter = {
         authorMeta: {
           name: authorName,
           avatar: pageAuthorAvatar || undefined,
+          // Persisted by `channelSync` so the NEXT sync starts from the `UC…` id
+          // and skips the profile page entirely. Absent when this run already had an id
+          // in hand (nothing to store) — so the write is idempotent and does not
+          // touch the row on the fast path.
+          resolvedAccountId: resolvedChannelId,
         },
       };
     } catch (err: unknown) {

@@ -243,6 +243,21 @@ export interface Channel {
   status: 'idle' | 'updating' | 'success' | 'error';
   errorMessage?: string;
   nextCursor?: string; // 历史动态翻页游标 (如 Twitter bottom_cursor / B站 offset)
+  /**
+   * The platform's own id for this account, once a sync has resolved it.
+   *
+   * YouTube is the reason this exists: a channel is added as `@handle`, and
+   * resolving it to a `UC…` id means downloading the profile page — measured at
+   * **1.16 MB** for a real channel, with the id buried at byte ~750 000. The
+   * adapter used to discard the result, so that megabyte was re-downloaded on
+   * EVERY sync, forever, for a value that never changes.
+   *
+   * Kept separate from `accountId` deliberately: `accountId` is what the user
+   * typed and is shown in the UI (`AvatarPickerModal`, error rows), so
+   * overwriting it would silently change labels the user recognises. This is
+   * derived state, so it may be rewritten freely.
+   */
+  resolvedAccountId?: string;
 }
 
 export interface MediaItem {

@@ -17,6 +17,9 @@ import type { FetchResult } from '../src/adapters/types';
  * actually asked) rather than that a helper was invoked.
  */
 
+/** Every `channels.update` payload this run produced. */
+const channelUpdates: Array<Record<string, unknown>> = [];
+
 let fetchCalls = 0;
 /** Resolved by the test to control when a fetch completes. */
 let releaseFetch: (() => void) | undefined;
@@ -51,7 +54,12 @@ vi.mock('../src/infrastructure/db/database', () => ({
     },
     channels: {
       get: vi.fn(async () => ({ status: 'idle' })),
-      update: vi.fn(async () => undefined),
+      // Recorded, not swallowed: several contracts are about WHAT gets written
+      // (the resolved id, the terminal cursor), and a mock that discards the
+      // payload cannot test any of them.
+      update: vi.fn(async (_id: string, changes: Record<string, unknown>) => {
+        channelUpdates.push(changes);
+      }),
     },
     creators: { get: vi.fn(async () => undefined), update: vi.fn() },
     postSuppressions: {
@@ -89,6 +97,7 @@ const post: Post = {
 
 beforeEach(() => {
   resetSyncCoordinator();
+  channelUpdates.length = 0;
   fetchCalls = 0;
   releaseFetch = undefined;
   fetchLatestImpl = async () => ({ posts: [post], totalFetched: 1, hasMore: false });
@@ -248,3 +257,40 @@ describe('cancellation composes caller signal with the deadline', () => {
   });
 });
 
+
+/**
+ * Persisting a resolved platform id.
+ *
+ * The adapter reports it once; this layer must STORE it, or the next sync pays
+ * for the same discovery again. YouTube's case: a 1.16 MB profile page to find
+ * an id that never changes.
+ */
+describe('channelSync stores a resolved platform id', () => {
+  it('writes resolvedAccountId onto the channel', async () => {
+    fetchLatestImpl = async () => ({
+      posts: [post],
+      totalFetched: 1,
+      hasMore: false,
+      authorMeta: { name: 'x', resolvedAccountId: 'UCOI806s3tcLz6S9Xh4kBWow' },
+    });
+
+    await updateChannel(channel, 10, true);
+
+    const persisted = channelUpdates.find((u) => u.resolvedAccountId !== undefined);
+    expect(persisted?.resolvedAccountId).toBe('UCOI806s3tcLz6S9Xh4kBWow');
+  });
+
+  it('does not write the field when the adapter resolved nothing', async () => {
+    // Idempotence: the fast path must not rewrite the same value on every sync.
+    fetchLatestImpl = async () => ({
+      posts: [post],
+      totalFetched: 1,
+      hasMore: false,
+      authorMeta: { name: 'x' },
+    });
+
+    await updateChannel(channel, 10, true);
+
+    expect(channelUpdates.some((u) => 'resolvedAccountId' in u)).toBe(false);
+  });
+});
