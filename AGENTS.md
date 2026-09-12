@@ -3,8 +3,8 @@
 Binding constraints for anyone (human or agent) editing this repo. Reusable rules only.
 One-off review output lives in `docs/REVIEW_2026-09.md` — do not copy it here.
 **Current work queue lives in `docs/PROJECT_PROGRESS_2026-09.md` §四.P8 (交接队列)** — read that
-before planning anything. Batch history is `docs/archive/2026-09-batches.md` (frozen, never a
-to-do list).
+before planning anything. Batch history is `docs/archive/2026-09-batches.md` and the closed-item
+ledger is `docs/archive/2026-09-closures.md` (both frozen, never to-do lists).
 Rule numbers are stable. Several rules cite **`docs/AGENTS_CASES.md`**, which holds the pre-split
 incident narrative, measurements and logs behind them — evidence, not the binding text.
 

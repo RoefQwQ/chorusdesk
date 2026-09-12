@@ -243,7 +243,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 **不会**变成「成功但 0 条」那种不可信的零（规则 13 合规）。
 `tests/youtube.handle.test.ts`（5 例，jsdom，因为适配器用 `DOMParser`）逐条钉住三个正则分支＋这条 404 行为，
 并记录了一个实测细节：`og:title` 优先于 `<title>`，且**只有** `<title>` 分支会剥掉「 - YouTube」后缀。
-  - `withny.ts` 曾在此名单内，**2026-09-12 随平台整体移除**（队列 B30）。
+  - `withny.ts` 曾在此名单内，**2026-09-12 随平台整体移除**。
 - **曾经的缺口已补上（2026-09-12）**：`bilibili.ts` 与 `xiaohongshu.ts` 原先分支密集、零测试。两者**都先抓了逐字真实载荷做 fixture，再提纯解析段，最后断言同一份 fixture 解析结果不变**（顺序见提交 `342ce6c` → `e4c8b56` → `bc0ffc3`、`06f30c7` → `272a989` → `d8b6c1`）。
   - 现有回归网：`tests/bilibili.parse.test.ts`、`tests/xiaohongshu.parse.test.ts`、`tests/xiaohongshu.enrich.test.ts`，载荷在 `tests/fixtures/bilibili/`、`tests/fixtures/xiaohongshu/`。
   - 提纯过程中真实抓到过一个缺陷：小红书同时存在两个提取器，行为不一致——这正是「先建网再动刀」要防的那类回归。

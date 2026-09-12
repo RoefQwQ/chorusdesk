@@ -699,6 +699,43 @@ The one net finding was real — `AGENTS.md`'s title and `ARCHITECTURE.md`'s dir
 local directory name `creator-feed-hub` while the public repository is `chorusdesk` — but it did
 not require four agents to find.
 
+### 复发（2026-09-12）：同一条规则的两种违反，同一次会话
+
+用户这次直接问「你是按照要求启用 subagent 的吗」。查证后是**部分没有**，两条都属规则 31。
+
+**① 三个写入代理并发改同一批文件，且未通过 `hub` 协调。**
+
+`AGENTS.md` + 本文件的减负被拆给三个 `task` 代理，**按规则分节分区**（每个代理只准碰指定
+规则号）——这一半是对的。缺的是「siblings coordinate through `hub` before editing shared
+files」：三个代理在同一份文件里各切各的段，谁也不知道别人切到哪，日志里可见
+`SlimRule30And9` 在「读兄弟代理的 Rule 8 段」、`SlimRule28And8` 在「重新定位 Rule 8/28 段」。
+
+代价是实的：`SlimRule30And9` 跑了 **1 小时 3 分**，交付**不完整**——规则 30 正文未压缩、
+规则 9 整个没动，那部分由父级事后自己补。分区减少了碰撞，没有消除它，也没有让任何一方
+知道自己的边界是否仍然有效。
+
+**② 穷尽式核查又用了 `scout`。** 本次会话实际派发：
+
+| 代理 | 类型 | 运行时长 |
+|---|---|---|
+| `AuditDocsVsCode` | **scout** | 1h39m |
+| `AuditPlatformChecklist` | **scout** | 59m |
+| `InventoryOpenClosed` | **scout** | 运行中 |
+| `InventoryCodeTodos` | **scout** | 运行中 |
+
+前两个是**穷尽式逐条核查**（每个发现带 `file:line`、核验已完成的声明），正是本规则说
+「不是 scout」的形状；该走 `reviewer` / `task`。**发现即已复发**：写下这段时正在跑的两个
+盘点代理又是 scout、又是穷尽式清单——同一个错误在同一次会话里出现两次，说明「知道这条规则」
+与「派活时想起它」之间没有桥。
+
+**做对的部分**（不辩护，只记录以免下次误改）：适配器 signal 穿透（2 个 sonic）、dialog
+收编（3 个 sonic）是独立文件的机械改动，类型与粒度都对；`AdversarialReview` 用 `reviewer`
+是对的；并发峰值 3，未超 8 的上限；每个任务都有 `Target / Change / Acceptance` 三段。
+
+**对策（用户 2026-09-12 拍板）**：① 在跑的 scout 跑完即收，结果由父级复核，不追加 scout；
+② 后续需要批量核查——小范围父级自己查，大范围用 `reviewer` / `task`；
+③ 多代理写同一文件必须先 `hub` 协调边界，不能只靠「我告诉它只碰第几节」。
+
 ## Rule 32
 
 **32. 同步进度的请求就是同步进度 — 越权开工是最高优先级的违约**
@@ -758,7 +795,7 @@ not require four agents to find.
 6. Adapter data integrity: no `Math.random()` post IDs (skip or content-hash), `btoa` → TextEncoder hash (rss `stableHash`), `Number.isFinite` guards on all parsed timestamps.
 7. `parseBackup`: version gate + per-record required-field validation, fail-fast.
 8. `FetchResult.error` → structured `FetchError { code, message, retryable }`; adapters classify; `channelSync` switches on codes; silent RSS fallback removed from `getAdapter`.
-   > 注（2026-09-12）：`retryable` 字段后来因「只写不读、且按可重试性重试会与规则 19 的冷却冲突」被删除（详见 PROJECT_PROGRESS 队列 B31）。
+   > 注（2026-09-12）：`retryable` 字段后来因「只写不读、且按可重试性重试会与规则 19 的冷却冲突」被删除（详见 `docs/PROJECT_PROGRESS_2026-09.md` 二.2 注）。
 9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
    > 注（2026-09-12）：v6 拆表后墓碑改经 `postSuppressions`，过滤按 `postId`（见 `DELETION_MODEL.md`）。
 10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
