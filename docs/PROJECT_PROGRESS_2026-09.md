@@ -56,8 +56,8 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 - **待真机确认**：见[四.P7](#p7真实浏览器行为验证滚动清单) —— RSS 阅读视图、抖音重试期限、
   图片代理 403 冷却。
 - **未排期**：四.P6 整体 UI 风格重设计。
-- **已否决（不要重新提出）**：PR-first 工作流（[PRODUCT_DECISIONS.md](PRODUCT_DECISIONS.md)）。
-- **待用户拍板**：AUDIT P2-17（a）待办是否迁 GitHub Issues。
+- **已否决（不要重新提出）**：PR-first 工作流、待办迁 GitHub Issues——个人仓库不引入
+  协作开销（[PRODUCT_DECISIONS.md](PRODUCT_DECISIONS.md)）。
 
 **已决的非目标（不要再提议）**
 
@@ -399,16 +399,6 @@ B2. **weibo / pixiv / fantia 的解析测试**（二.3）。
 B3. **`autoSync.ts` / `platformAuth.ts` 的测试**（二.3）。
     前置：两者都直接依赖 `chrome.*`，需要先确定 mock 边界（E2E 已覆盖 alarm 的端到端行为，
     所以这里的目标是**单元级**的判据而非再验一遍端到端）。
-
-#### 队列 C — 需要用户决定
-
-C1. **待办是否迁 GitHub Issues**（AUDIT P2-17a）。**未决定**。
-    PR-first 工作流已否决，但那否决的是 **PR 流程**，与「待办放哪」是两件事。
-    属**流程变更**（本仓库现为 master-first、文档承载待办），需用户单独拍板。
-    当前事实：待办入口是本文 §四.P8。
-
-> 队列 C 目前只有这一条。P6 整体 UI 风格重设计**已决定不排期**（见上），不是待决事项；
-> 它是「未来可能重启」，届时按 P6 一节的评估口径走。
 
 #### 仍不可验（环境限制，别浪费时间重试）
 
