@@ -435,29 +435,29 @@ Twitter 标签页路径真的跑通了。
 | # | 事项 | 类别 | 证据 |
 |---|---|---|---|
 | **1** | ~~**`restore-all` 语义越界**~~ **已完成 2026-09-12** | 状态正确性 | 见下 |
-| **2** | **SyncCoordinator**：同频道 single-flight + 跨入口平台节流 | 状态正确性 | 无任何并发锁；`platformLastFinished` 是 batch 局部变量 |
-| **3** | **RSS identity scope**：`guid` 只在 feed 内唯一，却当全局主键 | 数据完整性 | `rss.ts:199` |
-| **4** | **单条/批量恢复共享同一策略** | 数据完整性 | 已完成，见 1 |
-| **5** | **`healBrokenPostMedia` 移出 reload hot path** | 规模 | `useDashboardData.ts:58` 每次 reload 全库扫 |
+| **2** | ~~**SyncCoordinator**：同频道 single-flight + 跨入口平台节流~~ **已完成 2026-09-13** | 状态正确性 | `src/sync/syncCoordinator.ts` |
+| **3** | ~~**RSS identity scope**：`guid` 只在 feed 内唯一，却当全局主键~~ **已完成 2026-09-13** | 数据完整性 | `e86325a` |
+| **4** | ~~**单条/批量恢复共享同一策略**~~ **已完成** | 数据完整性 | 见 1 |
+| **5** | ~~**`healBrokenPostMedia` 移出 reload hot path**~~ **已完成 2026-09-13** | 规模 | `d9bcd4e`；`runMediaHealingOnce` |
 | **6** | **Platform capability 模型**：`backgroundSync` / `pageContextRequired` / `cancellable` / `history` | 能力错配 | 无 capability；Twitter 到 SW 才说「不支持」 |
-| **7** | **取消信号可组合**：caller signal ∪ deadline | 能力错配 | `channelSync.ts:248` 的 `??` 二选一 |
-| **8** | **`PROXY_IMAGE` 加 byte/MIME 上限** | 数据完整性 | 只有 `arrayBuffer()`，无上限 |
-| **9** | **后端聚合诚实**：autoSync 把结果丢了 | 能力错配 | 10/10 失败也记「完成」 |
+| **7** | ~~**取消信号可组合**：caller signal ∪ deadline~~ **已完成 2026-09-13** | 能力错配 | `composeAbortSignals` |
+| **8** | ~~**`PROXY_IMAGE` 加 byte/MIME 上限**~~ **已完成 2026-09-13** | 数据完整性 | `MAX_IMAGE_BYTES = 8MB` |
+| **9** | ~~**后端聚合诚实**：autoSync 把结果丢了~~ **已完成 2026-09-13** | 能力错配 | autoSync 报 `failed/total` |
 | **10** | **Feed 数据分页**（IndexedDB query 取代全量 `toArray`） | 规模 | 全库进 Vue 内存，只显示 36 条 |
-| **11** | **E2E 拆独立 scenario** | 工程质量 | 一个 click 让 backup+alarm 全 skip |
+| **11** | ~~**E2E 拆独立 scenario**~~ **根因已修 2026-09-13**（见「已知陷阱」）；拆分仍未做 | 工程质量 | `dismissDialogs` 竞态；本地 3/3 失败 → 5/5 通过 |
 | **12** | **`FetchError` 五阶段细分** | 数据完整性 | 本轮 A2，未做 |
-| **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短 |
+| **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短**（无老用户，已降级为「不急」）** |
 | **14** | **DNR 规则表驱动 + 测试** | 工程质量 | 186 行零测试；remove/add 两处手维护 |
-| **15** | **`toSecureMediaUrl` 的 `includes()` → `hostMatches`** | 数据完整性 | `media.ts:27-29` |
+| **15** | **`toSecureMediaUrl` 的 `includes()` → `hostMatches`** | 数据完整性 | `media.ts` 仍有 4 处 `includes(` |
 | **16** | **MessageMap 类型协议** | 工程质量 | 完全没有；改一条消息要同步 5 处 |
 | **17** | **Platform 声明性事实单一来源** | 工程质量 | 新增平台仍 8–10 个散点 |
 | **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
 | **19** | **weibo / pixiv / fantia 解析测试** | 证据 | 零直接测试 |
 | **20** | **`autoSync` / `platformAuth` 单元测试** | 证据 | 零测试 |
-| **21** | **规则 8 台账收敛** | 工程质量 | 8 处直连 |
-| **22** | **`AGENTS.md` 规则 9/28/30 压到 ≤8 行** | 工程质量 | 51/51/55 行 |
+| **21** | **规则 8 台账收敛** | 工程质量 | 实测 **7 处**直连（原文写 8，已过期） |
+| **22** | **`AGENTS.md` 规则 9/28/30 压到 ≤8 行** | 工程质量 | 实测 51/**49**/**53** 行 |
 | **23** | **`dashboardToolbar` 偶发未处理拒绝** | 工程质量 | ~1/8 次 |
-| **24** | **release.yml 与 CI 门禁一致性** | 工程质量 | Release 跑 `npm test`，CI 跑 `test:coverage` |
+| **24** | **release.yml 与 CI 门禁一致性** | 工程质量 | Release 跑 `npm test`，CI 跑 `test:coverage`（棘轮在发布路径不生效） |
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 
 **批次建议**（每批独立可交付、可验证）：
@@ -473,6 +473,32 @@ Twitter 标签页路径真的跑通了。
 ---
 
 #### 已完成（批次 1：状态正确性，2026-09-13）
+
+**CI 红灯根因 —— `dismissDialogs` 竞态（2026-09-13）**
+
+**现象**：40 次 run 里 8 次失败（20%），且**8/8 全部卡在同一步 `backup.export`**。
+失败信息自称 `this is the environment, not the view under test` ——正是这句话让红灯被当成噪音。
+
+**根因**：`dismissDialogs` 只探一次「现在有没有 dialog」，没有就返回。它假定
+后续 dialog 是**同步**入队的（注释原文如此），但导入路径在两者**之间**还 `await` 了
+`backupService.restore()` 与 `reloadData()`：
+
+```ts
+const replace = await dialog.confirm(...)   // ← 门禁在这里应答
+deps.settings.value = await backupService.restore(...)  // ← 异步空窗
+await deps.reloadData()                                 // ← 异步空窗
+await dialog.alert('已恢复为备份快照…')      // ← 空窗之后才入队
+```
+
+探测正好落进空窗 → 返回早 → alert 随后挂载，其 `z-50` 遮罩吞掉下一次点击
+（`mousedown=0 mouseup=0 click=0`，坐标系完全正常——所以它看起来像环境问题）。
+
+**复现**：把那段间隔拉宽到 300ms，同一台机器上
+**旧门禁 3/3 失败**（症状与 CI 逐字一致），**修好后 5/5 通过**；
+900ms 间隔也通过（说明修法不依赖某个具体数值）。
+
+**修法**：不再假设同步。`answered > 0` 之后，要求「连续 `DIALOG_SETTLE_MS` 内没有新 dialog」
+才认定突发结束，总预算 `DIALOG_SETTLE_BUDGET_MS` 封顶（规则 24：量级要显式）。
 
 **#2 SyncCoordinator** —— **已完成**。新增 `src/sync/syncCoordinator.ts`。
 
@@ -594,9 +620,11 @@ await db.postSuppressions.clear();   // 无条件
 #### 已证伪 / 不采纳（不要让下一轮再提）
 
 - **「当前 master 不是全绿，所以不能再写所有门禁通过」**——措辞不准。准确说法：
-  **HEAD 的红灯是真实状态**（以 `gh run list` 为准），但红因指向 E2E 输入注入 flake，
-  不是业务代码回归。两次红都发生在**纯文档提交**上（`c7126c7`、`5530eba` 后的那两次）。
-  门禁不可靠这件事本身已进队列（#11）。
+  **HEAD 的红灯是真实状态**（以 `gh run list` 为准），但红因是一处**门禁自身的竞态**，
+  不是业务代码回归。
+  > **2026-09-13 更正**：原文说「两次红都发生在纯文档提交上」——**实测不成立**。
+  > 40 次 run 里 8 次失败（20%），**8/8 全部卡在同一步 `backup.export`**，
+  > 提交类型（文档 / 代码）与红绿无关，那是巧合。详见「已知陷阱」。
 - **「restore-all 是没人注意的实现遗漏」**——不准确。它是 `DELETION_MODEL.md` 第 48 行
   **用户已确认的语义**（「全部恢复 → suppression 全部删除」）。真正的性质是
   **既定语义与「彻底删除」的界面承诺冲突**，所以解法是拆动作、不是改语义。
@@ -616,9 +644,15 @@ await db.postSuppressions.clear();   // 无条件
 
 - 扩展 E2E 必须带 `--enable-unsafe-extension-debugging`，否则 `Extensions.loadUnpacked`
   报 `Method not available`（规则 28）。
-- **E2E 偶发 `click=0`**：输入未送达，约 4 次跑挂 1 次；两次 CI 红灯都是它。
-  失败信息**自带归因**（"this is the environment, not the view under test"）——那正是
-  没人继续查的原因，别被它锚定（#11）。
+- **E2E 的 `mousedown=0` 不是环境问题**（2026-09-13 定位并修复）。旧笔记与失败信息都写着
+  「this is the environment, not the view under test」——**那句话是错的，也是没人继续查的原因**。
+  真因是 `dismissDialogs` 里一个**竞态**：导入路径在 `dialog.confirm(...)` 与随后的
+  `dialog.alert(...)` **之间**还 `await` 了 `restore()` 与 `reloadData()`，而这期间页面上
+  **没有任何 dialog**。旧实现只探一次，正好落在这个空窗里就返回，紧接着 alert 挂载、
+  其 `z-50` 遮罩吞掉了下一次点击（`download.export` 的按钮点击全被吃掉）。
+  本地复现方式：把那段间隔拉宽到 300ms，旧门禁 **3/3 失败**、修好后 **5/5 通过**。
+  修法：`answered > 0` 之后要求「连续 `DIALOG_SETTLE_MS` 内没有新 dialog」才认定突发结束
+  （带上限 `DIALOG_SETTLE_BUDGET_MS`），而不是假设后续 dialog 是同步入队的。
 - 导入成功路径的 `alert()` **阻塞渲染进程**，连带 `Runtime.evaluate` / `Page.enable` 永久挂起；
   须在执行动作前启用 Page 域并应答 `Page.javascriptDialogOpening`。
 - 视觉验证只开独立 profile 的专用实例，绝不驱动用户正在浏览的窗口（规则 25）。

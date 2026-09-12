@@ -657,39 +657,80 @@ async function answerDialog(target, which, cdp) {
   await clickLocated(target, locator, `dialog ${which}`, cdp);
 }
 
+/** Read the text of the dialog currently on screen, or `''` if there is none. */
+function dialogText(target) {
+  return target.eval(`(document.querySelector('[role=alertdialog]')?.textContent || '')`);
+}
+
 /**
- * Dismiss every queued dialog, until none is present.
+ * Answer dialogs until the app has stopped raising them.
  *
  * One user action can raise two in a row — importing a backup asks how to apply
- * it, and the success notice follows immediately. Leaving the second one open
- * puts its overlay over the card the next step wants to click, and the click
- * then lands on the overlay: `Input.dispatchMouseEvent` succeeds while the
- * button's own listeners never fire (measured: mousedown=0 after 5 attempts,
- * with the geometry looking perfect). That is indistinguishable from an
- * environment problem unless you know the overlay is there.
+ * it, and the success notice follows. Leaving the second one open puts its
+ * overlay over the card the next step wants to click, and the click then lands on
+ * the overlay: `Input.dispatchMouseEvent` succeeds while the button's own
+ * listeners never fire (measured: mousedown=0 after 5 attempts, with the geometry
+ * looking perfect). That is indistinguishable from an environment problem unless
+ * you know the overlay is there.
+ *
+ * The follow-up is NOT always synchronous, which is what this used to assume.
+ * The import path is
+ *
+ *     const replace = await dialog.confirm(...)     ← answered here
+ *     await backupService.restore(...)              ← async work
+ *     await deps.reloadData()                       ← async work
+ *     await dialog.alert(...)                       ← enqueued AFTER both
+ *
+ * so there is a real, non-empty window in which NO dialog exists and the next one
+ * has not been enqueued yet. A single probe in that window returned `0` while an
+ * alert was still coming, and the export click that followed was swallowed by its
+ * overlay — the CI failure this function exists to prevent, reproduced locally by
+ * widening that gap to 300ms (probe #1 read `NONE`, then the click was lost with
+ * `mousedown=0 mouseup=0 click=0`, identical to the runner).
+ *
+ * So absence is not proof the burst is over: the loop requires the app to have
+ * raised at least one dialog and then stay quiet for `SETTLE_MS`. The cost is one
+ * short wait after the last dialog; the alternative is a click that silently goes
+ * nowhere.
  */
+const DIALOG_SETTLE_MS = 1000;
+/** Overall bound on waiting for a dialog burst to finish (rule 24: keep the magnitude explicit). */
+const DIALOG_SETTLE_BUDGET_MS = 5000;
+
 async function dismissDialogs(target, cdp, max = 5) {
-  for (let i = 0; i < max; i++) {
-    const before = await target.eval(`(document.querySelector('[role=alertdialog]')?.textContent || '')`);
-    if (!before) return i;
-    await answerDialog(target, 'confirm', cdp);
-    // Wait for THIS dialog to be gone or replaced. Checking for simple absence
-    // is wrong when two dialogs are queued: the service advances to the next one
-    // synchronously, so there is no frame in which no dialog exists.
-    const progressed = await target
-      .wait('the dialog to close or change', () =>
-        target.eval(`(document.querySelector('[role=alertdialog]')?.textContent || '') !== ${JSON.stringify(before)}`),
-      )
-      .catch(() => null);
-    if (progressed === null) {
-      throw new Error(
-        `dialog did not respond to its confirm button; still showing: ${await target.eval(
-          `(document.querySelector('[role=alertdialog]')?.textContent || '').slice(0, 120)`,
-        )}`,
-      );
+  let answered = 0;
+  let quietSince = null;
+  const deadline = Date.now() + DIALOG_SETTLE_BUDGET_MS;
+  for (;;) {
+    const before = await dialogText(target);
+    if (before) {
+      if (answered >= max) return answered;
+      await answerDialog(target, 'confirm', cdp);
+      answered++;
+      quietSince = null;
+      // Wait for THIS dialog to be gone or replaced. Checking for simple absence
+      // is wrong when two dialogs are queued back to back: the service advances
+      // to the next one synchronously, so there is no frame in which none exists.
+      const progressed = await target
+        .wait('the dialog to close or change', async () => (await dialogText(target)) !== before)
+        .catch(() => null);
+      if (progressed === null) {
+        throw new Error(
+          `dialog did not respond to its confirm button; still showing: ${(await dialogText(target)).slice(0, 120)}`,
+        );
+      }
+      continue;
     }
+    // Nothing on screen. If we never answered anything, the action raised no
+    // dialog at all and there is nothing to settle.
+    if (answered === 0) return 0;
+    quietSince ??= Date.now();
+    // Quiet for a whole settle period ⇒ the burst is over.
+    if (Date.now() - quietSince >= DIALOG_SETTLE_MS) return answered;
+    // Bounded: a burst that keeps raising dialogs must not spin here forever.
+    if (Date.now() > deadline) return answered;
+    await sleep(100);
   }
-  return max;
 }
 
 // ---------------------------------------------------------------- in-page probes

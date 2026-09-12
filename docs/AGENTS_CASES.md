@@ -834,3 +834,50 @@ files」：三个代理在同一份文件里各切各的段，谁也不知道别
 
 **未覆盖（诚实记录）**：新增**模块**（如 `src/utils/timestamp.ts`）在 §4.6 的登记
 没有测试兜底——那需要一张「文件 → 小节」的映射表，比这一条的范围大，暂靠评审。
+
+---
+
+## Rule 34
+
+**34. A test harness's own failure message is a hypothesis, not a diagnosis**
+
+**事故**：GitHub CI 长期报错。实测 40 次 run 里 **8 次失败（20%）**，且 **8/8 全部卡在
+同一步 `backup.export`**（提交类型是文档还是代码与红绿无关——原先文档里「两次红都在纯文档
+提交上」的说法是巧合，已更正）。失败信息是：
+
+> Synthetic input reached nothing — **this is the environment, not the view under test.**
+
+**这句话是错的，而且写它就是把红灯变成噪音的原因。**
+
+**根因**：`e2e/release-gate.mjs` 的 `dismissDialogs` 只探一次「当前有没有 dialog」，
+没有就 `return`。它的注释把这一点写成了前提：
+
+> the service advances to the next one **synchronously**, so there is no frame in which no
+> dialog exists
+
+但导入路径在 confirm 与 alert 之间**还有两次 `await`**：
+
+```ts
+const replace = await dialog.confirm(...)               // 门禁在这里应答
+deps.settings.value = await backupService.restore(...)  // ← 无 dialog 的空窗
+await deps.reloadData()                                 // ← 仍无 dialog
+await dialog.alert('已恢复为备份快照…')                   // ← 此刻才入队
+```
+
+探测落进空窗 → 提前返回 → alert 随后挂载，其 `z-50` 遮罩吞掉下一次点击
+（`下载 JSON 备份` 的点击全部丢失）。**失败信息自带的证据其实指向遮罩
+（`mousedown=0`、坐标系完美、`hasFocus:true`、`visibility:visible`），结论却指向了环境。**
+
+**复现（这是关键）**：把那段间隔拉宽到 300ms，同一台机器上
+**旧实现 3/3 失败**（症状与 CI 逐字一致），**修好后 5/5 通过**；900ms 间隔也通过
+（说明修法不吃某个具体数值）。**先复现再修**——一个通过的单次运行不是证据。
+
+**修法**：不再假设同步。`answered > 0` 之后要求「连续 `DIALOG_SETTLE_MS` 无新 dialog」
+才认定突发结束，`DIALOG_SETTLE_BUDGET_MS` 封顶（规则 24：量级要显式）。
+
+**四个被证伪的环境假设**（全部来自那句错误的自诊断）：窗口在屏外、窗口未 map、
+重试预算太短、Xvfb 屏幕太窄。**其中一个是真缺陷**（`xvfb-run` 默认 1280x1024 比
+1440 宽的窗口还窄，`-s "-screen 0 1920x1080x24"` 该留），**但没有一个是本因**。
+
+**推广形态**：「后续动作会出现在 `await` 之后」——任何假定「后续同步出现」的
+就绪探测，在中间有异步工作的应用里都是错的。要要求**静默期**，不是单次采样。

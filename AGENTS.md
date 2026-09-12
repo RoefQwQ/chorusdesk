@@ -836,6 +836,46 @@ P0-4」，直接写了测试文件——而那批待办**明文规定要先经�
 
 ---
 
+## 34. A test harness's own failure message is a hypothesis, not a diagnosis
+
+The release gate failed ~20% of CI runs (8 of 40), always at the same step, and the failure text
+said:
+
+> Synthetic input reached nothing — **this is the environment, not the view under test.**
+
+That sentence was wrong, and writing it is why the flake survived a day and four wrong theories.
+The fault was ours: `dismissDialogs` probed once for a dialog, found none, and returned — while
+the import path *awaited* work between its confirm and its alert:
+
+```ts
+const replace = await dialog.confirm(...)               // the gate answers this
+deps.settings.value = await backupService.restore(...)  // ← the dialog-free window
+await deps.reloadData()                                 // ← still dialog-free
+await dialog.alert('已恢复为备份快照…')                   // enqueued only now
+```
+
+The probe landed in that window, the alert mounted afterwards, and its `z-50` overlay swallowed
+the next click. Perfect geometry, `hasFocus: true`, `visibility: visible`, `mousedown=0` — the
+error message's own evidence pointed *at* the overlay, and its conclusion pointed away.
+
+- **"A dialog can follow an `await`" is the general form.** Any readiness probe that assumes a
+  follow-up appears synchronously is wrong wherever the app does async work in between. Require
+  a quiet period (`answered > 0` **and** no new dialog for `DIALOG_SETTLE_MS`) rather than a
+  single sample.
+- **An assertion of "this is the environment" must be earned numerically, and retracted when
+  numbers refute it.** Four hypotheses blamed the environment (off-screen window, unmapped
+  window, short retry budget, narrow Xvfb screen); one was real (`-s "-screen 0 1920x1080x24"`
+  was worth keeping) and none was this.
+- **Reproduce before repairing.** Widening the suspected gap to 300ms made the old gate fail
+  **3/3** and the fixed gate pass **5/5** on one machine — that contrast, not a passing run, is
+  what makes the fix believable (rule 30: sample a flake more than once).
+- A harness is product code. Its comments, thresholds and error strings are deliverables, and a
+  wrong one costs more than a missing one.
+
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-34).
+
+---
+
 ## Fix queue
 
 全部 12 项 DONE 的债务台账**已移入 [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md) 文末**（`## Fix queue`）。
