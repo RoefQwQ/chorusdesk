@@ -93,9 +93,11 @@ describe('RSS post identity is scoped to the feed', () => {
     const { rssAdapter } = await import('../src/adapters/rss');
     const res = await rssAdapter.fetchLatest(channel('rss:a'), 10);
 
-    expect(res.legacyIds).toHaveLength(1);
-    expect(res.legacyIds![0]).toMatch(/^rss_/);
-    expect(res.legacyIds![0]).not.toBe(res.posts[0].id);
+    expect(res.renamedIds).toHaveLength(1);
+    expect(res.renamedIds![0].from).toMatch(/^rss_/);
+    // The pair points at the id the adapter actually produced for that item —
+    // an explicit pair, so it cannot be misaligned by a skipped item.
+    expect(res.renamedIds![0].to).toBe(res.posts[0].id);
   });
 });
 
@@ -248,7 +250,7 @@ describe('channelSync adopts renamed ids reported by the adapter', () => {
           posts: [post('rss_scoped_1')],
           totalFetched: 1,
           hasMore: false,
-          legacyIds: ['rss_legacy_1'],
+          renamedIds: [{ from: 'rss_legacy_1', to: 'rss_scoped_1' }],
         }),
       }),
     }));
@@ -307,7 +309,7 @@ describe('channelSync state preservation on the write path', () => {
           posts: [post('rss_fresh', { isRead: 0 })],
           totalFetched: 1,
           hasMore: false,
-          legacyIds: ['rss_never_existed'],
+          renamedIds: [{ from: 'rss_never_existed', to: 'rss_fresh' }],
         }),
       }),
     }));
@@ -329,7 +331,7 @@ describe('channelSync state preservation on the write path', () => {
           posts: [post('rss_new2', { isRead: 0 })],
           totalFetched: 1,
           hasMore: false,
-          legacyIds: ['rss_old2'],
+          renamedIds: [{ from: 'rss_old2', to: 'rss_new2' }],
         }),
       }),
     }));
@@ -338,5 +340,93 @@ describe('channelSync state preservation on the write path', () => {
     await updateChannel(channel('rss:a'), 10, true, { sinceTimestamp: 1 });
 
     expect((await db.posts.get('rss_new2'))?.isRead).toBe(0);
+  });
+});
+
+/**
+ * The pairing cannot mis-align, structurally.
+ *
+ * It used to be two positionally-aligned arrays (`legacyIds[i]` ↔ `posts[i]`),
+ * which is correct only while every loop iteration pushes to both in step. The
+ * consumer moves a stored row AND its suppression AND its recycle snapshot, so a
+ * shift would migrate the wrong row and carry the user's read/bookmark state and
+ * deletion record with it.
+ *
+ * These pin the property rather than the mechanism: the pair that arrives is the
+ * one the adapter computed for that item, whatever the loop did.
+ */
+describe('rename pairs are explicit, not positional', () => {
+  const twoItems = `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>t</title><link>https://example.com/</link>
+<item><title>one</title><guid>1</guid><link>https://example.com/1</link><pubDate>Wed, 10 Sep 2026 10:00:00 GMT</pubDate><description>a</description></item>
+<item><title>two</title><guid>2</guid><link>https://example.com/2</link><pubDate>Tue, 09 Sep 2026 10:00:00 GMT</pubDate><description>b</description></item>
+</channel></rss>`;
+
+  it('pairs each old id with the id of the SAME item', async () => {
+    const { renamedIds, posts } = await (async () => {
+      vi.resetModules();
+      vi.doMock('../src/infrastructure/chrome/http', () => ({
+        bgFetch: async () => ({ ok: true, status: 200, data: twoItems, truncated: false }),
+        MAX_RESPONSE_CHARS: 1_000_000,
+      }));
+      const { rssAdapter } = await import('../src/adapters/rss');
+      const res = await rssAdapter.fetchLatest(channel('rss:a'), 10);
+      return { renamedIds: res.renamedIds ?? [], posts: res.posts };
+    })();
+
+    expect(renamedIds).toHaveLength(2);
+    // Every `to` must be an id the adapter actually produced — that is the
+    // property position-pairing could break and this cannot.
+    const produced = new Set(posts.map((p) => p.id));
+    for (const pair of renamedIds) {
+      expect(produced.has(pair.to)).toBe(true);
+      expect(pair.from).not.toBe(pair.to);
+    }
+    expect(new Set(renamedIds.map((r) => r.to)).size).toBe(2);
+  });
+
+  it('the consumer uses the pair as given, not a positionally re-derived one', async () => {
+    // The property the old positional join could break: `channelSync` must move
+    // the row named by the pair. Here the pair points at a DIFFERENT id than the
+    // post the adapter returns, which a positional join would silently ignore —
+    // so this fails if the consumer re-derives instead of trusting the adapter.
+    await db.posts.put(post('rss_from_pair', { isRead: 1 }));
+    vi.resetModules();
+    vi.doMock('../src/platform/registry', () => ({
+      getAdapter: () => ({
+        platform: 'rss',
+        fetchLatest: async () => ({
+          // The returned post has one id …
+          posts: [post('rss_from_position')],
+          totalFetched: 1,
+          hasMore: false,
+          // … and the pair names another. Only a consumer that trusts the pair
+          // migrates the row that actually exists.
+          renamedIds: [{ from: 'rss_from_pair', to: 'rss_from_pair_moved' }],
+        }),
+      }),
+    }));
+    const { updateChannel } = await import('../src/sync/channelSync');
+
+    await updateChannel(channel('rss:a'), 10, true, { sinceTimestamp: 1 });
+
+    expect(await db.posts.get('rss_from_pair')).toBeUndefined();
+    expect((await db.posts.get('rss_from_pair_moved'))?.isRead).toBe(1);
+  });
+
+  it('drops an item whose id did not change from the pair list', async () => {
+    // The pair list is about renames; an unchanged id must not appear, or
+    // `channelSync` would "move" a row onto itself.
+    vi.resetModules();
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async () => ({ ok: true, status: 200, data: twoItems, truncated: false }),
+      MAX_RESPONSE_CHARS: 1_000_000,
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel('rss:a'), 10);
+
+    for (const pair of res.renamedIds ?? []) {
+      expect(pair.from).not.toBe(pair.to);
+    }
   });
 });

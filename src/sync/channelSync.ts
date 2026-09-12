@@ -421,11 +421,11 @@ async function runChannelUpdate(
         // The adapter reports the pairing because it is the only place that knows
         // both ids; this is bounded to the page it just returned, which is the
         // only honest scope (rule 16).
-        if (result.legacyIds && result.legacyIds.length > 0) {
-          pendingRenames = result.legacyIds
-            .map((from, i) => ({ from, to: result.posts[i]?.id }))
-            .filter((p): p is { from: string; to: string } =>
-              typeof p.to === 'string' && p.from !== p.to);
+        if (result.renamedIds && result.renamedIds.length > 0) {
+          // Taken as given, never re-derived by pairing against `result.posts`:
+          // the adapter knows both ids for each item, and a positional join here
+          // is what would let a skipped item migrate the wrong row.
+          pendingRenames = result.renamedIds;
           const moved = await adoptRenamedPostIds(pendingRenames);
           if (moved > 0) {
             devLog.info(

@@ -83,19 +83,19 @@ export interface FetchResult {
   /** Total raw posts returned by adapter in this batch before DB deduplication */
   totalFetched?: number;
   /**
-   * Older ids these same items were stored under, when the adapter has changed
-   * how it derives `Post.id`.
+   * Items whose `Post.id` scheme changed, as EXPLICIT old→new pairs.
    *
-   * The adapter is the only place that knows both, because the inputs (guid,
-   * channel id, fallback chain) are here and a migration re-deriving them would
-   * reimplement this file and could disagree with it. `channelSync` uses these to
-   * MOVE the stored row, its suppression and its recycle snapshot onto the new id
-   * — bounded to what the adapter just returned, which is the only honest scope
-   * (rule 16: a row outside the newest page can never acquire a counterpart).
+   * The adapter is the only place that knows both ids, because the inputs (guid,
+   * channel id, fallback chain) live there and a migration re-deriving them would
+   * reimplement it and could disagree. `channelSync` uses these to MOVE the
+   * stored row, its suppression and its recycle snapshot onto the new id —
+   * bounded to what the adapter just returned, the only honest scope (rule 16).
    *
-   * Empty or absent when nothing changed.
+   * Pairs, not two positionally-aligned arrays: the consumer acts destructively
+   * (it moves rows and their deletion records), so a shifted index would migrate
+   * the WRONG row. An array of pairs cannot shift.
    */
-  legacyIds?: string[];
+  renamedIds?: Array<{ from: string; to: string }>;
   /**
    * Set when the adapter returned content, but at least one of its sources
    * failed — the result is real but incomplete.

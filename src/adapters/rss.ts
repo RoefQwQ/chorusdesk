@@ -226,17 +226,21 @@ export const rssAdapter: PlatformAdapter = {
 
       const posts: Post[] = [];
       /**
-       * Ids these items had under the pre-scope scheme (`rss_${hash(guid)}`).
+       * Ids these items had under the pre-scope scheme (`rss_${hash(guid)}`),
+       * paired with the id they have now.
        *
-       * Returned so `channelSync` can move the STORED rows onto the scoped ids
-       * for exactly the items the adapter just returned — the only bound that is
-       * honest (rule 16): a row outside the newest page can never acquire a
-       * counterpart, and a migration deriving the new id itself would have to
-       * reimplement the guid fallback chain and could disagree with this file.
-       * Here both ids come from the same `guid` in the same loop, so they cannot
-       * drift.
+       * Explicit pairs rather than two parallel arrays indexed by position.
+       * Position-pairing is correct only while every loop iteration pushes to
+       * both, in step — a property nothing enforces, and one whose violation is
+       * silent and destructive: `channelSync` moves a stored row, its
+       * suppression and its recycle snapshot from `from` to `to`, so a shifted
+       * pair migrates the WRONG row and takes the user's read/bookmark state
+       * and deletion record with it. A pair cannot shift.
+       *
+       * Returned so `channelSync` can move the stored rows for exactly the items
+       * the adapter just returned — the only boundary that is honest (rule 16).
        */
-      const legacyIds: string[] = [];
+      const renamedIds: Array<{ from: string; to: string }> = [];
 
       for (const item of items.slice(0, limit)) {
         const title = item.querySelector('title')?.textContent || '无标题动态';
@@ -333,8 +337,7 @@ export const rssAdapter: PlatformAdapter = {
 
         const legacyId = `rss_${stableHash(guid)}`;
         const scopedId = `rss_${stableHash(`${channel.id}\u0000${guid}`)}`;
-        if (legacyId !== scopedId) legacyIds.push(legacyId);
-        posts.push(buildPost(channel, {
+        const built = buildPost(channel, {
           // Scoped to THIS feed, not just to the item's own guid.
           //
           // `<guid>` is required to be unique *within one feed* and nothing more
@@ -359,12 +362,16 @@ export const rssAdapter: PlatformAdapter = {
           mediaList,
           originalUrl: link,
           publishedAt,
-        }));
+        });
+        // The pair is recorded here, from the ids this very iteration computed —
+        // so it cannot drift from the post it describes.
+        if (legacyId !== built.id) renamedIds.push({ from: legacyId, to: built.id });
+        posts.push(built);
       }
 
       return {
         posts,
-        legacyIds,
+        renamedIds,
         authorMeta: {
           name: channelTitle,
         },
