@@ -14,8 +14,6 @@ import { handleProxyImage } from '../src/infrastructure/chrome/messages/proxyIma
  * http(s) host may be fetched, and only a platform host may carry the session.
  */
 
-const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-
 interface FetchCall {
   url: string;
   headers: Record<string, string>;
@@ -24,20 +22,46 @@ interface FetchCall {
 
 let calls: FetchCall[];
 
+/** What every candidate URL answers with, until a test overrides it. */
+let served: { contentType: string; bytes: Uint8Array } = {
+  contentType: 'image/png',
+  bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+};
+
+/** A `Response`-ish object that streams, like the real one does. */
+function responseWith(bytes: Uint8Array, contentType: string): unknown {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => contentType },
+    arrayBuffer: async () => bytes.buffer,
+    body: {
+      getReader() {
+        let sent = false;
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: bytes };
+          },
+          async cancel() {},
+          releaseLock() {},
+        };
+      },
+    },
+  };
+}
+
 function installFetch(): void {
   calls = [];
+  served = { contentType: 'image/png', bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) };
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     calls.push({
       url,
       headers: (init.headers ?? {}) as Record<string, string>,
       credentials: init.credentials,
     });
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => 'image/png' },
-      arrayBuffer: async () => PNG_BYTES.buffer,
-    };
+    return responseWith(served.bytes, served.contentType);
   });
 }
 
@@ -133,5 +157,62 @@ describe('handleProxyImage — platform hosts keep their session', () => {
     await run('https://xhscdn.com.attacker.tld/x.png');
 
     expect(calls[0].credentials).toBe('omit');
+  });
+});
+
+/**
+ * Resource ceilings.
+ *
+ * The proxy had none: it read the body with `arrayBuffer()`, copied it into a
+ * `Uint8Array`, built a JS binary string, base64-encoded that (~1.37×), and sent
+ * it across the runtime message channel — five live representations of one
+ * response, each larger than the last. `BG_FETCH` got a ceiling for this reason;
+ * this path was missed, and its host is the less trusted of the two (any http(s)
+ * host by design, AGENTS rule 3).
+ */
+describe('handleProxyImage — resource ceilings', () => {
+  it('refuses a body that is not an image', async () => {
+    // Measured on the same session as the transport-truncation bug: an image URL
+    // answered `text/html` (a site root), and the proxy base64'd the whole page
+    // into a data URL that could never render as an `<img>`.
+    installFetch();
+    served = { contentType: 'text/html; charset=utf-8', bytes: new TextEncoder().encode('<!doctype html><html>') };
+
+    const res = await run('https://example.com/not-really-an-image');
+
+    expect(res.ok).toBe(false);
+    expect(String(res.error)).toContain('不是图片');
+  });
+
+  it('accepts any image/* subtype, including svg', async () => {
+    // The request already asks for `image/svg+xml`, and an `<img>` data URL has
+    // no scripting context, so the usual SVG hazard does not apply here.
+    for (const type of ['image/webp', 'image/avif', 'image/svg+xml']) {
+      installFetch();
+      served = { contentType: type, bytes: new Uint8Array([1, 2, 3]) };
+      const res = await run('https://example.com/pic');
+      expect(res.ok, type).toBe(true);
+    }
+  });
+
+  it('refuses an oversized body instead of encoding it', async () => {
+    installFetch();
+    served = { contentType: 'image/png', bytes: new Uint8Array(9 * 1024 * 1024) };
+
+    const res = await run('https://example.com/huge.png');
+
+    expect(res.ok).toBe(false);
+    expect(String(res.error)).toContain('上限');
+  });
+
+  it('still serves a large-but-legal image', async () => {
+    // The complement: a ceiling that rejects ordinary images is worse than none.
+    installFetch();
+    served = { contentType: 'image/png', bytes: new Uint8Array(2 * 1024 * 1024) };
+
+    const res = await run('https://example.com/big-but-fine.png');
+
+    expect(res.ok).toBe(true);
+    expect(String(res.dataUrl)).toMatch(/^data:image\/png;base64,/);
   });
 });

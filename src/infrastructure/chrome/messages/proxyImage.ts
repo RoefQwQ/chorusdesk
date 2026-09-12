@@ -1,4 +1,5 @@
 import { toSecureMediaUrl } from '../../../utils/media';
+import { devLog } from '../../../utils/devLog';
 import { errorMessage } from '../../../utils/errorMessage';
 import { hostMatches, isPlatformHost, parseFetchableUrl, resolveMediaReferer } from './hosts';
 
@@ -20,6 +21,87 @@ type SendResponse = (response?: unknown) => void;
 
 
 /**
+ * Ceilings for the image proxy.
+ *
+ * `PROXY_IMAGE` had none: it read the whole body with `arrayBuffer()`, copied it
+ * into a `Uint8Array`, built a JS binary string, base64-encoded that, and sent
+ * the result across the runtime message channel — so one response was held in
+ * FIVE representations at once, and every one of them is bigger than the last
+ * (base64 alone is ~1.37×). A single oversized or hostile response could stall
+ * the worker that every platform's sync also runs in.
+ *
+ * `BG_FETCH` was given a ceiling for exactly this reason; this path was missed.
+ * The host is far less trusted here too: the proxy fetches *any* http(s) host by
+ * design (AGENTS rule 3 — a feed hosts its images wherever it likes).
+ */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The proxy only ever serves images, so anything else is a refusal, not a
+ * download. The request already ASKED for images (`Accept: image/…`); this is the
+ * server's answer being checked against it — measured motivation, from the same
+ * session that produced the `bgFetch` truncation bug: a URL used as an image
+ * returned `text/html` (a site root, 250 000 characters) and the proxy base64'd
+ * the whole page into a data URL that could never render as an `<img>`.
+ *
+ * `image/svg+xml` is deliberately allowed through the MIME check — the adapter
+ * already requests it, and an `<img src="data:image/svg+xml;base64,…">` cannot
+ * execute script in the page (no scripting context), so the usual SVG hazard does
+ * not apply on this path.
+ */
+function isImageMime(contentType: string): boolean {
+  const mime = (contentType.split(';')[0] || '').trim().toLowerCase();
+  return mime.startsWith('image/');
+}
+
+/**
+ * Read at most `MAX_IMAGE_BYTES`, reporting whether the body was cut.
+ *
+ * Streams rather than `arrayBuffer()` so an oversized response is never
+ * materialized: the point is to not pay for the bytes, not merely to discard them
+ * afterwards.
+ */
+async function readImageCapped(res: Response): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const whole = new Uint8Array(await res.arrayBuffer());
+    return whole.length > MAX_IMAGE_BYTES
+      ? { bytes: whole.slice(0, MAX_IMAGE_BYTES), truncated: true }
+      : { bytes: whole, truncated: false };
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.length;
+      if (total > MAX_IMAGE_BYTES) {
+        truncated = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  const bytes = new Uint8Array(total > MAX_IMAGE_BYTES ? MAX_IMAGE_BYTES : total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    if (offset + chunk.length > bytes.length) {
+      bytes.set(chunk.subarray(0, bytes.length - offset), offset);
+      break;
+    }
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { bytes, truncated };
+}
+
+/**
  * Handles PROXY_IMAGE messages: fetches the requested image through the
  * extension's host permissions, applying the per-platform Referer header and
  * authenticated cookies (XHS), then converts the body into a base64 data URL.
@@ -28,6 +110,8 @@ type SendResponse = (response?: unknown) => void;
  *  - `{ ok: true, dataUrl }` on success
  *  - `{ ok: false, error }` for invalid URLs / unexpected failures
  *  - `{ ok: false, status, error }` when every candidate URL was rejected
+ *  - `{ ok: false, error }` naming the ceiling when the body was not an image or
+ *    was too large to be one
  *
  * Returns `true` so the runtime message channel stays open until the async
  * sendResponse fires — callers MUST return this value from the listener.
@@ -131,9 +215,40 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
         return;
       }
 
-      const arrayBuffer = await res.arrayBuffer();
-      const mimeType = res.headers.get('content-type') || 'image/jpeg';
-      const bytes = new Uint8Array(arrayBuffer);
+      // Enforce both ceilings BEFORE reading the body: a response that is not an
+      // image, or is larger than any image should be, is refused rather than
+      // downloaded and then discarded.
+      const contentType = res.headers.get('content-type') || '';
+      if (!isImageMime(contentType)) {
+        devLog.warn(
+          'proxyImage',
+          `${target.hostname} 返回的不是图片`,
+          `Content-Type: ${contentType || '（缺失）'}；已拒绝，避免把整页内容编码进 data URL`,
+        );
+        sendResponse({
+          ok: false,
+          status: res.status,
+          error: `该地址返回的不是图片（${contentType || '无 Content-Type'}）`,
+        });
+        return;
+      }
+
+      const { bytes, truncated } = await readImageCapped(res);
+      if (truncated) {
+        devLog.warn(
+          'proxyImage',
+          `${target.hostname} 图片超过上限`,
+          `已超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，已截断并放弃`,
+        );
+        sendResponse({
+          ok: false,
+          status: res.status,
+          error: `图片超过上限（${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB）`,
+        });
+        return;
+      }
+
+      const mimeType = contentType.split(';')[0] || 'image/jpeg';
       let binary = '';
       const chunkSize = 8192;
       for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -144,7 +259,10 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
 
       sendResponse({ ok: true, dataUrl });
     } catch (err: unknown) {
-      console.error('[Background] PROXY_IMAGE error:', err);
+      // The Developer Log panel is the surface a user can actually send us
+      // (rules 11/20); a console line is invisible to it. Same defect class as
+      // the adapters' console-only diagnostics.
+      devLog.error('proxyImage', '图片代理异常', errorMessage(err, 'Proxy image error'));
       sendResponse({ ok: false, error: errorMessage(err, 'Proxy image error') });
     }
   })();
