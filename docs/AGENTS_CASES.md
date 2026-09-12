@@ -6,7 +6,7 @@
 >
 > 规则编号与 `AGENTS.md` 一一对应且保持稳定。未出现在本文件中的规则（1–15、20、22、25）
 > 本身已足够短，未做拆分——不要因为本文件里没有它们就认为它们的约束更弱。
-> 规则 32 与其它条目不同：它自 2026-09-12 起直接在本文件附案例（见文末 Rule 32），
+> 规则 32、33 与其它条目不同：它们自 2026-09-12 起直接在本文件附案例（见文末 Rule 32 / Rule 33），
 > 案例与规则同批写入，非拆分产物。
 >
 > 拆分动机：`AGENTS.md` 会在每个会话被自动加载，规则必须可扫描；「我们怎么知道的」属于证据。
@@ -765,3 +765,35 @@ not require four agents to find.
 11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
 12. CI (`.github/workflows/ci.yml`): typecheck + lint + 测试 + build；`typescript` 固定 7.0.2；ESLint flat config（`eslint.config.js`，TS6 兼容别名）；`vue-tsc` 加入使 typecheck 覆盖 `.vue`，`vueCompilerOptions.strictTemplates` 于 2026-09-11 启用（否则模板里未导入的组件对门禁不可见，见规则 27）；`release.yml` + 标签/版本校验；`jsdom` 用于 RSS 解析/净化测试（需要真实 `DOMParser`）。
     > 注（2026-09-12）：CI 现跑 `test:coverage`（核心模块覆盖率棘轮）与真机 E2E 门禁；测试数与文件数不写死。
+
+## Rule 33
+
+**33. 改了公开契约，同一提交内改文档 — 这条有测试兜底**
+
+**事故**：2026-09-12 的删除域改造（`431cbfc`）在 `src/types/index.ts` 加了
+`KnownPlatform`、`isKnownPlatform`、`KNOWN_PLATFORMS`、`NameSource`，改了 `Platform` 的定义；
+在 `src/adapters/types.ts` 加了 `FetchOptions.signal`、`FetchResult.degraded`/`warnings`、
+`FetchErrorCode` 的 `storage` 成员。**`docs/ARCHITECTURE.md` §4.1/§4.2 一个字都没改。**
+
+**为什么没人发现**：`ARCHITECTURE.md` §4 自称「当前事实与契约」，但**没有任何测试读它**。
+主机白名单那条规则有 `tests/hosts.singleSource.test.ts` 钉着，文档这条没有——于是它只是一句
+靠记性的愿望。发现方式是**事后人工对读两边**（用户起疑 → 用 git 时间戳判哪边陈旧），
+不是任何自动信号。
+
+**同类发现（同一次对读）**：`ARCHITECTURE.md` §4.1 还列着已删除的 `DeletedPostRecord`；
+`clearStaleUpdatingStatus` 与 `__END__` 哨兵的归属文件写错（各自搬到 `channelRepository` /
+`cursorState` 后未更新）；§8.1 还写「版本 1–5」（已到 v6）；`DEVELOPMENT.md` 步骤 4 仍在
+禁止修改一个**早已删除**的 rss 回退；`AGENTS.md` 规则 9 仍在要求把占位前缀加进
+**已被删除**的两份手写清单。**全部是「代码搬走了，文档留在原地」。**
+
+**根因**：文档更新依赖「我记得」。而这个仓库已经反复证明，靠记性维持的一致性会失效
+（规则 32 是同一类：规则读过 ≠ 规则在注意力里）。
+
+**对策**：把可机器判定的那一半写成测试。`tests/architecture.typeContract.test.ts` 读
+`src/types/index.ts` 与 `src/adapters/types.ts` 的导出符号，在 §4.1 / §4.2 正文里找名字，
+缺谁点名谁。加一个导出＝加一段说明，这是刻意的成本。
+**变异验证**：往任一文件追加一个未记载的 `export type`，测试立即失败并列出符号名；
+删掉还原后全绿。**它只查名字在不在，不查文笔。**
+
+**未覆盖（诚实记录）**：新增**模块**（如 `src/utils/timestamp.ts`）在 §4.6 的登记
+没有测试兜底——那需要一张「文件 → 小节」的映射表，比这一条的范围大，暂靠评审。

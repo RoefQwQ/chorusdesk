@@ -131,11 +131,19 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 ### 4.1 类型契约 `src/types/index.ts`
 
+> **改这里就必须改这一节，同一提交内。** 不是靠记性：`tests/architecture.typeContract.test.ts`
+> 逐个读本文件的导出符号，漏一个即门禁红（报错会点名缺的是哪个）。§4.2 同理。
+
 - `KnownPlatform` / `Platform`：**封闭集与可存储值分开**。`KnownPlatform` 是本扩展**实际提供适配器**的 9 个平台（`bilibili | youtube | twitter | pixiv | fantia | xiaohongshu | weibo | douyin | rss`），`Platform = KnownPlatform | (string & {})` 额外容纳历史/已移除平台的键（如 Withny 的行仍在库里，`getAdapter` 对它返回 `undefined`）。分开的原因：`(string & {})` 让 `switch`/`Record` 永远无法证明穷尽，所以**关于本扩展行为的决策用 `KnownPlatform`**（`ADAPTER_MAP` 即以它为键，漏一个成员即编译报错），**存储与容错用 `Platform`**。
 - `isKnownPlatform(platform)`：类型守卫，把 `Platform` 收窄为 `KnownPlatform`；`getAdapter` 用它而非 `as` 断言——守卫即断言，写在代码里而不是注释里。
 - `KNOWN_PLATFORMS`：`KnownPlatform` 的运行时可枚举镜像（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）。**顺序无语义**——唯一消费方是 `isKnownPlatform` 的成员判断与守卫测试的双射断言；UI 的平台展示顺序来自 `PLATFORM_REGISTRY` 的键序，不要引用这里的顺序。
 - `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记（另见 `DEVELOPMENT.md` §3 的完整接入清单：三处类型改动缺一不可）。
 - `NameSource = 'generated' | 'platform' | 'user'`：`Creator.name` / `Channel.displayName` 的**来源**。同步层只允许覆盖**自己生成的**名字（`generated`）；用户改过的（`user`）与已由平台给出的（`platform`）不动。字段**缺失**＝`nameSource` 引入前写入的旧行，此时同步层退回一次字符串形状判断，命中后写入并盖上 `platform`，此后不再走那条路径。这取代了此前两份手写的前缀清单（见 `src/utils/urlParser.ts` 的 `GENERATED_NAME_PREFIXES` 与 AGENTS 规则 9）。
+- `AccountRole = 'main' | 'sub' | 'alt' | 'custom'` 与它的四个映射，**必须一起改**：
+  - `ACCOUNT_ROLE_ORDER`：**顺序即语义**——筛选行排列、「最高优先角色」判定与排序权重都读它，不是展示细节；
+  - `ACCOUNT_ROLE_LABELS`（长式，账号行/徽章）、`ACCOUNT_ROLE_SHORT_LABELS`（筛选胶囊/选择器，须与 `AddCreatorModal` 的四个选项一致）；
+  - `ACCOUNT_ROLE_BADGE_CLASS`（徽章配色，含 `.dark` 变体）。
+  新增一个角色要同时动这四处；漏掉 `ORDER` 会让新角色永远排在最后并被判为最低优先。
 - 实体：
   - `Creator { id, name, nameSource?, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
   - `Channel { id, creatorId, platform, accountId, displayName, nameSource?, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。
@@ -166,6 +174,8 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 ### 4.2 平台层 `src/platform/registry.ts` 与 `src/adapters/`
 
 Adapter 契约（`src/adapters/types.ts`）：
+
+> 同 §4.1：本文件的导出符号由 `tests/architecture.typeContract.test.ts` 逐个核对，漏一个即红。
 
 ```ts
 export interface FetchOptions {
@@ -227,6 +237,8 @@ export interface PlatformAdapter {
 ```
 
 两个能力字段都是「平台知识随平台走」（AGENTS 规则 8）的形状：`minRequestIntervalMs` 由 `sync/batchSync.ts` 与 `sync/rateLimit.ts` 以 `Math.max(用户配置, 平台下限)` 合并——**覆盖可以抬高下限，永不能压低**；`archivesMedia` 由 `services/imageCache` 在写入前读取。
+
+`fetchError(code, message)`：`FetchError` 的**唯一构造入口**（adapter 一律用它，不要手写字面量）——把「错误对象长这样」收在一处，改形状时不必搜全仓。
 
 `src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；模块只导出一个函数 `getAdapter(platform)`，找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）。没有运行时注册入口——新增平台就是在 `ADAPTER_MAP` 里加一行。
 

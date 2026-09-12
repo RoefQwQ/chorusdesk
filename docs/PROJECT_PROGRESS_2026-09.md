@@ -528,7 +528,7 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
 - **门禁全绿**：`npm run typecheck`（tsc + vue-tsc strictTemplates）、`npm run lint`、
   `npm test`、`npm run test:coverage`（核心模块阈值）、`npm run build`、`npm run e2e`（真机 17 项）。
   **具体测试数不写死**（每次提交都变，运行即得；2026-09-12 为 651 通过 / 6 跳过 / 64 文件）。
-- **读序**：`AGENTS.md`（32 条规则 + Non-goals，**必读**）→ `docs/ARCHITECTURE.md`（当前事实
+- **读序**：`AGENTS.md`（33 条规则 + Non-goals，**必读**）→ `docs/ARCHITECTURE.md`（当前事实
   与契约）→ 本文件「现状速览」→ 本节。`docs/DEVELOPMENT.md` 是改动流程手册。
 - **历史材料**：`docs/DOUYIN_RESEARCH_2026-09.md`（抖音为何不能走 API）、
   `docs/PHASE_REPORT_2026-09.md`、`docs/REVIEW_2026-09.md`。

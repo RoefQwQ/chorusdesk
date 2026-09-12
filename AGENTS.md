@@ -815,6 +815,27 @@ P0-4」，直接写了测试文件——而那批待办**明文规定要先经�
 
 ---
 
+## 33. 改了公开契约，同一提交内改文档 — 这条有测试兜底
+
+`docs/ARCHITECTURE.md` §4 自称「当前事实与契约」。**改动 `src/types/index.ts` 或
+`src/adapters/types.ts` 的导出符号，必须在同一提交内更新对应小节（§4.1 / §4.2）。**
+
+- **不要分两次。**「先改代码，回头补文档」的「回头」不会发生——2026-09-12 的删除域改造
+  加了 `KnownPlatform`、`isKnownPlatform`、`KNOWN_PLATFORMS`、`NameSource`、
+  `FetchResult.degraded`、`storage` 错误码，§4.1/§4.2 一条都没写；**当时没有任何东西会红**，
+  是后来人工对读两边才发现的。
+- **兜底是 `tests/architecture.typeContract.test.ts`**：它逐个读那两个文件的导出符号，
+  在对应小节里找名字，缺谁就点名谁。加一个导出=加一段说明，这就是刻意的成本。
+- 它只查「名字在不在」，不查文笔好坏——文笔归评审。**能机器守住的只有名字。**
+- 同理适用于新增**模块**：`src/utils/timestamp.ts` 这类新文件要在 §4.6 等对应小节登记；
+  （这一条暂无测试，靠评审，见 `AUDIT_2026-09-12.md` 的 P2-17 记录。）
+
+> 为什么写成测试而不是又一条散文规则：本仓库已经把「主机白名单必须单一来源」这类规则
+> 落在 `tests/hosts.singleSource.test.ts` 上。文档与接口对不上原本**没有任何失败信号**，
+> 于是只能等人犯错、等人发现。可执行的规则才留痕。
+
+---
+
 ## Fix queue
 
 全部 12 项 DONE 的债务台账**已移入 [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md) 文末**（`## Fix queue`）。
