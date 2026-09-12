@@ -3,6 +3,7 @@ import type { FetchOptions, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { db } from '../infrastructure/db/database';
 import { updateChannel, isStorageFailure } from './channelSync';
+import { waitForPlatformTurn } from './syncCoordinator';
 import {
   clearRateLimit,
   formatCooldown,
@@ -73,14 +74,13 @@ export async function batchUpdateChannelsInterleaved(
   const cooldowns = await readCooldowns();
 
   /**
-   * When the previous request on this platform *finished*.
-   *
-   * Deliberately not when it started: the interval is meant to be a gap between
-   * requests, and a platform whose request takes longer than the interval
-   * consumed its own spacing, so the next one followed with no delay at all.
-   * That is what let three Douyin page loads fire back to back.
+   * Platform spacing now comes from `syncCoordinator`, which is shared by every
+   * entry point. The local `platformLastFinished` map that used to live here was
+   * per-CALL, so two batches running concurrently each believed the platform had
+   * never been contacted and both fired immediately — defeating the floor exactly
+   * when the platform was about to receive the most requests. `updateChannel`
+   * records the finish timestamp on every path, including failure.
    */
-  const platformLastFinished: Record<string, number> = {};
 
   let successful = 0;
   let degraded = 0;
@@ -112,10 +112,7 @@ export async function batchUpdateChannelsInterleaved(
     // floor — defeating the per-platform value exactly where it matters most. The
     // platform floor is a minimum, so a caller can only raise it.
     const gap = Math.max(overrideInterval ?? 0, platformMinInterval(ch.platform));
-    const elapsed = Date.now() - (platformLastFinished[ch.platform] || 0);
-    if (elapsed < gap) {
-      await new Promise((r) => setTimeout(r, gap - elapsed));
-    }
+    await waitForPlatformTurn(ch.platform, gap);
 
     try {
       const res = await updateChannel(ch, limit, true, options);
@@ -149,10 +146,6 @@ export async function batchUpdateChannelsInterleaved(
         posts: [],
         error: fetchError(isStorageFailure(e) ? 'storage' : 'network', errorMessage(e)),
       });
-    } finally {
-      // Recorded on every path, including failure: a failed request still hit the
-      // platform, and the spacing that follows must account for it.
-      platformLastFinished[ch.platform] = Date.now();
     }
   }
 
@@ -171,7 +164,6 @@ export async function updateCreator(
   const results: FetchResult[] = [];
   const interleaved = interleaveChannelsByPlatform(channels);
   const cooldowns = await readCooldowns();
-  const platformLastFinished: Record<string, number> = {};
 
   for (const ch of interleaved) {
     // Same two guards as the batch path: a cool-down is absolute, and the
@@ -190,11 +182,7 @@ export async function updateCreator(
       continue;
     }
 
-    const gap = platformMinInterval(ch.platform);
-    const elapsed = Date.now() - (platformLastFinished[ch.platform] || 0);
-    if (elapsed < gap) {
-      await new Promise((r) => setTimeout(r, gap - elapsed));
-    }
+    await waitForPlatformTurn(ch.platform, platformMinInterval(ch.platform));
 
     try {
       const res = await updateChannel(ch, limit, true, options);
@@ -205,8 +193,10 @@ export async function updateCreator(
         await clearRateLimit(ch.platform);
       }
       results.push(res);
-    } finally {
-      platformLastFinished[ch.platform] = Date.now();
+    } catch (e: unknown) {
+      // Same domain split as the batch path (AUDIT P1-1): a local storage error
+      // must not be reported as a platform failure.
+      results.push({ posts: [], error: fetchError(isStorageFailure(e) ? 'storage' : 'network', errorMessage(e)) });
     }
   }
   return results;

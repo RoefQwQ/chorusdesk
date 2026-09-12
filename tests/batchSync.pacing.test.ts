@@ -47,10 +47,18 @@ vi.mock('../src/infrastructure/db/database', () => ({
 
 vi.mock('../src/sync/channelSync', () => ({
   updateChannel: async (channel: Channel): Promise<FetchResult> => {
+    // Imported lazily: `vi.mock` is hoisted above the imports, so a top-level
+    // binding would not exist yet.
+    const { notePlatformFinished } = await import('../src/sync/syncCoordinator');
     const startedAt = Date.now();
     await new Promise((resolve) => setTimeout(resolve, requestDurationMs));
     const finishedAt = Date.now();
     requests.push({ platform: channel.platform, channelId: channel.id, startedAt, finishedAt });
+    // The real `updateChannel` records this on every path, including failure, and
+    // the batch loop's pacing reads it through `syncCoordinator`. The mock must do
+    // the same or it removes the very state the contract is about — omitting it
+    // made every measured gap 0.
+    notePlatformFinished(channel.platform, finishedAt);
     return results.get(channel.id) ?? { posts: [] };
   },
 }));
@@ -58,6 +66,7 @@ vi.mock('../src/sync/channelSync', () => ({
 import { batchUpdateChannelsInterleaved } from '../src/sync/batchSync';
 import { fetchError } from '../src/adapters/types';
 import { RATE_LIMIT_BASE_MS, platformMinInterval } from '../src/sync/rateLimit';
+import { resetSyncCoordinator } from '../src/sync/syncCoordinator';
 
 function channel(id: string, platform: string): Channel {
   return {
@@ -74,6 +83,9 @@ function channel(id: string, platform: string): Channel {
 beforeEach(() => {
   settings.clear();
   requests = [];
+  // Pacing state is now shared across entry points, so it must not leak between
+  // cases — otherwise every test after the first starts with a warm timestamp.
+  resetSyncCoordinator();
   requestDurationMs = 0;
   results = new Map();
 });

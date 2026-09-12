@@ -206,6 +206,79 @@ export async function permanentlyDeletePost(id: string): Promise<void> {
   await db.recycleSnapshots.delete(id);
 }
 
+/**
+ * Move stored rows whose `Post.id` scheme changed onto the ids the adapter now
+ * produces, preserving everything the user can see or has decided.
+ *
+ * The adapter supplies pairs of (new id, the id this item WOULD have had under
+ * the old scheme) for the items it just returned, so this never has to
+ * reimplement the adapter's identity derivation — the one thing a Dexie
+ * migration cannot do correctly, because the inputs (a feed's guid fallback
+ * chain) live in the adapter and would drift.
+ *
+ * Bounded to the page the adapter returned, deliberately (rule 16): a row
+ * outside that window can never acquire a counterpart, so it is left alone —
+ * stale but intact — rather than guessed at.
+ *
+ * State that must survive the move, because losing either is invisible:
+ *  - `isRead` / `isBookmarked` (the row is the user's only copy of them);
+ *  - the suppression and recycle snapshot, which are keyed by `postId`. A
+ *    deletion whose suppression stayed on the old id would be silently lifted —
+ *    the exact failure the deletion model exists to prevent (I2/I9).
+ */
+export async function adoptRenamedPostIds(
+  pairs: ReadonlyArray<{ from: string; to: string }>,
+): Promise<number> {
+  if (pairs.length === 0) return 0;
+  return db.transaction(
+    'rw',
+    [db.posts, db.postSuppressions, db.recycleSnapshots],
+    async () => {
+      let moved = 0;
+      for (const { from, to } of pairs) {
+        if (from === to) continue;
+        const existing = await db.posts.get(from);
+        // Only move when the OLD row is what is stored. If the new id already
+        // exists, the row was written under it (a fresh sync) and there is
+        // nothing to adopt; if neither exists, there is nothing to move.
+        if (!existing) continue;
+        const target = await db.posts.get(to);
+        if (target) {
+          // Both present: keep the new row (it came from this very sync) and
+          // drop the stale one, but carry the user state across first.
+          await db.posts.put({
+            ...target,
+            isRead: target.isRead || existing.isRead ? 1 : 0,
+            isBookmarked: target.isBookmarked || existing.isBookmarked ? 1 : 0,
+          });
+          await db.posts.delete(from);
+        } else {
+          await db.posts.put({ ...existing, id: to });
+          await db.posts.delete(from);
+        }
+        moved++;
+
+        const suppression = await db.postSuppressions.get(from);
+        if (suppression) {
+          await db.postSuppressions.put({ ...suppression, postId: to });
+          await db.postSuppressions.delete(from);
+        }
+        const snapshot = await db.recycleSnapshots.get(from);
+        if (snapshot) {
+          const snapshotPost = snapshot.postData;
+          await db.recycleSnapshots.put({
+            ...snapshot,
+            id: to,
+            postData: snapshotPost ? { ...snapshotPost, id: to } : snapshotPost,
+          });
+          await db.recycleSnapshots.delete(from);
+        }
+      }
+      return moved;
+    },
+  );
+}
+
 /** Get count of recycle-bin snapshots. */
 export async function getDeletedPostCount(): Promise<number> {
   try {

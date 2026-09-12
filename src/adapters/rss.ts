@@ -225,6 +225,18 @@ export const rssAdapter: PlatformAdapter = {
         : Array.from(parsed.querySelectorAll('channel > item'));
 
       const posts: Post[] = [];
+      /**
+       * Ids these items had under the pre-scope scheme (`rss_${hash(guid)}`).
+       *
+       * Returned so `channelSync` can move the STORED rows onto the scoped ids
+       * for exactly the items the adapter just returned — the only bound that is
+       * honest (rule 16): a row outside the newest page can never acquire a
+       * counterpart, and a migration deriving the new id itself would have to
+       * reimplement the guid fallback chain and could disagree with this file.
+       * Here both ids come from the same `guid` in the same loop, so they cannot
+       * drift.
+       */
+      const legacyIds: string[] = [];
 
       for (const item of items.slice(0, limit)) {
         const title = item.querySelector('title')?.textContent || '无标题动态';
@@ -319,8 +331,23 @@ export const rssAdapter: PlatformAdapter = {
           }
         });
 
+        const legacyId = `rss_${stableHash(guid)}`;
+        const scopedId = `rss_${stableHash(`${channel.id}\u0000${guid}`)}`;
+        if (legacyId !== scopedId) legacyIds.push(legacyId);
         posts.push(buildPost(channel, {
-          id: `rss_${stableHash(guid)}`,
+          // Scoped to THIS feed, not just to the item's own guid.
+          //
+          // `<guid>` is required to be unique *within one feed* and nothing more
+          // — the spec leaves the syntax entirely to the publisher (RSS 2.0
+          // §itemGuid). Two unrelated feeds both emitting `<guid>1</guid>` is
+          // therefore conformant, and this project treated the hash of that
+          // string as a GLOBAL primary key: the two items collapsed into one
+          // Post, and — worse — suppressing one (「彻底删除」) hid the other,
+          // because `postSuppressions.postId` is keyed the same way.
+          //
+          // Identity is `(feed, item)`, which is what the value actually means.
+          // The `rss_` prefix is kept so the id shape stays recognisable.
+          id: scopedId,
           channelLabel: channel.label,
           title,
           // RSS is the one platform whose body is prose the user is meant to
@@ -337,6 +364,7 @@ export const rssAdapter: PlatformAdapter = {
 
       return {
         posts,
+        legacyIds,
         authorMeta: {
           name: channelTitle,
         },

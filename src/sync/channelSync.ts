@@ -3,9 +3,10 @@ import type { Creator, Channel, Post } from '../types';
 import type { FetchError, FetchOptions, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
+import { isChannelRunning, notePlatformFinished, withChannelRun } from './syncCoordinator';
 import { GENERATED_NAME_PREFIXES } from '../utils/urlParser';
 import { db } from '../infrastructure/db/database';
-import { getSuppressedPostIds, clearSuppressions } from '../infrastructure/db/postRepository';
+import { adoptRenamedPostIds, getSuppressedPostIds, clearSuppressions } from '../infrastructure/db/postRepository';
 import { devLog } from '../utils/devLog';
 import { toEpochMsOr } from '../utils/timestamp';
 import {
@@ -15,6 +16,39 @@ import {
 } from './cursorState';
 
 class FetchTimeoutError extends Error {}
+
+/**
+ * Abort when EITHER signal aborts.
+ *
+ * `AbortSignal.any` is the platform's own answer (Chrome 116+, below this
+ * extension's floor), with a hand-rolled fallback for the non-extension
+ * environments the unit tests run in. The fallback links the two with
+ * `addEventListener` and removes the listeners once either fires, so a
+ * long-lived caller signal does not accumulate one listener per sync.
+ */
+export function composeAbortSignals(
+  a: AbortSignal | undefined,
+  b: AbortSignal,
+): AbortSignal {
+  if (!a) return b;
+  if (a === b) return a;
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([a, b]);
+  const controller = new AbortController();
+  const abort = (reason?: unknown) => {
+    controller.abort(reason);
+    a.removeEventListener('abort', onA);
+    b.removeEventListener('abort', onB);
+  };
+  const onA = () => abort(a.reason);
+  const onB = () => abort(b.reason);
+  if (a.aborted) abort(a.reason);
+  else if (b.aborted) abort(b.reason);
+  else {
+    a.addEventListener('abort', onA, { once: true });
+    b.addEventListener('abort', onB, { once: true });
+  }
+  return controller.signal;
+}
 
 /**
  * Was this name one WE generated, for a row written before `nameSource` existed?
@@ -164,12 +198,38 @@ export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
 
 /**
  * Executes an on-demand update for a single channel with timeout safety & rate-limiting protection.
+ *
+ * **Single-flight.** Six entry points call this (dashboard refresh-all /
+ * refresh-creator / refresh-channel / deep-sync, the popup's `SYNC_CHANNEL`, and
+ * the auto-sync alarm) and nothing coordinated them, so one channel could be
+ * fetched twice concurrently — each run holding a Channel snapshot from a
+ * different moment, last writer winning, `nextCursor` silently rewound by
+ * whichever finished second. The lock lives here because this is the one
+ * function all six cross; a per-caller guard cannot see another context's run.
+ * A second call for a channel already in flight joins the first and receives its
+ * result, so there is one fetch and one write.
  */
 export async function updateChannel(
   channel: Channel,
   limit: number = 10,
   force: boolean = false,
   options?: FetchOptions
+): Promise<FetchResult> {
+  if (isChannelRunning(channel.id)) {
+    devLog.debug(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 已有同步在跑，加入它`,
+      '同一频道的并发同步会互相覆盖 nextCursor / status，因此合并为一次',
+    );
+  }
+  return withChannelRun(channel.id, () => runChannelUpdate(channel, limit, force, options));
+}
+
+async function runChannelUpdate(
+  channel: Channel,
+  limit: number,
+  force: boolean,
+  options?: FetchOptions,
 ): Promise<FetchResult> {
   const adapter = getAdapter(channel.platform);
   if (!adapter) {
@@ -256,9 +316,16 @@ export async function updateChannel(
     const mergedOptions: FetchOptions = {
       ...options,
       sinceTimestamp,
-      // Caller-supplied signal wins if present, so a future cancellation source
-      // (e.g. the user cancelling a run) composes with the timeout.
-      signal: options?.signal ?? abortController.signal,
+      // The 45s deadline must still CANCEL when a caller supplied its own signal.
+      //
+      // This was `options?.signal ?? abortController.signal` — a choice, not a
+      // combination. With a caller signal present the deadline lost its only
+      // lever, so the timeout rejected the promise while the underlying fetch
+      // kept running: the exact "resolved while the request continued" failure
+      // the abort controller was added to fix (AUDIT P1-2), reintroduced for any
+      // caller that cancels. No caller passes one today, which is why it went
+      // unnoticed — the defect was waiting for the feature that needs it.
+      signal: composeAbortSignals(options?.signal, abortController.signal),
     };
 
     // Why this line exists: a real session's log contained the fetch lines for a
@@ -342,6 +409,33 @@ export async function updateChannel(
       // 2. History dig (isHistory or cursor): upsert duplicates quietly to heal media, only add new IDs
       // 3. Normal sync (sinceTimestamp > 0): drop posts where publishedAt <= sinceTimestamp
       let newPosts = result.posts;
+      /** Pairs moved by `adoptRenamedPostIds`, needed again when writing. */
+      let pendingRenames: Array<{ from: string; to: string }> = [];
+
+        // Rows the adapter renamed. `Post.id` is a global primary key and the
+        // suppression is keyed by it, so a scheme change has to MOVE the stored
+        // row — otherwise the same item exists twice (old id orphaned with the
+        // user's read/bookmark state, new id freshly written) and a 彻底删除
+        // recorded against the old id stops applying.
+        //
+        // The adapter reports the pairing because it is the only place that knows
+        // both ids; this is bounded to the page it just returned, which is the
+        // only honest scope (rule 16).
+        if (result.legacyIds && result.legacyIds.length > 0) {
+          pendingRenames = result.legacyIds
+            .map((from, i) => ({ from, to: result.posts[i]?.id }))
+            .filter((p): p is { from: string; to: string } =>
+              typeof p.to === 'string' && p.from !== p.to);
+          const moved = await adoptRenamedPostIds(pendingRenames);
+          if (moved > 0) {
+            devLog.info(
+              'channelSync',
+              `已把 ${moved} 条动态迁移到新的 ID（${channel.platform}）`,
+              '该平台的 ID 生成方式变了（例如 RSS 纳入来源作用域），旧行连同已读/收藏与删除记录一并迁移。',
+            );
+          }
+        }
+
       if (options?.forceRefresh) {
         // When force-refreshing, do not filter out existing posts; upsert them all to heal media/content
       } else if (options?.isHistory || options?.cursor !== undefined) {
@@ -446,6 +540,35 @@ export async function updateChannel(
         // restoreDeleted: the user explicitly asked for these back, so the
         // suppression is cleared for exactly the ids the adapter returned.
         await clearSuppressions(newPosts.map(p => p.id));
+      }
+
+      // Preserve user state for rows this sync is about to overwrite.
+      //
+      // Normally `newPosts` holds ids the DB has never seen, so writing them
+      // fresh cannot lose anything. The exception is a row whose ID just changed
+      // (an adapter identity migration, e.g. RSS gaining its feed scope): the
+      // stored copy holds the user's read/bookmark state, and the adapter's fresh
+      // copy always carries `isRead: 0`. Without this the migration would move
+      // the row and then immediately overwrite the state it had preserved —
+      // measured: `isRead: 1` became 0 across the adoption.
+      if (pendingRenames.length > 0 && newPosts.length > 0) {
+        const renamedTo = new Map(pendingRenames.map((r) => [r.to, r.from]));
+        const carried = await db.posts.bulkGet(newPosts.map((p) => p.id));
+        newPosts = newPosts.map((p, i) => {
+          const stored = carried[i];
+          if (!stored) return p;
+          // Either the id itself is post-adoption (looked up directly), or it is
+          // the new id of a pair we just moved — both mean "the user has state".
+          const wasRenamed = renamedTo.has(p.id);
+          if (!wasRenamed && stored.isRead === p.isRead && stored.isBookmarked === p.isBookmarked) {
+            return p;
+          }
+          return {
+            ...p,
+            isRead: stored.isRead || p.isRead ? 1 : 0,
+            isBookmarked: stored.isBookmarked || p.isBookmarked ? 1 : 0,
+          };
+        });
       }
 
       enhancedPosts = newPosts.map((p) => ({
@@ -656,6 +779,11 @@ export async function updateChannel(
     );
     return { posts: [], error: structured };
   } finally {
+    // Recorded on EVERY path, including failure: a request that failed still hit
+    // the platform, so the spacing that follows must account for it (rule 19).
+    // Shared across entry points, so a concurrent batch cannot start from "this
+    // platform was never contacted" and fire immediately.
+    notePlatformFinished(channel.platform);
     // Failsafe: Ensure channel is NEVER left in 'updating' status
     const current = await db.channels.get(channel.id);
     if (current?.status === 'updating') {
