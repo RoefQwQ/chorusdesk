@@ -1,4 +1,4 @@
-import type { KnownPlatform, Platform } from '../types';
+import { isKnownPlatform, type KnownPlatform, type Platform } from '../types';
 import type { PlatformAdapter } from '../adapters/types';
 import { bilibiliAdapter } from '../adapters/bilibili';
 import { youtubeAdapter } from '../adapters/youtube';
@@ -33,5 +33,11 @@ export function getAdapter(platform: Platform): PlatformAdapter | undefined {
   // No silent fallback: an unknown platform must surface as an unsupported
   // error (channelSync handles a missing adapter) rather than silently
   // fetching the channel's URL as RSS.
-  return ADAPTER_MAP[platform as KnownPlatform];
+  //
+  // `isKnownPlatform` narrows `Platform` (which includes `(string & {})` for
+  // stored legacy keys) to the closed set, so the lookup needs no `as` cast:
+  // the guard IS the assertion, in code rather than in a comment. It also says
+  // out loud that "unknown platform" is a handled case, not a table miss.
+  if (!isKnownPlatform(platform)) return undefined;
+  return ADAPTER_MAP[platform];
 }

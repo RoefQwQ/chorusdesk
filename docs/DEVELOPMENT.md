@@ -65,9 +65,16 @@
    - 平台特有的行为参数放**本 adapter 上**，不要塞进 `sync` 层分支：`minRequestIntervalMs`（请求最小间隔，覆盖只能抬高下限）、`archivesMedia: false`（声明不参与本地图片归档）。理由与形状见 `ARCHITECTURE.md` §4.2。
 2. 请求统一走 `src/infrastructure/chrome/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
 3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base64(guid) 32位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。
-4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册；不要改 `getAdapter` 的 rss 回退语义。
-5. 在 `src/types/index.ts` 增加 `Platform` 字面量、`PLATFORM_REGISTRY` 元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
+4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册。**`ADAPTER_MAP` 的键类型是 `KnownPlatform`，漏注册会编译报错**（这正是它的作用）；`getAdapter` 对未知平台返回 `undefined`，**没有 rss 回退**——未知平台必须显式报「不支持」，绝不能拿该频道的 URL 当 RSS 源去抓。
+   > 更正（2026-09-12）：本步此前写「不要改 `getAdapter` 的 rss 回退语义」。那个回退**早已删除**（见 `AGENTS.md` fix queue 第 8 条、`ARCHITECTURE.md` §4.2），照旧文做会去找一个不存在的分支。
+5. 在 `src/types/index.ts` 做**三处**改动（不是一处）：
+   - `KnownPlatform` 联合加成员；
+   - `KNOWN_PLATFORMS` 运行时常量加成员（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）；
+   - `PLATFORM_REGISTRY` 加元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
+   三者缺一不可：`ADAPTER_MAP: Record<KnownPlatform, …>` 会因联合成员没有适配器而报错，而 `KNOWN_PLATFORMS` 是给运行时可枚举用的那份。
 6. 在 `src/utils/urlParser.ts` 增加 URL → `{ platform, accountId, cleanUrl }` 分支（注意域名顺序：`weibo.cn` 在 `weibo.com` 前等，避免子串误判；XHS 短链 `xhslink.com`、YouTube `youtu.be` 这类别名要并进同平台分支）。
+   - **同时把该平台生成的占位名前缀加进同文件的 `GENERATED_NAME_PREFIXES`**。这是**必做项**：`channelSync` 的占位名识别从这份清单派生（`legacyPlaceholderName` / `legacyCreatorPlaceholderName` 用 `.some()` 判成员，没有第二份手写清单），`tests/urlParser.test.ts` 会双向断言「清单 ↔ 解析器实际产出」一致——漏加会让占位名永远不被真实昵称覆盖，且守卫测试会失败。
+   > 更正（2026-09-12）：此前不存在这一步，也没有守卫；`AGENTS.md` 规则 9 记的正是漏加前缀导致 8 个平台的昵称写不进去那次事故。派生 + 守卫是本轮（审计 P1-5）的根治。
 7. 平台域名：只需把域名加入 `src/infrastructure/chrome/messages/hosts.ts` 的 `PLATFORM_HOSTS`。manifest 的 `host_permissions` 由 `platformHostMatchPatterns()` **派生生成**，图片代理白名单、凭据策略与 Referer 选择同样读取该清单——不要再手写第二份列表（`tests/hosts.singleSource.test.ts` 会断言这一点）。
    - 若走 Cookie 登录：在 `src/infrastructure/chrome/platformAuth.ts` 的 `platformsToCheck` 增加 `{ key, domain, authCookieNames }` 行（登录状态灯）。
    - 若该平台的图片 CDN 需要特定 Referer：在 `hosts.ts` 的 `MEDIA_REFERER_BY_DOMAIN` 增加映射；不需要 Referer 的 CDN 不要加（扩展会发不带 Referer 的请求）。

@@ -22,9 +22,9 @@ chorusdesk/
 │  ├─ popup/                        # Popup 入口（App.vue + composables）
 │  └─ dashboard/                    # Dashboard 入口（App.vue 组合层 + composables + views）
 ├─ src/
-│  ├─ types/index.ts                # Platform/Creator/Channel/Post/Settings 等共享类型
+│  ├─ types/index.ts                # Platform/KnownPlatform/Creator/Channel/Post/Settings 等共享类型
 │  ├─ platform/                     # Adapter 注册表（真实实现）
-│  │  ├─ registry.ts                # ADAPTER_MAP + getAdapter/registerAdapter
+│  │  ├─ registry.ts                # ADAPTER_MAP（键为 KnownPlatform）+ getAdapter（无静默回退）
 │  ├─ adapters/                     # 各平台实现
 │  │  ├─ types.ts                   # FetchOptions/FetchResult/PlatformAdapter 契约
 │  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts
@@ -36,10 +36,12 @@ chorusdesk/
 │  │  ├─ channelSync.ts             # 单频道同步 updateChannel / clearStaleUpdatingStatus
 │  │  ├─ batchSync.ts               # 平台轮转交错批量同步
 │  │  ├─ historySync.ts             # 历史翻页 fetchChannelHistory / deepSyncChannel
+│  │  ├─ cursorState.ts             # '__END__' 哨兵语义的唯一实现（谁消费、哪种平台是猜测）
+│  │  ├─ rateLimit.ts               # 平台节流下限 + 跨 worker 持久化的冷却（strike 翻倍、封顶）
 │  │  └─ index.ts                   # 兼容导出
 │  ├─ infrastructure/
 │  │  ├─ db/                        # Dexie 数据库 + 仓储（真实实现）
-│  │  │  ├─ database.ts             # FeedDatabase + 版本 1-5 schema
+│  │  │  ├─ database.ts             # FeedDatabase + 版本 1-6 schema
 │  │  │  ├─ settingsRepository.ts   # DEFAULT_SETTINGS / getSettings / saveSettings
 │  │  │  ├─ statsService.ts         # getDatabaseStats
 │  │  │  └─ postRepository.ts       # 动态生命周期：删除/回收站/清理/媒体自愈
@@ -129,11 +131,14 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 ### 4.1 类型契约 `src/types/index.ts`
 
-- `Platform`：`'bilibili' | 'youtube' | 'twitter' | 'pixiv' | 'fantia' | 'xiaohongshu' | 'weibo' | 'douyin' | 'rss' | (string & {})`（Withny 于 2026-09-12 整体移除）。
-- `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记。
+- `KnownPlatform` / `Platform`：**封闭集与可存储值分开**。`KnownPlatform` 是本扩展**实际提供适配器**的 9 个平台（`bilibili | youtube | twitter | pixiv | fantia | xiaohongshu | weibo | douyin | rss`），`Platform = KnownPlatform | (string & {})` 额外容纳历史/已移除平台的键（如 Withny 的行仍在库里，`getAdapter` 对它返回 `undefined`）。分开的原因：`(string & {})` 让 `switch`/`Record` 永远无法证明穷尽，所以**关于本扩展行为的决策用 `KnownPlatform`**（`ADAPTER_MAP` 即以它为键，漏一个成员即编译报错），**存储与容错用 `Platform`**。
+- `isKnownPlatform(platform)`：类型守卫，把 `Platform` 收窄为 `KnownPlatform`；`getAdapter` 用它而非 `as` 断言——守卫即断言，写在代码里而不是注释里。
+- `KNOWN_PLATFORMS`：`KnownPlatform` 的运行时可枚举镜像（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）。**顺序无语义**——唯一消费方是 `isKnownPlatform` 的成员判断与守卫测试的双射断言；UI 的平台展示顺序来自 `PLATFORM_REGISTRY` 的键序，不要引用这里的顺序。
+- `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记（另见 `DEVELOPMENT.md` §3 的完整接入清单：三处类型改动缺一不可）。
+- `NameSource = 'generated' | 'platform' | 'user'`：`Creator.name` / `Channel.displayName` 的**来源**。同步层只允许覆盖**自己生成的**名字（`generated`）；用户改过的（`user`）与已由平台给出的（`platform`）不动。字段**缺失**＝`nameSource` 引入前写入的旧行，此时同步层退回一次字符串形状判断，命中后写入并盖上 `platform`，此后不再走那条路径。这取代了此前两份手写的前缀清单（见 `src/utils/urlParser.ts` 的 `GENERATED_NAME_PREFIXES` 与 AGENTS 规则 9）。
 - 实体：
-  - `Creator { id, name, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
-  - `Channel { id, creatorId, platform, accountId, displayName, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。
+  - `Creator { id, name, nameSource?, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
+  - `Channel { id, creatorId, platform, accountId, displayName, nameSource?, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。
   - `Post { id, creatorId, channelId, platform, channelLabel?, title?, content, contentHtml?, mediaList: MediaItem[], originalUrl, publishedAt, fetchedAt, isRead, isBookmarked?, isRepost?, authorMeta? }`。
     - `content` 是纯文本正文，所有平台都有，用于卡片预览、搜索与过滤。
     - `contentHtml` 是**已净化**的文章 HTML，目前仅 RSS 设置：其正文是文章而非配文，
@@ -142,7 +147,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
       渲染端（阅读视图）可直接交给 `v-html`。纯文本正文不设置该字段，
       以保留源自身的换行。
   - `AppSettings`：`theme / itemsPerFetch / requestDelayMs / autoOpenOriginalUrl / enableAutoSync? / hideReposts? / hideTextOnly? / enableImageCache? / imageCacheDirectoryName? / imageCacheStrategy? / platformOrder?`（`platformOrder` 为侧边栏平台的自定义拖拽顺序，未列出的平台按 `PLATFORM_REGISTRY` 顺序）。
-  - `DeletedPostRecord { id, channelId?, creatorId?, platform?, title?, deletedAt, postData?: Post }`。
+  - `PostSuppression { postId, platform, suppressedAt, channelId?, creatorId? }`（v6 起）与 `RecycleSnapshot { id, channelId?, creatorId?, platform?, title?, deletedAt, postData?: Post }`（v6 起）。前者是同步黑名单（**只有显式恢复才解除**），后者是回收站快照（可清）；`channelId`/`creatorId` 在抑制行里是**参考信息**，供取关提示计数用，不参与身份（身份是 `postId`）。取代了旧的一行两职 `DeletedPostRecord`，见 §4.4 与 `DELETION_MODEL.md`。
 
 动态 `Post.id` 的生成前缀规则（分布在各自 adapter 内，**不得随意改变**，收藏/回收站/墓碑都依赖它）：
 
@@ -168,8 +173,15 @@ export interface FetchOptions {
   cursor?: string;             // 历史翻页游标
   isHistory?: boolean;         // 深度历史挖掘
   sinceTimestamp?: number;     // 增量水位（ms）
-  restoreDeleted?: boolean;    // 恢复已删动态（同步前清墓碑）
+  restoreDeleted?: boolean;    // 恢复已删动态（同步前清抑制）
   forceRefresh?: boolean;      // 忽略水位强制刷新（重写旧动态）
+  /** 取消在途采集：channelSync 的 45s 期限触发，adapter 透传给 bgFetch。 */
+  signal?: AbortSignal;
+  /**
+   * 本次采集**允许落库的新动态**上限（历史挖掘用）。重复 id 的 upsert（自愈）不消耗额度，
+   * 只有真正的新 id 计入并截断；缺省/0 = 不限制。见 `historySync` 的挖掘预算。
+   */
+  maxNewPosts?: number;
 }
 
 export interface FetchResult {
@@ -179,11 +191,25 @@ export interface FetchResult {
   hasMore?: boolean;           // false 表示到底
   error?: FetchError;          // 结构化失败：{ code, message }，不是字符串
   totalFetched?: number;       // 归一化前原始条数
+  /**
+   * 有内容但**至少一个数据源失败**——结果真实但不完整。
+   * 与 `error` 刻意分开：degraded 仍落库（部分数据好过没有），`error` 且无内容才不落库。
+   * 多源平台（bilibili 动态+medialist、XHS 列表+详情补全、Twitter 标签页+直连）失去一路时，
+   * 唯一症状就是「这个人好像没发东西」，所以它必须能被告知（channelSync 记 warn）。
+   */
+  degraded?: boolean;
+  /** 缺了什么，写给开发者日志里的人话。 */
+  warnings?: string[];
 }
 
-/** `code` 驱动同步层策略（是否重试/冷却），`message` 直接给用户看。 */
+/** `code` 驱动同步层策略（冷却/游标终态/文案），`message` 直接给用户看。 */
 export interface FetchError {
-  code: FetchErrorCode;        // 含 'rate_limit' / 'network' / 'auth' / 'parse' / 'unsupported' 等
+  /**
+   * `'auth' | 'rate_limit' | 'network' | 'parse' | 'timeout' | 'not_found' | 'unsupported' | 'storage'`。
+   * `storage` = **本地**写库失败，单列是因为 `code` 不只是文案：它驱动平台冷却与游标终态，
+   * 把本地故障报成 network 会去冷却一个从未被联系过的平台（审计 P1-1）。
+   */
+  code: FetchErrorCode;
   message: string;
 }
 
@@ -227,8 +253,12 @@ export interface PlatformAdapter {
 统一入口函数（各文件实现，`src/sync/index.ts` re-export）：
 
 - `channelSync.ts`
-  - `clearStaleUpdatingStatus()`：把状态残留为 `updating` 的 channel 重置为 `idle`（启动/崩溃恢复）。
   - `updateChannel(channel, limit = 10, force = false, options?: FetchOptions): Promise<FetchResult>`：单频道同步核心（完整流程见 §5.2）。
+  - `isStorageFailure(err)`：判断异常是否为**本地** IndexedDB 失败（Dexie 会把 `DOMException` 包在普通 Error 里，看 `name`/`message`）。`channelSync` 与 `batchSync` 共用，把这类失败归类为 `storage` 而不是 `network`——分类错不只是文案错，错误码会驱动平台冷却。
+- **`FetchResult.degraded` 的消费**：`channelSync` 在写「同步完成」info 之后，若 `result.degraded` 记一条 `warn`（含 `warnings` 文案）。这条日志是「个别数据源挂了」唯一的可见面。
+- `cursorState.ts`：**独占 `'__END__'` 游标终态语义**——哨兵常量（`END_OF_HISTORY_CURSOR`）、哪些平台是单发采集因而其标记只是猜测（`SINGLE_SHOT_ACQUISITION`）、两个消费点各自要问的谓词（`statesEndOfHistory` / `shouldRecordHistoryEnd` / `isEndOfHistoryCursor` / `hasStaleTerminalCursor` / `terminalCursorIsStated`）与用户文案。`channelSync` 与 `historySync` 只消费，不得各自再写字面量。成立理由：该规则曾有三份实现，今天改「完成」的含义必须改三处（见 AGENTS 规则 10 与 `tests/douyin.endcursor.test.ts`）。
+- `rateLimit.ts`：平台节流下限（`platformMinInterval`，adapter 声明优先）+ 持久化冷却（`readCooldowns`/`noteRateLimit`/`clearRateLimit`/`remainingCooldown`/`formatCooldown`）。冷却存在 `settings` 表，因为 MV3 worker 会在两次同步之间死掉。
+  > `clearStaleUpdatingStatus()` 不在 `src/sync`：它是一行 channel 写入、不涉及 adapter，住在 `src/infrastructure/db/channelRepository.ts`（经 `src/application/channelService.ts` 暴露）。从前住在 `channelSync` 时，每个调用方（含 popup）都被拖进整个 adapter registry。
 - `batchSync.ts`
   - `interleaveChannelsByPlatform(channels)`：按平台分桶后轮转交错（`[B1,B2,T1,Y1] → [B1,T1,Y1,B2,...]`），降低同域连击。
   - `batchUpdateChannelsInterleaved(channelList, limit, options?)`：`options.minPlatformIntervalMs`（默认 800）同平台最小间隔；`onProgress(current,total,channel,result)`；`shouldStop()`；返回 `{ totalChannels, successful, newPostsCount }`。
@@ -242,8 +272,8 @@ export interface PlatformAdapter {
 | 常量 | 值 | 位置 |
 |---|---|---|
 | 单频道成功冷却 | 30 秒（`lastSuccessAt`，force/cursor 除外） | `channelSync.ts` |
-| 单次请求超时 | 45 秒 | `channelSync.ts` |
-| 历史到底标记 | `'__END__'`（`nextCursor`） | `channelSync.ts` / `historySync.ts` |
+| 单次请求超时 | 45 秒（超时同时 abort 在途请求） | `channelSync.ts` |
+| 历史到底标记 | `'__END__'`（`nextCursor`） | `cursorState.ts`（唯一定义；`channelSync`/`historySync` 消费） |
 | 批量同平台最小间隔 | 800 ms（默认） | `batchSync.ts` |
 | 批量账号间间隔（updateCreator） | 600 ms | `batchSync.ts` |
 | 深挖每轮条数 / 轮间间隔 | 20 条 / 900 ms | `historySync.ts` |
@@ -294,6 +324,8 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
 
 ### 4.5 Chrome 基础设施 `src/infrastructure/chrome/`
 
+- `http.ts`：**所有 adapter 取数的网络端口**。`bgFetch(url, options)` 在 Service Worker 内直接调 `performBgFetch`（规则 6：SW 不能给自己 `sendMessage`），在扩展页内发 `BG_FETCH` 消息；仅在非扩展环境走直连 `fetch`（本地冒烟）。`options.signal` 会被透传：**页面侧无法把 `AbortSignal` 塞进消息**，所以取消是**第二条消息** `BG_FETCH_ABORT`（带请求 id），worker 侧按 id 找到在途 `AbortController` 并 abort。没有它时，调用方超时只是「不再等待」，底层的 `fetch` 仍在跑——用户一重试就是两个并发请求打同一个平台。
+- `messages/bgFetch.ts`：`performBgFetch(rawUrl, headerOverrides?, signal?)` 强制 http(s)、无内嵌凭据；凭据按 `PLATFORM_HOSTS`（规则 3）；**响应体在读取时就截断**（`readCapped`，250k 字符，超限即停止读取而不是读完再截）——RSS 源是用户任意指定的域，不设上限等于让一个恶意/异常源支配 worker 与消息通道。
 - `autoSync.ts`：`setupAutoSync()` 按 `settings.enableAutoSync` 创建（30 分钟周期）/清除 Alarm `'creator-feed-auto-sync'`，随后 `updateUnreadBadge()`；`handleAutoSyncAlarm(alarm)` 校验名称后 `syncAllChannels()`（**串行**逐 channel `updateChannel(channel, itemsPerFetch, false, { onlyOriginal: hideReposts })`，无交错）；`updateUnreadBadge()` 统计 `posts.where('isRead').equals(0)`，封顶 999。
 - `declarativeNetRequest.ts`：`setupDeclarativeNetRules()`，幂等（先 remove 再 add）重建 6 条动态规则：
   - `1001` sinaimg 改 Referer=`https://weibo.com/`；`1002` pximg 改 Referer=pixiv；`1003` sinaimg http→https 升级；`1004/1005/1006` 小红书 xhscdn.com / xiaohongshu.com / xhscdn.net 改 Referer+Origin。
@@ -302,16 +334,17 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
 
 ### 4.6 工具层 `src/utils/`
 
-- `http.ts`：`HttpResponse { ok, status, statusText?, data: string, error? }`；`bgFetch(url, options)` 优先 `chrome.runtime.sendMessage({ type: 'BG_FETCH', url, options: { method, headers, credentials } })`，扩展环境失败时给出明确错误文案；**仅非扩展环境**走直连 `fetch` 兜底（用于本地冒烟）。所有跨域抓取统一走此函数。
 - `media.ts`：`toSecureMediaUrl()`（补 `https:`、升级 `http:`、小红书 avatar 归一化到 `sns-avatar-qc.xhscdn.com`）；`proxyImage(url)`（`PROXY_IMAGE` 消息 → 返回 base64 data URL，带进程内 `imageProxyCache` Map 与 `pendingProxyFetches` 去重）；`isImageFailed/markImageFailed` 失败记忆。
-- `urlParser.ts`：`parseProfileUrl(rawUrl): ParsedProfile | null`，`ParsedProfile { platform, accountId, cleanUrl, suggestedName?, isContentUrl? }`；支持 `feed://` 前缀、RSS 特征（`.xml/.rss/.atom`、`/feed`、rsshub、`?feed` 等）与全部平台主页形态；`chrome://` 等内部页跳过 DOM 注入由调用方判断。
+- `timestamp.ts`：`toEpochMs(ts)` / `toEpochMsOr(ts, fallback)`。`Post.publishedAt` 的契约是 **Epoch ms**，但部分平台给秒，此前 4 处展示代码各自写 `ts < 1e12 ? ts*1000 : ts` 的猜测。**猜测只此一份**：≥1e12 视为 ms，否则视为秒；缺失/非有限/非正数返回 `null`（调用方渲染「未知时间」，而不是把 `NaN` 渲染成 Invalid Date、把 `0` 渲染成 1970）。新增读写时间戳的代码一律走这里，不要新写启发式。
+- `urlParser.ts`：`parseProfileUrl(rawUrl): ParsedProfile | null`，`ParsedProfile { platform, accountId, cleanUrl, suggestedName?, isContentUrl? }`；支持 `feed://` 前缀、RSS 特征（`.xml/.rss/.atom`、`/feed`、rsshub、`?feed` 等）与全部平台主页形态；`chrome://` 等内部页跳过 DOM 注入由调用方判断。**主机判定走 `hostMatches`（不是子串）**——`host.includes('bilibili.com')` 也匹配 `bilibili.com.attacker.example`，而这个判定决定频道建给哪个平台（AGENTS 规则 1）；`tests/urlParser.test.ts` 有 12 个 attacker 主机用例。同时导出 **`GENERATED_NAME_PREFIXES`**：本解析器会生成的 16 个占位名前缀，是 `channelSync` 占位名识别的唯一来源（见 §4.3 与 AGENTS 规则 9）。
+- `http.ts` 已移入 `src/infrastructure/chrome/http.ts`（它调用 `performBgFetch` 读 `chrome.cookies`，本就属于 chrome 层；见 §4.5/§5.4）。
 
 ### 4.7 图片缓存服务 `src/services/imageCache/`
 
 - `index.ts`：`imageCacheService` 编排，实际对外方法只有 7 个——`isReady` / `bindDirectory` / `unbindDirectory` / `getLocalCachedMediaUrl` / `isPostFullyCached` / `cacheMediaItem` / `cachePost`，内部经 `proxyImage`/直连取 Blob，命中磁盘后生成 object URL；进程内 `objectUrlMemoryCache`、`inFlightCacheJobs`（并发写去重）与 `knownMissingMedia`/`postDirCache`（负向探测与目录解析的记忆，避免每次挂载重复走目录树）各司其职。
   - **写入侧受平台能力开关管辖**：`cacheMediaItem` 与 `cachePost` 先问 `getAdapter(platform)?.archivesMedia !== false`，为假直接返回不做事（rss 声明 `archivesMedia: false`，理由见 `src/adapters/types.ts` 该字段注释）。**读取侧刻意不设这个门**，否则早先已归档的图会从磁盘上"消失"。卡片的自动保存与设置页的批量归档都经过 `cacheMediaItem`，因此这一个咽喉点即可覆盖全部写入路径。
 - `fsManager.ts`：File System Access API；目录句柄持久化在**独立的** IndexedDB `'FeedHubFSCache'`（store `'handles'`，key `'root_cache_dir'`），与业务库 `CreatorFeedHubDB` 分开；提供 `promptSelectDirectory/verifyDirectoryPermission/getOrCreateNestedDirectory/getExistingNestedDirectory/saveBlobToFile/readFileAsBlob/...`。
-- `pathResolver.ts`：目录结构 `[创作者名, 平台中文名, YYYYMMDD_短id]`（`resolvePostDirSegments`）；文件名/目录名跨平台净化 `sanitizePathSegment`（Windows 保留字符替换、去首尾点）；`resolveFileExtension` 由 MIME/URL 推断扩展名。
+- `pathResolver.ts`：目录结构 `[创作者名, 平台中文名, YYYYMMDD_短id]`（`resolvePostDirSegments`）；文件名/目录名跨平台净化 `sanitizePathSegment`（Windows 保留字符替换、去首尾点）；`resolveFileExtension` 由 MIME/URL 推断扩展名；`formatDateSegment` 的秒/毫秒判定走 `utils/timestamp.ts` 的 `toEpochMs`（不再自写启发式）。
 - 目录选择须由用户手势触发（浏览器权限要求）；绑定目录信息记录在 `settings.imageCacheDirectoryName` 与句柄库中。
 
 ## 5. 核心数据流
@@ -333,7 +366,7 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
 ### 5.2 单频道同步 `updateChannel`（手动/自动/历史共用内核）
 
 ```text
-getAdapter(channel.platform)（缺失回退 rss）
+getAdapter(channel.platform)（无适配器则报「不支持的平台」，不回退到 rss）
  → 冷却：!force && !cursor && lastSuccessAt 距今 < 30s → 直接返回空
  → db.channels.update(id, { status: 'updating', errorMessage: undefined })
  → 水位：普通同步（无 cursor/isHistory/restoreDeleted/forceRefresh）时
@@ -412,7 +445,8 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 |---|---|---|---|---|---|
 | `UPDATE_AUTO_SYNC` | Dashboard 设置开关 | background 内联 | — | `{ success: true }` | 否 |
 | `OPEN_DASHBOARD` | **当前仓库无调用方**（Popup 直接 `chrome.tabs.create` 开 `dashboard.html`）；作为契约保留 | background 内联 | — | `{ success: true }` | 否 |
-| `BG_FETCH` | `src/infrastructure/chrome/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ url, options: { method, headers, credentials } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
+| `BG_FETCH` | `src/infrastructure/chrome/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ requestId?, url, options: { headers } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
+| `BG_FETCH_ABORT` | 同上（`bgFetch` 的 `signal` 触发） | `messages/bgFetch.ts` `handleBgFetchAbort` | `{ requestId }` | `{ aborted: boolean }`（同步应答，`false` = 没有在途请求） | 否 |
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit, deep }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`；`deep=true` 时先滚动作品网格再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
@@ -462,7 +496,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 
 ## 8. 数据库兼容策略（原则）
 
-1. 库名固定 `CreatorFeedHubDB`；**不得删除或重排已有 version 1–5**；schema 变更只能追加新 version，且新 version 需声明**全部** store 的完整索引（Dexie 语义）。
+1. 库名固定 `CreatorFeedHubDB`；**不得删除或重排已有 version 1–6**；schema 变更只能追加新 version，且新 version 需声明**全部** store 的完整索引（Dexie 语义）。
 2. 新字段必须对旧数据有默认兜底（读取端 `getSettings` 已示范 `{ ...DEFAULT_SETTINGS, ...item.value }` 合并模式）。
 3. 导入旧 JSON 必须容忍缺字段（现有导入为逐表 `bulkPut`，缺字段行保留旧行默认值）。
 4. `Post.id`/`Channel.id` 生成规则不可随意改变（收藏、已读、墓碑、去重全部依赖 id）。

@@ -17,19 +17,9 @@ Commands: `npm run dev` / `build` / `zip` / `test` / `typecheck` / `lint`. CI ru
 
 ## Non-goals (settled — do not re-open, do not propose)
 
-Decisions the user has already made. Re-raising one as a "found issue" or a "small
-follow-up" wastes their time; if new evidence genuinely contradicts a decision, say so
-once, with the evidence, and wait.
-
-- **A video post needs no badge on its thumbnail.** The footer link already reads
-  「视频动态」 for exactly those posts, so it is the at-rest identifier; an extra icon over
-  the media would repeat it a third time (the hover prompt being the second). Asked and
-  declined 2026-09-11: 「现在右下角本来就有文字标识，为啥还要额外加一个」. Do not propose a
-  play icon, a corner badge, or a duration pill for video thumbnails.
-- **RSS cards do not need images.** Card rendering for RSS is text-first by decision
-  (2026-09-11: 「rss不需要这个」). The article *reader* view still renders the article's
-  images — that part is in scope and works. Do not add a thumbnail, a count hint, or an
-  option for card images, and do not report their absence as a defect.
+产品方向的非目标（含用户原话与日期）已移入 **[docs/PRODUCT_DECISIONS.md](docs/PRODUCT_DECISIONS.md)**：
+视频缩略图不加角标、RSS 卡片不显示配图、不采用 PR-first 工作流。
+**提议任何「改进」之前先搜那份文件**——已经决定过的事重新提出，等于浪费用户的时间。
 
 ---
 
@@ -159,31 +149,21 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
 - Adapters MUST NOT import the db. Repositories MUST NOT import `chrome.*`.
 - **Adapters may call `chrome.runtime.sendMessage` when the platform cannot be fetched from
   the worker at all.** Two do: `douyin.ts` (page-driven acquisition, rule 9) and `twitter.ts`
-  (its tab path). There is no narrower port for this — the adapter is asking the worker to run
-  something only a page can run, and an intermediate wrapper would be the same call one layer
-  down. Anything else `chrome.*` in an adapter is a finding, not a pattern.
-
-  This note exists because the rule used to name only *repositories* as forbidden from
-  `chrome.*`, leaving adapters in a grey zone: `bilibili.ts`, `weibo.ts` and `xiaohongshu.ts`
-  each had a `checkAuthStatus()` reading `chrome.cookies.get` directly, and nobody could say
-  whether that was a violation. It was not — it was **dead code**, and the same cookie-name
-  tables live (and are used) in `platformAuth.ts`. Found 2026-09-12 and deleted; the lesson is
-  in the shape of the question, not the answer: "is this allowed?" hid "does this run?".
-- **Adapters reach the network through `src/infrastructure/chrome/http.ts` (`bgFetch`).** That port
-  lives in the chrome layer, not in `utils`, because its service-worker mode calls
-  `performBgFetch`, which reads `chrome.cookies`. So `adapters → infrastructure/chrome` is a real,
-  sanctioned edge — it is how every adapter fetches. (It used to be laundered through a mislocated
-  `utils/http.ts`, which also made a leaf layer depend on the chrome layer. Moved 2026-09-11; see
-  `docs/REVIEW_2026-09.md`.)
+  (its tab path). No narrower port exists — an intermediate wrapper would be the same call one
+  layer down. Anything else `chrome.*` in an adapter is a finding, not a pattern.
+- **Adapters reach the network through `src/infrastructure/chrome/http.ts` (`bgFetch`).** The
+  port lives in the chrome layer, not in `utils`, because its service-worker mode calls
+  `performBgFetch`, which reads `chrome.cookies` — so `adapters → infrastructure/chrome` is a
+  real, sanctioned edge; it is how every adapter fetches.
 - **The `application/` facade covers the writes, not everything.** Creator / channel / post /
   backup go through `src/application` (`creatorService`, `channelService`, `postService`,
-  `backupService`) — including the whole recycle-bin lifecycle, which used to import seven
-  repository functions directly from the UI. What still imports `src/infrastructure/db/*` directly
-  from UI is the bare `db` handle, `settingsRepository`, `statsService` and media maintenance
+  `backupService`) — including the whole recycle-bin lifecycle (fix queue #10; resolved — do
+  not restate it as unfinished). What still imports `src/infrastructure/db/*` directly from
+  UI is the bare `db` handle, `settingsRepository`, `statsService` and media maintenance
   (`healBrokenPostMedia`, `cleanupOldPosts`) — **8 usage sites as of 2026-09-11, down from 9**,
   in exactly these files (`grep -rn "infrastructure/db" entrypoints/` reproduces it; count the
-  *usages*, not the files, and `import type` does not count — a type-only import crosses nothing
-  at runtime):
+  *usages*, not the files, and `import type` does not count — a type-only import crosses
+  nothing at runtime):
 
   |file|what|
   |---|---|
@@ -192,14 +172,13 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
   |`dashboard/composables/useMediaMaintenance.ts`|`healBrokenPostMedia`, `cleanupOldPosts`|
   |`popup/composables/useQuickFollow.ts`|`db`|
 
-  The list was earlier just a phrase, and that is how it drifted: a 9th site
-  (`useDeletedPosts.ts`) sat outside the four named categories while being exactly the shape this
-  rule forbids, so "known debt, enumerated" stopped being true without anyone editing the rule.
-  Fix queue #10 resolved the *facade*, so do not restate it as unfinished; equally, do not treat
-  the remaining direct imports as sanctioned. Prefer adding a service method over a new direct
-  repository import, and **add the file to the table above in the same commit**.
+  Do not treat the remaining direct imports as sanctioned. Prefer adding a service method
+  over a new direct repository import, and **add the file to the table above in the same
+  commit**.
 - New platform = new file in `src/adapters/` implementing `PlatformAdapter`; register in
   `src/platform/registry.ts`. See `docs/REVIEW_2026-09.md` for the full 6-8 touch-point list.
+
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-8).
 
 ## 9. Page-driven platforms keep their scraping in an isolated layer
 
@@ -219,54 +198,37 @@ For any platform in that shape, keep the boundary:
 
 **"Self-contained" is not advice, and `chrome.scripting` is not only Douyin's.** The injected
 function is serialized with `Function.prototype.toString()`, so it carries **no closure**: every
-identifier must be a parameter, a local, or a page global. Twitter's injected function read
-`Bearer ${TWITTER_BEARER_TOKEN}` — a module constant — for as long as that path existed. In the page
-that is a `ReferenceError`, caught by the function's own `try/catch`, returned as a plain failure, and
-the sync fell through to the direct fetch. **The page path never ran once, in production, and nothing
-could tell**: the failure looked like a platform problem, and `PLATFORMS.md`'s advice to open the
-creator's profile and retry was inert.
+identifier must be a parameter, a local, or a page global. Constants travel through
+`executeScript`'s `args` (Twitter: the bearer plus the four GraphQL sets — one definition, shared
+with the direct fetch, which is why the two cannot drift).
 
-Two things made it invisible, and both are the general lesson:
-
-- An injected function that catches its own errors converts a programming mistake into a plausible
-  platform message. Assert on the *result*, never on "it did not throw".
-- Calling the function **object** in a test keeps the closure and passes; only evaluating its
-  **source** with no closure reproduces what Chrome does. `tests/twitterTimeline.injected.test.ts`
-  does that, and it is the template for any new injected path.
-
-Constants for an injected function travel through `executeScript`'s `args` (Twitter: the bearer plus
-the four GraphQL sets — one definition, shared with the direct fetch, which is also why the two can no
-longer drift).
+- **An injected function that catches its own errors converts a programming mistake into a
+  plausible platform message.** Assert on the *result*, never on "it did not throw".
+- **Only evaluating the function's SOURCE with no closure reproduces what Chrome does.** Calling
+  the function *object* in a test keeps the closure and passes.
+  `tests/twitterTimeline.injected.test.ts` is the template for any new injected path.
 
 Nothing else may learn the page's shape. When the markup changes, only the collector, the contract,
 and the fixtures should need edits — never the db, `channelSync`, `buildPost`, or another platform.
 
-Two further invariants this exposed, both easy to miss:
+Two further invariants this exposed:
 
 - **Do not persist a signed CDN URL as identity or as a click target.** Douyin covers carry
   `x-expires`/`x-signature`; a Post's `originalUrl` must be the canonical work page. Conversely, do
   not "clean" query strings off media URLs — stripping the signature 403s every image.
-- **A new platform must add its generated placeholder-name prefixes to BOTH prefix lists in
-  `channelSync.ts`** (channel `displayName` and creator `name`). A platform missing from those lists
-  keeps its `平台用户_xxxx` placeholder forever, because the real nickname is only allowed to
-  overwrite a name the sync layer recognizes as a placeholder.
+- **A new platform must add its generated placeholder-name prefixes to
+  `GENERATED_NAME_PREFIXES` in `src/utils/urlParser.ts`** — the single source. `channelSync`
+  derives its placeholder detection from that list (there is no longer a second hand-written copy
+  to keep in step), and `tests/urlParser.test.ts` asserts the list covers every prefix the parser
+  actually emits. A platform missing from it keeps its generated placeholder forever, because the
+  real nickname is only allowed to overwrite a name the sync layer recognizes as a placeholder.
+  > Changed 2026-09-12: this rule previously required adding the prefixes to **two hand-written
+  > lists inside `channelSync.ts`**. That structure is gone — deriving from the generator is the
+  > fix for the class, and the guard test is what replaced "remember to update both".
+  > A stored row from before `nameSource` existed still falls back to the old shape check once,
+  > then is stamped `platform` and never consults it again.
 
-**Audited 2026-09-12: eight of `urlParser`'s sixteen generated prefixes were missing**, and every one
-of them was real — all nine adapters return `authorMeta.name`, so the authoritative nickname was
-always available and simply could not be written. Two causes, both worth knowing before editing:
-
-- `startsWith(channel.platform)` is **case-sensitive**. `'YouTube视频_x'.startsWith('youtube')` and
-  `'RSS_x'.startsWith('rss')` are both false. That is the whole reason `Pixiv` and `Fantia` appear
-  spelled out with a capital letter in that list — they were added for exactly this, one at a time.
-- The creator list is a **second, hand-written list**, and it only ever covered "creator page"
-  placeholders (`Pixiv画师_`, `Fantia俱乐部_`) — none of the "single work" ones. Following a creator
-  from one artwork therefore pinned `Pixiv作品_12345` as their name permanently.
-
-There is **no guard on this**: nothing fails when the two lists and `urlParser` disagree, so a missing
-prefix is a silent, permanent wrong name. Withny was the first instance and went unnoticed for as long
-as the platform existed; these eight are the second. Deriving the prefixes from the single place that
-generates them is the fix for the class; until then, both lists are manual and must be re-checked
-whenever `urlParser` gains a branch.
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-9).
 
 
 ## 10. Probe the page's real scroll container before declaring "no pagination"
@@ -433,42 +395,27 @@ question.
 
 ## 18. Third-party HTML is sanitized at the boundary, and structure is rendered, not flattened
 
-An RSS item's `<content:encoded>` is **arbitrary markup authored by whoever controls the
-feed**. The reader renders the body, and once it renders markup it does so inside an
-extension page — a page that holds the user's cookies. This is therefore a code-execution
-boundary, not a formatting concern.
+An RSS item's `<content:encoded>` is arbitrary markup authored by whoever controls the feed, and
+it renders inside an extension page that holds the user's cookies — a code-execution boundary,
+not a formatting concern.
 
-- Sanitize **at parse time** in the adapter (`src/utils/sanitizeHtml.ts`), so stored data is
+- **Sanitize at parse time** in the adapter (`src/utils/sanitizeHtml.ts`), so stored data is
   already safe and no renderer has to remember that a feed is untrusted.
-- The policy is an allowlist, and unknown elements are **unwrapped** (children kept) while
-  `script`/`style`/`iframe`/`form`/`svg` are **dropped with their subtree** — unwrapping
-  `<style>` would print its CSS into the article as text, and `svg`/`math` are a different
-  namespace where `tagName` cannot distinguish an `xlink:href` carrier from a plain `<a>`.
-- URLs are validated by **parsing and testing the protocol**, never by prefix-matching the
-  raw string: `java\nscript:` and a leading control character are the standard bypasses.
-  Relative URLs resolve against the article's link (a bare `/img.png` on a
-  `chrome-extension://` page resolves against the extension and 404s). `href`/`src` are set
-  explicitly and are never copied by the generic attribute loop.
+- The policy is an allowlist: unknown elements are **unwrapped** (children kept) while
+  `script`/`style`/`iframe`/`form`/`svg` are **dropped with their subtree**.
+- URLs are validated by **parsing and testing the protocol**, never by prefix-matching the raw
+  string; relative URLs resolve against the article's link, and `href`/`src` are set explicitly,
+  never copied by the generic attribute loop.
 - Serialize nodes **this code created**; never rewrite the input's markup with patterns.
+- **A feed's structure is its content.** Store the structure (`Post.contentHtml`), render it with
+  tag-level typography (`.article-body` in `assets/main.css`), and **do not render the same media
+  twice** — `standaloneMedia()` is the single rule both the card and the reader use.
+- **The image proxy: reachability is not credentials.** Any http(s) host may be fetched; only a
+  platform host gets the user's session (`credentials: 'include'`, platform `Referer`).
+  Any change here MUST keep those two properties pinned together: `tests/proxyImage.test.ts`
+  asserts both that an unknown host is fetched *and* that it receives no cookies.
 
-The other half of the lesson: **a feed's structure is its content.** Flattening an article to
-text is what pushed every image into a gallery under the body (measured: 23 images in one
-article, rendered as a "+17" placeholder grid) and left headings indistinguishable from
-paragraphs. Store the structure (`Post.contentHtml`), render it with tag-level typography
-(`.article-body` in `assets/main.css`), and **do not render the same media twice** —
-`standaloneMedia()` is the single rule both the card and the reader use.
-
-### The image proxy: reachability is not credentials
-
-`proxyImage` used to refuse any host outside `PLATFORM_HOSTS`. A feed may host its images
-anywhere, and the proxy is the only path that can load a CDN which blocks hotlinking or sends
-no CORS header — so every RSS article image was unreadable. The check was the same category
-error as rule 3, one layer down: **any http(s) host may be fetched; only a platform host
-gets the user's session** (`credentials: 'include'`, platform `Referer`). Reachability was
-never what the allowlist was for.
-
-Any change here MUST keep those two properties pinned together: `tests/proxyImage.test.ts`
-asserts both that an unknown host is fetched *and* that it receives no cookies.
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-18).
 
 ---
 
@@ -705,28 +652,16 @@ const { windowId } = await cdp('Browser.getWindowForTarget', { targetId: firstPa
 await cdp('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
 ```
 
-**`--window-position=-2400,-2400` alone does not hide the window from the user.** It is
-honoured — measured on Windows, `Browser.getWindowBounds` reports
-`{left: -2400, top: -2400, width: 1440, height: 900, state: "normal"}` — and that is exactly the
-problem: the window exists, off the coordinate range. It still appears in the taskbar, it can
-still be alt-tabbed to, and if the virtual desktop extends to negative coordinates (a monitor
-placed to the left of the primary) it is visibly **on a real display**. The user said so
-directly: 「你开的测试浏览器在我的屏幕可显示范围内」. Every comment in this repo claiming
-"off-screen: the user is not disturbed" was wrong.
-
-Minimizing is what actually keeps it out of the way, and CDP does it properly (same
-measurement: `state: "minimized"`). `release-gate.mjs`, `creators-render.mjs` and
-`feed-render.mjs` all do this now, and **skip it when `CI` is set** — on a runner the window
-must stay on the X screen, because an off-screen window under Xvfb receives no synthetic input
-at all (a real intermittent failure; see the CI history for 2026-09-11).
-
-Minimizing does not break driven input — verified, not assumed: after the change all four
-clicks in the release gate still report delivery (`mousedown=1 mouseup=1 click=1`), and
-`feed-render` stays byte-identical across two runs of the same build.
+**`--window-position=-2400,-2400` alone does not hide the window from the user.** The window
+still appears in the taskbar, can still be alt-tabbed to, and if the virtual desktop extends to
+negative coordinates (a monitor placed to the left of the primary) it is visibly **on a real
+display**. Minimizing is what actually keeps it out of the way, and CDP does it properly — but
+**skip it when `CI` is set**: on a runner the window must stay on the X screen, because an
+off-screen window under Xvfb receives no synthetic input at all.
 
 With it, the extension's **service worker** appears as a target (`background.js`) and can be
-evaluated in, so `chrome.alarms`, `chrome.tabs`, message handlers and the router are drivable;
-**extension pages render for real**; **downloads** can be captured
+evaluated in, so `chrome.alarms`, `chrome.tabs`, message handlers and the rule router are
+drivable; **extension pages render for real**; **downloads** can be captured
 (`Browser.setDownloadBehavior`) and **file inputs** fed (`DOM.setFileInputFiles`); and IndexedDB
 persists in the profile across a browser restart.
 
@@ -734,9 +669,8 @@ persists in the profile across a browser restart.
   *before* the action and answer `Page.javascriptDialogOpening` (or close the target and reopen —
   the state is already committed). A hang here is the dialog, not a hang in the product.
 - **The unpacked extension does not survive a browser restart.** `loadUnpacked` after a restart is
-  a fresh install, so anything the profile would have carried (alarm existence, `onInstalled`
-  timing) is recreated rather than restored. Cross-restart behaviour therefore stays unverifiable
-  here — say that plainly instead of inferring it from a single reading.
+  a fresh install, so cross-restart behaviour stays unverifiable here — say that plainly instead
+  of inferring it from a single reading.
 - Use the cheap tool when the extension host is not the subject: a component-level render with the
   **production** stylesheet (rule 30) for geometry, jsdom for behaviour. Reach for CDP when the
   host itself is the subject — storage, alarms, messaging, permission gates — not for layout.
@@ -785,8 +719,8 @@ other option) rather than silently picking.
 
 ## 30. To verify a real component in a real browser, bundle it into one inlined HTML file
 
-Rule 28 covers what cannot be done here (loading the extension). This is the technique that
-covers what remains: real layout, real CSS, real component, no extension host.
+Rule 28 covers what cannot be done here (loading the extension). This is the technique for
+the rest: real layout, real CSS, real component, no extension host.
 
 ```bash
 # tiny harness: index.html + main.ts mounting the component, plus a vite config with
@@ -794,76 +728,45 @@ npx vite build --config .tmp-harness/vite.config.ts
 # then inline the emitted JS and CSS into one file
 ```
 
-Reasons each part is needed, all learned by it failing first:
-
-- **Vite, because Tailwind's content scan is rooted at the harness directory.** The first
-  attempt imported `assets/main.css` and produced a page with *no spacing at all*: every
-  utility class was absent, so `p-2.5` and `space-y-2` did nothing and rows came out 24px with
-  a 0px gap. Inline the **production** stylesheet (`.output/chrome-mv3/assets/main-*.css`)
-  instead — then the geometry is the extension's geometry.
-- **Inlined, because an ES module cannot be loaded from `file://`.** `<script type="module"
-  src="...">` fails with a CORS error ("Cross origin requests are only supported for protocol
-  schemes: chrome, chrome-extension, …"), and the page renders empty with no clue why. Putting
-  the JS and CSS text directly in the HTML removes the fetch. Use a lambda for the
+- **Inline the PRODUCTION stylesheet** (`.output/chrome-mv3/assets/main-*.css`), not
+  `assets/main.css`. Tailwind's content scan is rooted at the harness directory, so importing
+  the source stylesheet yields a page with *no utilities at all* — rows come out with no
+  spacing and the geometry you then measure is not the extension's.
+- **Inline the JS/CSS text rather than linking it.** An ES module cannot be loaded from
+  `file://` (CORS: "Cross origin requests are only supported for protocol schemes: chrome,
+  chrome-extension, …"), and the page renders empty with no clue why. Use a lambda for the
   replacement — the bundle contains backslashes that `re.sub` reads as group references.
-- **Real geometry, not assertions about geometry.** This is what jsdom cannot do, and the
-  numbers are worth reading: a scroll viewport's height, whether one copy of a list overflows
-  it, where a row boundary actually falls.
-
-**A synthetic click aimed at a stale position is indistinguishable from a window that
-cannot be clicked — and the environment will look perfect while it happens.** The CI gate
-failed intermittently for a day and I offered four explanations, all wrong (window placed
-off-screen, window not yet mapped, retry budget too short, window wider than the Xvfb
-screen). What finally settled it was making the failure print the geometry, which cleared
-every environmental suspect at once:
-
-    display 1920x1080 fits the window 1440x900     ← the display is fine
-    screenX:10 screenY:10 outer 1440x900           ← the window is fully on it
-    hasFocus: true  visibility: visible            ← and focused
-    mousedown=0 mouseup=0 click=0                  ← yet nothing arrived
-
-The coordinates had been measured **once**, before `Page.bringToFront` and the focus wait
-— seconds during which the app is still mounting and re-laying out. All five retry attempts
-then dispatched at that same stale point. Fix: measure again before **every** dispatch. It
-is cheap, and it is why the failure correlated with how fast the app settled rather than
-with anything about the display.
-
-Two process notes, because they cost more than the bug did:
-
-- **A single green run is not evidence.** I declared this fixed four times on one passing
-  run each; the commit that "fixed" it twice failed 2 of 4 runs. The fix is only believable
-  because `3e70768` was measured at 2/4 and its successor at **10/10** on unchanged
-  arguments — at the old rate, ten straight passes is about a one-in-a-thousand outcome.
-  Sample a flake more than once before believing anything, including a repair.
-- **When the environment is exonerated, stop blaming it.** Four hypotheses about
-  occlusion and mapping all pointed outward; the fault was a stale measurement in our own
-  code. Let the failure carry numbers, and read them before theorising.
+- **Measure real geometry, not assert about it.** This is what jsdom cannot do: a scroll
+  viewport's height, whether one copy of a list overflows it, where a row boundary falls.
+- **Re-measure before EVERY synthetic dispatch.** A click aimed at coordinates measured once
+  — before `Page.bringToFront` and the focus wait, while the app is still re-laying out — is
+  indistinguishable from a window that cannot be clicked, and the environment reports itself
+  as perfect (focused, visible, on-display) while it happens. Measuring again is cheap.
+- **A single green run is not evidence.** Sample a flake more than once before believing
+  anything, including a repair.
+- **When the environment is exonerated, stop blaming it.** Let the failure carry numbers, and
+  read them before theorising.
+- **When a test cannot distinguish two configurations, find out which one it is and say so.**
+  jsdom reports every height as 0, so a copy-count check there can only ever see 1; that check
+  belongs in the browser, where the count differs and the difference is observable.
 
 ### Pitfalls of driving an occluded browser
 
-Three failures that all trace to the same cause — **a window that is not composited produces no
-frames**, and a lot of the platform quietly depends on frames:
+Three failures from the same cause — **a window that is not composited produces no frames**:
 
-- **No `rAF`.** `await new Promise(r => requestAnimationFrame(r))` never settles, so a cell
-  using it as a step barrier hangs and is killed at the timeout. Use `setTimeout`.
+- **No `rAF`.** `await new Promise(r => requestAnimationFrame(r))` never settles; a cell using
+  it as a step barrier hangs until the timeout. Use `setTimeout`.
 - **No `scroll` event.** `window.scrollTo(...)` moves `scrollY` but never fires the event, so
-  anything gated on scroll (`showBackToTop`, lazy loaders) silently stays in its initial state.
-  This looks exactly like a product bug and is not one — dispatch `new Event('scroll')` manually,
-  and treat "the control did not appear" as unverified until you have. Do not report it as a
-  defect without checking `scrollY` and the listener.
-- **No screenshot.** The capture API returns "the tab is not visible". Bringing the tab to the
-  front may work; raising the user's window over their other work will not, so after one attempt
-  stop and verify numerically instead. Say plainly which parts you could not see.
+  anything gated on scroll (`showBackToTop`, lazy loaders) silently stays in its initial state
+  and looks exactly like a product bug. Dispatch `new Event('scroll')` manually, and check
+  `scrollY` and the listener before reporting a defect.
+- **No screenshot.** The capture API returns "the tab is not visible"; raising the user's
+  window over their work to get one is not acceptable, so after one attempt verify numerically
+  and **say plainly which parts you could not see**.
 
 And one about reading Vue state across the bridge: **every read of the DOM must follow an
 `await`.** Vue flushes on a microtask, so dispatching an event and reading the DOM on the same
 line observes the *previous* render — a working handler then looks like a dead one.
-
-Corollary worth stating: **when a test cannot distinguish two configurations, find out which
-one it is and say so.** Removing a `:loop="false"` from a list left the suite green because
-jsdom reports every height as 0, so the copy count is always 1 there. The fix was not a
-cleverer assertion — it was moving that check to the browser, where the copy count differs
-(1 vs 2) and the difference is directly observable.
 
 > Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-30).
 
@@ -885,6 +788,7 @@ cleverer assertion — it was moving that check to the browser, where the copy c
 - A cancelled audit is not evidence of a stuck agent: look for repeated identical calls (a loop)
   and for compaction having already discarded the earlier work, before blaming the model.
 
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-31).
 
 ---
 
@@ -913,19 +817,5 @@ P0-4」，直接写了测试文件——而那批待办**明文规定要先经�
 
 ## Fix queue
 
-All 12 items are DONE (queues 1-4 in commit 25b8217, queues 5-12 in the
-follow-up series). Kept as a record of what was fixed and where the rule came
-from.
-
-1. `bgFetch` credential host matching — `hosts.ts` + `senderGuard.ts`; hostname-exact token injection, GET-only, credentials by allowlist.
-2. Sender validation — router policy table in `background.ts`.
-3. `isRead`/`isBookmarked` → `0|1` with Dexie v4 migration (posts + tombstone snapshots).
-4. Auto-sync alarm guard + SW-direct `performBgFetch` (`IS_SERVICE_WORKER`).
-5. DNR rules scoped with `initiatorDomains: [chrome.runtime.id]`, `sub_frame` dropped, applied on install only.
-6. Adapter data integrity: no `Math.random()` post IDs (skip or content-hash), `btoa` → TextEncoder hash (rss `stableHash`), `Number.isFinite` guards on all parsed timestamps.
-7. `parseBackup`: version gate + per-record required-field validation, fail-fast.
-8. `FetchResult.error` → structured `FetchError { code, message, retryable }`; adapters classify; `channelSync` switches on codes; silent RSS fallback removed from `getAdapter`.
-9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
-10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
-11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
-12. CI (`.github/workflows/ci.yml`: typecheck + lint + vitest + build), 495 regression tests (hosts/senderGuard/FetchError/buildPost/backup validation/component SSR/dexie migration/image-cache probe/manual ordering/dev log), `typescript` pinned to 7.0.2; ESLint flat config added 2026-09 (`eslint.config.js`, TS6-compat alias for typescript-eslint); `vue-tsc` added 2026-09 so typecheck covers `.vue`, and `vueCompilerOptions.strictTemplates` enabled 2026-09-11 (without it an unresolved component tag is invisible to the gate — see rule 27); `release.yml` + tag/version gate added 2026-09; `jsdom` added 2026-09 for the RSS parse/sanitizer tests, which need a real `DOMParser`.
+全部 12 项 DONE 的债务台账**已移入 [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md) 文末**（`## Fix queue`）。
+它是「修过什么、规则从哪来」的记录，**不是待办清单**——待办入口见文首。

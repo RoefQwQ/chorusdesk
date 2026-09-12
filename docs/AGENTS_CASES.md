@@ -4,7 +4,7 @@
 > 实测数字、日志与提交。它的作用是作证据，**不是约束**：与 `AGENTS.md` 冲突时以 `AGENTS.md`
 > 为准，与源码冲突时以源码为准。
 >
-> 规则编号与 `AGENTS.md` 一一对应且保持稳定。未出现在本文件中的规则（1–15、18、20、22、25）
+> 规则编号与 `AGENTS.md` 一一对应且保持稳定。未出现在本文件中的规则（1–15、20、22、25）
 > 本身已足够短，未做拆分——不要因为本文件里没有它们就认为它们的约束更弱。
 > 规则 32 与其它条目不同：它自 2026-09-12 起直接在本文件附案例（见文末 Rule 32），
 > 案例与规则同批写入，非拆分产物。
@@ -13,6 +13,59 @@
 > 与 `docs/archive/2026-09-batches.md`（批次历史）是同一类材料。
 
 ---
+
+## Rule 8
+
+**8. Layering**
+
+How the adapter `chrome.*` exemption earned its bullet, and how the direct-import list learned
+to be a table:
+
+The rule used to name only *repositories* as forbidden from `chrome.*`, leaving adapters in a
+grey zone: `bilibili.ts`, `weibo.ts` and `xiaohongshu.ts` each had a `checkAuthStatus()` reading
+`chrome.cookies.get` directly, and nobody could say whether that was a violation. It was not —
+it was **dead code**, and the same cookie-name tables live (and are used) in `platformAuth.ts`.
+Found 2026-09-12 and deleted. The lesson is in the shape of the question, not the answer:
+"is this allowed?" hid "does this run?".
+
+`bgFetch` used to be laundered through a mislocated `utils/http.ts`, which also made a leaf
+layer depend on the chrome layer. Moved to `src/infrastructure/chrome/http.ts` on 2026-09-11;
+see `docs/REVIEW_2026-09.md`.
+
+The direct-import list was earlier just a phrase, and that is how it drifted: a 9th site
+(`useDeletedPosts.ts`) sat outside the four named categories while being exactly the shape this
+rule forbids, so "known debt, enumerated" stopped being true without anyone editing the rule.
+Fix queue #10 resolved the *facade* — the whole recycle-bin lifecycle, which used to import
+seven repository functions directly from the UI, now goes through `src/application`. That
+history is why the rule now carries the four-file table with a same-commit update requirement.
+
+## Rule 9
+
+**9. Page-driven platforms keep their scraping in an isolated layer**
+
+The Twitter Bearer-token incident that earned the closure rule, and the 2026-09-12 prefix
+audit that earned the two-lists rule:
+
+Twitter's injected function read `Bearer ${TWITTER_BEARER_TOKEN}` — a module constant — for
+as long as that path existed. In the page that is a `ReferenceError`, caught by the
+function's own `try/catch`, returned as a plain failure, and the sync fell through to the
+direct fetch. **The page path never ran once, in production, and nothing could tell**: the
+failure looked like a platform problem, and `PLATFORMS.md`'s advice to open the creator's
+profile and retry was inert. Constants for the injected function travel through
+`executeScript`'s `args` (Twitter: the bearer plus the four GraphQL sets — one definition,
+shared with the direct fetch, which is also why the two can no longer drift).
+
+Audited 2026-09-12: **eight of `urlParser`'s sixteen generated prefixes were missing**, and
+every one of them was real — all nine adapters return `authorMeta.name`, so the
+authoritative nickname was always available and simply could not be written. Two causes:
+`startsWith(channel.platform)` is case-sensitive (`'YouTube视频_x'.startsWith('youtube')`
+and `'RSS_x'.startsWith('rss')` are both false — the whole reason `Pixiv` and `Fantia`
+appear spelled with a capital letter, added one at a time), and the creator list is a
+second, hand-written list that only ever covered "creator page" placeholders
+(`Pixiv画师_`, `Fantia俱乐部_`) — none of the "single work" ones, so following a creator
+instance and went unnoticed for as long as the platform existed; these eight are the
+second. Deriving the prefixes from the single place that generates them is the fix for
+the class.
 
 ## Rule 16
 
@@ -79,6 +132,47 @@ happened to load more slowly, succeeded — the fixed sleep raced the page and w
   and the collector diagnoses those better than a timeout could.
 - A fixed sleep after `load` is a guess about someone else's renderer. It is acceptable only
   as a short settle before a real readiness check.
+
+## Rule 18
+
+**18. Third-party HTML is sanitized at the boundary, and structure is rendered, not flattened**
+
+An RSS item's `<content:encoded>` is **arbitrary markup authored by whoever controls the
+feed**. The reader renders the body, and once it renders markup it does so inside an
+extension page — a page that holds the user's cookies. This is therefore a code-execution
+boundary, not a formatting concern.
+
+- Sanitize **at parse time** in the adapter (`src/utils/sanitizeHtml.ts`), so stored data is
+  already safe and no renderer has to remember that a feed is untrusted.
+- The policy is an allowlist, and unknown elements are **unwrapped** (children kept) while
+  `script`/`style`/`iframe`/`form`/`svg` are **dropped with their subtree** — unwrapping
+  `<style>` would print its CSS into the article as text, and `svg`/`math` are a different
+  namespace where `tagName` cannot distinguish an `xlink:href` carrier from a plain `<a>`.
+- URLs are validated by **parsing and testing the protocol**, never by prefix-matching the
+  raw string: `java\nscript:` and a leading control character are the standard bypasses.
+  Relative URLs resolve against the article's link (a bare `/img.png` on a
+  `chrome-extension://` page resolves against the extension and 404s). `href`/`src` are set
+  explicitly and are never copied by the generic attribute loop.
+- Serialize nodes **this code created**; never rewrite the input's markup with patterns.
+
+The other half of the lesson: **a feed's structure is its content.** Flattening an article to
+text is what pushed every image into a gallery under the body (measured: 23 images in one
+article, rendered as a "+17" placeholder grid) and left headings indistinguishable from
+paragraphs. Store the structure (`Post.contentHtml`), render it with tag-level typography
+(`.article-body` in `assets/main.css`), and **do not render the same media twice** —
+`standaloneMedia()` is the single rule both the card and the reader use.
+
+### The image proxy: reachability is not credentials
+
+`proxyImage` used to refuse any host outside `PLATFORM_HOSTS`. A feed may host its images
+anywhere, and the proxy is the only path that can load a CDN which blocks hotlinking or sends
+no CORS header — so every RSS article image was unreadable. The check was the same category
+error as rule 3, one layer down: **any http(s) host may be fetched; only a platform host
+gets the user's session** (`credentials: 'include'`, platform `Referer`). Reachability was
+never what the allowlist was for.
+
+Any change here MUST keep those two properties pinned together: `tests/proxyImage.test.ts`
+asserts both that an unknown host is fetched *and* that it receives no cookies.
 
 ## Rule 19
 
@@ -415,6 +509,27 @@ CDP, and everything below it was written as if the ceiling were lower than it is
 `--load-extension` remains fine for spawning a *plain* Chrome to view non-extension URLs (rule 25's
 recipe) — though with a CDP-loaded extension available, that is now mostly a fallback.
 
+**Addendum — the `// off-screen: the user is not disturbed` comment in the block above is
+superseded.** Every comment in this repo claiming off-screen placement disturbs no one was wrong,
+this block's included. Measured on Windows: `Browser.getWindowBounds` reports
+`{left: -2400, top: -2400, width: 1440, height: 900, state: "normal"}` — the flag is honoured,
+and that is exactly the problem: the window still appears in the taskbar, can still be
+alt-tabbed to, and on a virtual desktop extending to negative coordinates (a monitor placed to
+the left of the primary) it is visibly **on a real display**. The user said so directly:
+「你开的测试浏览器在我的屏幕可显示范围内」.
+
+What actually keeps it out of the way is minimizing after load (`Target.getTargets` →
+`Browser.getWindowForTarget` → `Browser.setWindowBounds` with `{windowState: 'minimized'}`;
+the same measurement then reports `state: "minimized"`). `release-gate.mjs`, `creators-render.mjs`
+and `feed-render.mjs` all do this now. Minimizing does not break driven input — verified, not
+assumed: after the change all four clicks in the release gate still report delivery
+(`mousedown=1 mouseup=1 click=1`), and `feed-render` stays byte-identical across two runs of the
+same build.
+
+The one exception, also from measurement: the scripts skip the minimize when `CI` is set, because
+on a runner the window must stay on the X screen — an off-screen window under Xvfb receives no
+synthetic input at all. That was a real intermittent failure in the CI history for 2026-09-11.
+
 ## Rule 29
 
 **29. Whitespace in a table is conserved — decide where it goes, and measure**
@@ -484,6 +599,35 @@ content rendered twice. jsdom proves the arithmetic; only this proves the *seam*
 `scrollTop` across the boundary and confirming the content under the viewport's top edge
 advances continuously (offset within a row going `33 → row ends → 0 of the next row`, never
 jumping). Measure and print the trace; do not eyeball it.
+
+**A synthetic click aimed at a stale position is indistinguishable from a window that
+cannot be clicked — and the environment will look perfect while it happens.** The CI gate
+failed intermittently for a day and I offered four explanations, all wrong (window placed
+off-screen, window not yet mapped, retry budget too short, window wider than the Xvfb
+screen). What finally settled it was making the failure print the geometry, which cleared
+every environmental suspect at once:
+
+    display 1920x1080 fits the window 1440x900     ← the display is fine
+    screenX:10 screenY:10 outer 1440x900           ← the window is fully on it
+    hasFocus: true  visibility: visible            ← and focused
+    mousedown=0 mouseup=0 click=0                  ← yet nothing arrived
+
+The coordinates had been measured **once**, before `Page.bringToFront` and the focus wait
+— seconds during which the app is still mounting and re-laying out. All five retry attempts
+then dispatched at that same stale point. Fix: measure again before **every** dispatch. It
+is cheap, and it is why the failure correlated with how fast the app settled rather than
+with anything about the display.
+
+Two process notes, because they cost more than the bug did:
+
+- **A single green run is not evidence.** I declared this fixed four times on one passing
+  run each; the commit that "fixed" it twice failed 2 of 4 runs. The fix is only believable
+  because `3e70768` was measured at 2/4 and its successor at **10/10** on unchanged
+  arguments — at the old rate, ten straight passes is about a one-in-a-thousand outcome.
+  Sample a flake more than once before believing anything, including a repair.
+- **When the environment is exonerated, stop blaming it.** Four hypotheses about
+  occlusion and mapping all pointed outward; the fault was a stale measurement in our own
+  code. Let the failure carry numbers, and read them before theorising.
 
 ### Pitfalls of driving an occluded browser
 
@@ -598,3 +742,26 @@ not require four agents to find.
 队列里排着「立即可做」的活、上下文里全是刚读过的实现细节，惯性是「顺手做掉」。
 对策不是「下次小心」，而是规则 32 的硬约束：动词就是全部授权；队列是清单不是许可；
 带用户确认关的条目，关没过就是没过。
+
+## Fix queue（原 `AGENTS.md` §Fix queue，2026-09-12 迁入）
+
+12 项全部 DONE（队列 1–4 在提交 `25b8217`，队列 5–12 在后续系列）。保留为
+「修过什么、规则从哪来」的记录。**它不是待办清单**——`AGENTS.md` 里从未承载待办，
+待办入口一直是 `PROJECT_PROGRESS_2026-09.md` §四.P8；把它移到这里是为了让规则文件
+只剩约束（AUDIT P2-17）。
+
+1. `bgFetch` credential host matching — `hosts.ts` + `senderGuard.ts`; hostname-exact token injection, GET-only, credentials by allowlist.
+2. Sender validation — router policy table in `background.ts`.
+3. `isRead`/`isBookmarked` → `0|1` with Dexie v4 migration (posts + tombstone snapshots).
+4. Auto-sync alarm guard + SW-direct `performBgFetch` (`IS_SERVICE_WORKER`).
+5. DNR rules scoped with `initiatorDomains: [chrome.runtime.id]`, `sub_frame` dropped, applied on install only.
+6. Adapter data integrity: no `Math.random()` post IDs (skip or content-hash), `btoa` → TextEncoder hash (rss `stableHash`), `Number.isFinite` guards on all parsed timestamps.
+7. `parseBackup`: version gate + per-record required-field validation, fail-fast.
+8. `FetchResult.error` → structured `FetchError { code, message, retryable }`; adapters classify; `channelSync` switches on codes; silent RSS fallback removed from `getAdapter`.
+   > 注（2026-09-12）：`retryable` 字段后来因「只写不读、且按可重试性重试会与规则 19 的冷却冲突」被删除（详见 PROJECT_PROGRESS 队列 B31）。
+9. Index-backed queries: watermark via `[channelId+publishedAt].last()`, tombstones via `channelId` index, bilibili dedup streams instead of materializing.
+   > 注（2026-09-12）：v6 拆表后墓碑改经 `postSuppressions`，过滤按 `postId`（见 `DELETION_MODEL.md`）。
+10. `application/` layer resolved (popup writes via services, dead `platformAuthService` deleted); cookie-auth table single-sourced in `platformAuth.ts`; `buildPost` factory for the 13 adapter literals.
+11. `CreatorsView` 1420 → ~1100 lines via `PlatformBadge` / `ChannelRow` / `CreatorCardHeader`; `BaseModal` (dialog semantics, focus trap, scroll lock) adopted by all 6 modals.
+12. CI (`.github/workflows/ci.yml`): typecheck + lint + 测试 + build；`typescript` 固定 7.0.2；ESLint flat config（`eslint.config.js`，TS6 兼容别名）；`vue-tsc` 加入使 typecheck 覆盖 `.vue`，`vueCompilerOptions.strictTemplates` 于 2026-09-11 启用（否则模板里未导入的组件对门禁不可见，见规则 27）；`release.yml` + 标签/版本校验；`jsdom` 用于 RSS 解析/净化测试（需要真实 `DOMParser`）。
+    > 注（2026-09-12）：CI 现跑 `test:coverage`（核心模块覆盖率棘轮）与真机 E2E 门禁；测试数与文件数不写死。
