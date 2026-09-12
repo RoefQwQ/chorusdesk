@@ -29,8 +29,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests (with core-module coverage ratchet)
+        # `test:coverage`, not `test`: the per-file branch thresholds in
+        # vitest.config.ts only apply when coverage runs, so a plain `vitest run`
+        # would let a PR delete them and stay green (audit P2-14).
+        run: npm run test:coverage
 
       - name: Build extension
         run: npm run build

@@ -1,5 +1,5 @@
 import type { Channel, Post, MediaItem } from '../types';
-import type { PlatformAdapter, FetchResult } from './types';
+import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
@@ -63,13 +63,14 @@ export const rssAdapter: PlatformAdapter = {
   // on every run for no result. See the field's note in `adapters/types.ts`.
   archivesMedia: false,
 
-  async fetchLatest(channel: Channel, limit: number = 10): Promise<FetchResult> {
+  async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     try {
       const feedUrl = channel.profileUrl || channel.accountId;
       const res = await bgFetch(feedUrl, {
         headers: {
           'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
         },
+        signal: options?.signal,
       });
 
       if (!res.ok) {

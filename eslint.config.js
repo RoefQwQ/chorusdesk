@@ -22,6 +22,18 @@ export default tseslint.config(
       globals: { ...globals.browser },
     },
   },
+  // The e2e harnesses are Node scripts (.mjs) that drive Chrome over CDP, so
+  // they need Node globals rather than the browser set — and they were excluded
+  // from lint entirely, which left a 59 KB `release-gate.mjs` as the one
+  // substantial file in the repo with no static checking at all (audit P2-2).
+  // Excluding a file does not protect it; it only removes the tool that would
+  // have caught a typo before a release gate spends a browser launch on it.
+  {
+    files: ['e2e/**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
   // Code paths that touch chrome.* APIs: SW router, infrastructure,
   // adapters, utils, and their tests.
   {
@@ -68,6 +80,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['.output/**', '.wxt/**', 'node_modules/**', 'dist/**', 'e2e/**'],
+    ignores: ['.output/**', '.wxt/**', 'node_modules/**', 'dist/**'],
   },
 );

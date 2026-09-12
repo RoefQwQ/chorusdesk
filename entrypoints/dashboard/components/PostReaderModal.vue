@@ -5,6 +5,7 @@ import BaseModal from './BaseModal.vue';
 import { PLATFORM_REGISTRY, type Channel, type Creator, type Post } from '../../../src/types';
 import { createImageErrorRecovery, toSecureMediaUrl } from '../../../src/utils/media';
 import { shouldShowTitle, standaloneMedia } from '../../../src/utils/postText';
+import { toEpochMs } from '../../../src/utils/timestamp';
 
 /**
  * 全宽阅读视图：给长文 / RSS 这类「正文即文章」的动态一个能真正读完的地方。
@@ -65,8 +66,9 @@ onBeforeUnmount(() => {
 });
 
 const formatDate = (timestamp: number) => {
-  if (!timestamp) return '未知时间';
-  const date = new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp);
+  const ms = toEpochMs(timestamp);
+  if (ms === null) return '未知时间';
+  const date = new Date(ms);
   return date.toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 </script>

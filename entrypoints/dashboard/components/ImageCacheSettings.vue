@@ -6,6 +6,7 @@ import { getAdapter } from '../../../src/platform/registry';
 import { devLog } from '../../../src/utils/devLog';
 import type { AppSettings, Post, Creator } from '../../../src/types';
 import { errorMessage } from '../../../src/utils/errorMessage';
+import { dialog } from '../composables/useDialog';
 
 const props = defineProps<{
   settings: AppSettings;
@@ -48,12 +49,12 @@ async function handleSelectDirectory() {
         enableImageCache: true,
         imageCacheDirectoryName: res.dirName,
       });
-      alert(`【本地目录绑定成功】已选定文件夹 "${res.dirName}"。此后图片将分类归档至该目录下！`);
+      await dialog.alert(`【本地目录绑定成功】已选定文件夹 "${res.dirName}"。此后图片将分类归档至该目录下！`);
     } else if (res.error && res.error !== '已取消选择目录') {
-      alert('绑定失败： ' + res.error);
+      await dialog.alert('绑定失败： ' + res.error);
     }
   } catch (err: unknown) {
-    alert('操作异常： ' + (errorMessage(err)));
+    await dialog.alert('操作异常： ' + (errorMessage(err)));
   } finally {
     isBinding.value = false;
     checkStatus();
@@ -61,7 +62,7 @@ async function handleSelectDirectory() {
 }
 
 async function handleUnbindDirectory() {
-  if (!confirm('确定要解绑当前的本地图片缓存目录吗？\n（已下载到本机的图片文件不会被删除）')) {
+  if (!(await dialog.confirm('确定要解绑当前的本地图片缓存目录吗？\n（已下载到本机的图片文件不会被删除）'))) {
     return;
   }
   await imageCacheService.unbindDirectory();
@@ -75,7 +76,7 @@ async function handleUnbindDirectory() {
 
 async function handleBatchCacheExisting() {
   if (!isReady.value) {
-    alert('请先点击上方“选择/更改本地目录”绑定一个磁盘文件夹！');
+    await dialog.alert('请先点击上方“选择/更改本地目录”绑定一个磁盘文件夹！');
     return;
   }
 
@@ -88,7 +89,7 @@ async function handleBatchCacheExisting() {
     (p) => p.mediaList && p.mediaList.length > 0 && getAdapter(p.platform)?.archivesMedia !== false,
   );
   if (targetPosts.length === 0) {
-    alert('当前动态列表中没有可归档的图文动态');
+    await dialog.alert('当前动态列表中没有可归档的图文动态');
     return;
   }
 
@@ -151,9 +152,9 @@ async function handleBatchCacheExisting() {
       // Ids only: enough to identify which posts to retry.
       devLog.warn('imageCache', `${failures.length} 条作品归档失败`, failures.slice(0, 20).join(', '));
     }
-    alert(`【离线归档完成】${summary.join('，')}。归档目录: "${boundDirName.value}"`);
+    await dialog.alert(`【离线归档完成】${summary.join('，')}。归档目录: "${boundDirName.value}"`);
   } catch (err: unknown) {
-    alert('批量缓存异常： ' + (errorMessage(err)));
+    await dialog.alert('批量缓存异常： ' + (errorMessage(err)));
   } finally {
     isBatchCaching.value = false;
   }

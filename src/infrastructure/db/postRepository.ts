@@ -1,16 +1,34 @@
-import type { Post, DeletedPostRecord } from '../../types';
+import type { Post, RecycleSnapshot } from '../../types';
 import { toSecureMediaUrl } from '../../utils/media';
 import { db } from './database';
 
 /**
+ * Deletion lifecycle (DELETION_MODEL.md).
+ *
+ * Three concepts with three lifecycles:
+ *
+ *   postSuppressions   「这条内容不许通过同步再出现」 — cleared ONLY by an
+ *                       explicit restore. `permanentlyDelete` and
+ *                       `emptyRecycleBin` must never touch it.
+ *   recycleSnapshots   「这条内容还能不能找回」 — cleared by 彻底删除 / 清空回收站
+ *                       / 恢复.
+ *   posts              「现在可见的内容」 — the feed itself.
+ *
+ * The earlier single-table design put suppression and snapshot in one row, so
+ * dropping a snapshot also dropped the blacklist and deleted posts came back on
+ * the next sync. Every mutation here that touches both halves is a single
+ * transaction, so a failure can never leave `posts` and `postSuppressions`
+ * disagreeing (I5/I6).
+ */
+
+/**
  * Clean up old unbookmarked posts to prevent storage explosion.
- * @param days Keep posts newer than this many days (e.g. 30, 60, 90). If 0, delete all unbookmarked posts.
- * @returns Number of posts deleted
+ *
+ * Deliberately does NOT create suppressions: this is storage maintenance the
+ * user triggers by hand, not 「我不要这条内容」 (DELETION_MODEL §6 问题 6).
  */
 export async function cleanupOldPosts(days: number = 60): Promise<number> {
   const cutoffTime = days > 0 ? Date.now() - days * 86400 * 1000 : Infinity;
-
-  // Find posts to delete: published before cutoff and NOT bookmarked
   const postsToDelete = await db.posts
     .filter(p => {
       const isOld = days === 0 || p.publishedAt < cutoffTime;
@@ -27,81 +45,157 @@ export async function cleanupOldPosts(days: number = 60): Promise<number> {
 }
 
 /**
- * Mark a post as deleted by removing it from `posts` and storing in `deletedPostIds` (Recycle Bin)
- * with a full post snapshot so it can be restored directly at any time.
+ * Delete a post: remove it from the feed, record the suppression (permanent
+ * until explicitly restored) and keep a full snapshot in the recycle bin.
+ *
+ * One transaction: a failure leaves the post in the feed rather than in a state
+ * where it is gone but not suppressed (I6).
  */
 export async function deletePostAndTombstone(post: Post): Promise<void> {
-  await db.posts.delete(post.id);
-  await db.deletedPostIds.put({
-    id: post.id,
-    channelId: post.channelId,
-    creatorId: post.creatorId,
-    platform: post.platform,
-    title: post.title || (post.content ? post.content.slice(0, 50) : post.id),
-    deletedAt: Date.now(),
-    postData: JSON.parse(JSON.stringify(post)),
+  await db.transaction('rw', [db.posts, db.postSuppressions, db.recycleSnapshots], async () => {
+    await db.posts.delete(post.id);
+    await db.postSuppressions.put({
+      postId: post.id,
+      platform: post.platform,
+      suppressedAt: Date.now(),
+      channelId: post.channelId,
+      creatorId: post.creatorId,
+    });
+    await db.recycleSnapshots.put({
+      id: post.id,
+      channelId: post.channelId,
+      creatorId: post.creatorId,
+      platform: post.platform,
+      title: post.title || (post.content ? post.content.slice(0, 50) : post.id),
+      deletedAt: Date.now(),
+      postData: JSON.parse(JSON.stringify(post)),
+    });
   });
 }
 
 /**
- * Restore a single deleted post directly back to `posts` table from Recycle Bin.
- * Returns the restored Post if it was restored, or null if no postData existed.
+ * Restore a post from the recycle bin: write it back and CLEAR its suppression.
+ *
+ * Both halves in one transaction. Returns the restored post, or null when no
+ * snapshot existed (the caller then re-fetches instead).
+ *
+ * I11: a snapshot whose parent channel is gone cannot be restored into a
+ * working feed — writing it back would produce a row pointing at a channel that
+ * does not exist, which the old code did while telling the user 「动态已定向找回」.
+ * Such an orphan can never become restorable again, so it is dropped here.
  */
 export async function restoreDeletedPost(id: string): Promise<Post | null> {
-  const record = await db.deletedPostIds.get(id);
-  if (!record) return null;
-  if (record.postData) {
-    await db.posts.put(record.postData);
-  }
-  await db.deletedPostIds.delete(id);
-  return record.postData || null;
+  return db.transaction('rw', [db.posts, db.channels, db.postSuppressions, db.recycleSnapshots], async () => {
+    const record = await db.recycleSnapshots.get(id);
+    if (!record) return null;
+    if (record.channelId && !(await db.channels.get(record.channelId))) {
+      await db.recycleSnapshots.delete(id);
+      return null;
+    }
+    if (record.postData) {
+      await db.posts.put(record.postData);
+    }
+    await db.postSuppressions.delete(id);
+    await db.recycleSnapshots.delete(id);
+    return record.postData || null;
+  });
 }
 
 /**
- * Clear all deleted post tombstone records and restore all snapshot posts back to feed.
+ * Restore every snapshot back into the feed and clear every suppression.
+ * With nothing left to restore this still clears the suppressions, which is
+ * what makes 「全部恢复」 mean "stop hiding these".
  */
 export async function restoreAllDeletedPostIds(): Promise<number> {
-  const records = await db.deletedPostIds.toArray();
-  const restored: Post[] = [];
-  for (const r of records) {
-    if (r.postData) {
-      restored.push(r.postData);
+  return db.transaction('rw', [db.posts, db.postSuppressions, db.recycleSnapshots], async () => {
+    const records = await db.recycleSnapshots.toArray();
+    const restored: Post[] = [];
+    for (const r of records) {
+      if (r.postData) restored.push(r.postData);
     }
-  }
-  if (restored.length > 0) {
-    await db.posts.bulkPut(restored);
-  }
-  await db.deletedPostIds.clear();
-  return records.length;
+    if (restored.length > 0) {
+      await db.posts.bulkPut(restored);
+    }
+    await db.postSuppressions.clear();
+    await db.recycleSnapshots.clear();
+    return records.length;
+  });
 }
 
 /**
- * Permanently purge a deleted post record from Recycle Bin without restoring it.
+ * 彻底删除: drop the snapshot for good. The post stays gone because the
+ * SUPPRESSION stays — this is the whole point of the split, and the reason
+ * the old comment ("the post stays gone") was false before it.
  */
 export async function permanentlyDeletePost(id: string): Promise<void> {
-  await db.deletedPostIds.delete(id);
+  await db.recycleSnapshots.delete(id);
 }
 
-/**
- * Get count of tombstoned deleted posts in Recycle Bin.
- */
+/** Get count of recycle-bin snapshots. */
 export async function getDeletedPostCount(): Promise<number> {
   try {
-    return await db.deletedPostIds.count();
+    return await db.recycleSnapshots.count();
   } catch {
     return 0;
   }
 }
 
-/**
- * Get all tombstoned deleted post records in Recycle Bin, sorted newest first.
- */
-export async function getDeletedPostRecords(): Promise<DeletedPostRecord[]> {
+/** Get all recycle-bin records, sorted newest first. */
+export async function getDeletedPostRecords(): Promise<RecycleSnapshot[]> {
   try {
-    return await db.deletedPostIds.orderBy('deletedAt').reverse().toArray();
+    return await db.recycleSnapshots.orderBy('deletedAt').reverse().toArray();
   } catch {
     return [];
   }
+}
+
+/**
+ * 清空回收站: drop every snapshot, keep every suppression (I3).
+ */
+export async function clearDeletedPostRecords(): Promise<void> {
+  await db.recycleSnapshots.clear();
+}
+
+/**
+ * Is this post currently suppressed? The sync layer's filter (I7/I10).
+ * Read failures propagate: the caller must fail closed, never write the post.
+ */
+export async function getSuppressedPostIds(postIds: readonly string[]): Promise<Set<string>> {
+  if (postIds.length === 0) return new Set();
+  const rows = await db.postSuppressions.bulkGet([...postIds]);
+  const suppressed = new Set<string>();
+  for (const row of rows) {
+    if (row) suppressed.add(row.postId);
+  }
+  return suppressed;
+}
+
+/**
+ * Lift suppression for exactly these ids (the user's explicit restore path).
+ * Bounded to the ids the adapter just returned — never a table scan.
+ */
+export async function clearSuppressions(postIds: readonly string[]): Promise<void> {
+  if (postIds.length > 0) await db.postSuppressions.bulkDelete([...postIds]);
+}
+
+/**
+ * How many suppressions still stand under these channels (unfollow prompt,
+ * §6 问题 5). Counts suppression rows directly, so it stays correct after
+ * 彻底删除 has dropped the snapshot.
+ */
+export async function countSuppressionsForChannels(channelIds: readonly string[]): Promise<number> {
+  if (channelIds.length === 0) return 0;
+  const ids = new Set(channelIds);
+  const rows = await db.postSuppressions.toArray();
+  return rows.filter((r) => r.channelId !== undefined && ids.has(r.channelId)).length;
+}
+
+/** How many suppressions still stand under this creator (batch unfollow prompt). */
+export async function countSuppressionsForCreator(creatorId: string): Promise<number> {
+  // `creatorId` is not an index on postSuppressions (the key is postId), so
+  // filter rather than `where` — this is a rare prompt, not a hot path.
+  const rows = await db.postSuppressions.toArray();
+  return rows.filter((r) => r.creatorId === creatorId).length;
 }
 
 /**
@@ -122,64 +216,37 @@ export async function setPostRead(id: string): Promise<void> {
 }
 
 /**
- * Permanently clear every tombstone in the recycle bin without restoring any
- * snapshot (dashboard "清空回收站" action — `db.deletedPostIds.clear()`).
- */
-export async function clearDeletedPostRecords(): Promise<void> {
-  await db.deletedPostIds.clear();
-}
-
-/**
  * Heal broken or stale image URLs in local IndexedDB posts (e.g. Xiaohongshu strict CDN domains).
  * Returns the count of healed posts.
  */
 export async function healBrokenPostMedia(): Promise<number> {
+  const posts = await db.posts.toArray();
   let healedCount = 0;
-  const xhsPosts = await db.posts.where('platform').equals('xiaohongshu').toArray();
 
-  for (const post of xhsPosts) {
-    let modified = false;
+  for (const post of posts) {
+    let changed = false;
+
     if (post.mediaList && post.mediaList.length > 0) {
-      for (const media of post.mediaList) {
-        if (media.previewUrl) {
-          const healed = toSecureMediaUrl(media.previewUrl);
-          if (healed && healed !== media.previewUrl) {
-            media.previewUrl = healed;
-            modified = true;
-          }
+      const newMediaList = post.mediaList.map(m => {
+        const securedPreview = toSecureMediaUrl(m.previewUrl);
+        const securedOriginal = toSecureMediaUrl(m.originalUrl);
+        if (securedPreview !== m.previewUrl || securedOriginal !== m.originalUrl) {
+          changed = true;
         }
-        if (media.originalUrl) {
-          const healed = toSecureMediaUrl(media.originalUrl);
-          if (healed && healed !== media.originalUrl) {
-            media.originalUrl = healed;
-            modified = true;
-          }
-        }
-      }
+        return { ...m, previewUrl: securedPreview, originalUrl: securedOriginal };
+      });
+      if (changed) post.mediaList = newMediaList;
     }
 
-    if (post.authorMeta?.avatar) {
-      const healedAvatar = toSecureMediaUrl(post.authorMeta.avatar);
-      if (healedAvatar && healedAvatar !== post.authorMeta.avatar) {
-        post.authorMeta.avatar = healedAvatar;
-        modified = true;
-      }
+    const securedAvatar = post.authorMeta?.avatar ? toSecureMediaUrl(post.authorMeta.avatar) : undefined;
+    if (securedAvatar && securedAvatar !== post.authorMeta?.avatar) {
+      post.authorMeta = { ...post.authorMeta, avatar: securedAvatar };
+      changed = true;
     }
 
-    if (modified) {
+    if (changed) {
       await db.posts.put(post);
       healedCount++;
-    }
-  }
-
-  // Also check channels avatarUrl
-  const xhsChannels = await db.channels.where('platform').equals('xiaohongshu').toArray();
-  for (const ch of xhsChannels) {
-    if (ch.avatarUrl) {
-      const fixed = toSecureMediaUrl(ch.avatarUrl);
-      if (fixed && fixed !== ch.avatarUrl) {
-        await db.channels.update(ch.id, { avatarUrl: fixed });
-      }
     }
   }
 

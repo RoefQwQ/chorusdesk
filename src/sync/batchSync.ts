@@ -2,7 +2,7 @@ import type { Channel } from '../types';
 import type { FetchOptions, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { db } from '../infrastructure/db/database';
-import { updateChannel } from './channelSync';
+import { updateChannel, isStorageFailure } from './channelSync';
 import {
   clearRateLimit,
   formatCooldown,
@@ -136,9 +136,11 @@ export async function batchUpdateChannelsInterleaved(
       options?.onProgress?.(i + 1, total, ch, res);
     } catch (e: unknown) {
       console.warn(`[BatchUpdate] Error on ${ch.id}:`, e);
+      // Same domain split as `channelSync` (AUDIT P1-1): a local storage error
+      // must not be reported as a platform network failure.
       options?.onProgress?.(i + 1, total, ch, {
         posts: [],
-        error: fetchError('network', errorMessage(e)),
+        error: fetchError(isStorageFailure(e) ? 'storage' : 'network', errorMessage(e)),
       });
     } finally {
       // Recorded on every path, including failure: a failed request still hit the

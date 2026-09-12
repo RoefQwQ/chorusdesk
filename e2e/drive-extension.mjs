@@ -35,7 +35,7 @@ socket.on('open', async () => {
     await send('Runtime.enable');
 
     // 1. What channels exist and their cursor state (via the app's own db).
-    const dbState = await evalInPage(`(async () => {
+    await evalInPage(`(async () => {
       const dbMod = await import('/chunks/main-V1p6wrdZ.js').catch(() => null);
       return { modLoaded: !!dbMod };
     })()`);

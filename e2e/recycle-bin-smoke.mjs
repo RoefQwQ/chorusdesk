@@ -41,7 +41,8 @@ ws.addEventListener('message', (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && pending.has(m.id)) {
     const p = pending.get(m.id); pending.delete(m.id);
-    m.error ? p.reject(new Error(`${m.method}: ${m.error.message}`)) : p.resolve(m.result);
+    if (m.error) p.reject(new Error(`${m.method}: ${m.error.message}`));
+    else p.resolve(m.result);
     return;
   }
   // `confirm()` blocks the renderer AND CDP. Answer immediately, always accept.

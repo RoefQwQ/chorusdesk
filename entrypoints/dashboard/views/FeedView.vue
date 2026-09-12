@@ -14,6 +14,11 @@ export interface FeedContext {
   searchQuery: string;
   selectedPlatform: string;
   platformOrder: string[];
+  /**
+   * Warm a platform's first screen of images into the disk cache (queue B5).
+   * Called on sidebar hover; resolves when the pass finishes or is superseded.
+   */
+  prefetchPlatform: (platform: string) => Promise<void>;
   /** Platform key -> post count, for the sidebar badges. */
   platformPostCounts: Record<string, number>;
   /** Platform metadata (name/color) for the sidebar rows. */
@@ -154,6 +159,7 @@ function handleSearchInput(event: Event) {
         :key="key"
         draggable="true"
         @click="emit('update:selectedPlatform', key)"
+        @mouseenter="context.prefetchPlatform(key)"
         @dragstart="onPlatformDragStart(key)"
         @dragover="(e: DragEvent) => onPlatformDragOver(e, key)"
         @dragleave="dragOverPlatformKey = null"

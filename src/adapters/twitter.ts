@@ -148,6 +148,15 @@ export const twitterAdapter: PlatformAdapter = {
       };
     }
 
+    // Cancellation (AUDIT P1-2): the tab path is a message round-trip whose
+    // worker side drives `chrome.scripting`; neither the message nor an
+    // in-flight injection can be recalled, so this acquisition is not
+    // cancellable. The already-aborted check is the only cancellation the path
+    // can offer: it skips dispatch when the caller has given up.
+    if (options?.signal?.aborted) {
+      return { posts: [], error: fetchError('timeout', '同步已取消（调用方已中止）') };
+    }
+
     try {
       const res = await chrome.runtime.sendMessage({
         type: 'FETCH_TWITTER_TIMELINE',

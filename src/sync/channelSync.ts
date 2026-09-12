@@ -3,8 +3,11 @@ import type { Creator, Channel, Post } from '../types';
 import type { FetchError, FetchOptions, FetchResult } from '../adapters/types';
 import { fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
+import { GENERATED_NAME_PREFIXES } from '../utils/urlParser';
 import { db } from '../infrastructure/db/database';
+import { getSuppressedPostIds, clearSuppressions } from '../infrastructure/db/postRepository';
 import { devLog } from '../utils/devLog';
+import { toEpochMsOr } from '../utils/timestamp';
 import {
   END_OF_HISTORY_CURSOR,
   shouldRecordHistoryEnd,
@@ -13,6 +16,51 @@ import {
 
 class FetchTimeoutError extends Error {}
 
+/**
+ * Was this name one WE generated, for a row written before `nameSource` existed?
+ *
+ * Only ever consulted when `nameSource === undefined`. Derived from
+ * `urlParser.GENERATED_NAME_PREFIXES` — not a second hand-written list, which
+ * is the shape that drifted twice and silently pinned machine names
+ * (audit P1-5, AGENTS rule 9). Each such row gets one chance to be repaired;
+ * the write then stamps `nameSource: 'platform'` and the heuristic is never
+ * consulted for it again.
+ */
+function legacyPlaceholderName(name: string, platform: string, accountId: string): boolean {
+  if (!name) return true;
+  if (name === accountId) return true;
+  const bare = accountId.replace(/^@/, '');
+  if (name === bare || name === `@${bare}`) return true;
+  if (name.startsWith(platform)) return true;
+  return GENERATED_NAME_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/** The creator-side half of `legacyPlaceholderName` (its old default names differ). */
+function legacyCreatorPlaceholderName(name: string, accountId: string): boolean {
+  if (!name) return true;
+  if (name === '新创作者' || name === '未命名创作者') return true;
+  if (name === accountId) return true;
+  const bare = accountId.replace(/^@/, '');
+  if (name === bare || name === `@${bare}`) return true;
+  return GENERATED_NAME_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
+ * Is this a local storage failure rather than a platform/network one?
+ *
+ * Dexie wraps the underlying `DOMException` in a plain Error whose `name`/`message`
+ * carry the original ("QuotaExceededError", "AbortError", or a transaction failure
+ * like "The transaction was aborted"). Inspecting both keeps the classification
+ * honest without matching on our own error strings.
+ *
+ * Exported because `batchSync` must make the same call when a per-channel sync
+ * throws out of its own try/catch (AUDIT P1-1).
+ */
+export function isStorageFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const text = `${err.name} ${err.message}`;
+  return /QuotaExceededError|UnknownError|AbortError|transaction was aborted|DatabaseClosedError|InvalidStateError|IndexedDB/i.test(text);
+}
 
 /**
  * Friendly wording for error classes the sync layer understands. With the
@@ -22,6 +70,10 @@ function friendlyError(err: FetchError): string {
   switch (err.code) {
     case 'rate_limit':
       return '触发平台防刷频率限制。目标平台正在进行安全限流冷却，请等待 2~3 分钟后再刷新，避免频繁请求。';
+    case 'storage':
+      // Name the local cause and explicitly clear the platform: this failure
+      // says nothing about whether the site was reachable.
+      return `${err.message}（本地存储问题，与平台是否可达无关）`;
     case 'auth':
       return err.message; // adapters already word auth errors as user actions
     default:
@@ -139,9 +191,22 @@ export async function updateChannel(
   });
 
   try {
-    // Twitter may need an existing authenticated tab fallback; allow enough time for it to load.
+    // The 45s budget must CANCEL the work, not merely stop waiting for it
+    // (AUDIT P1-2). Before this the timeout resolved while the underlying fetch
+    // kept running, so a user who retried during the wait had two live requests
+    // against a platform whose protection model is a request ceiling — exactly
+    // what the pacing/cooldown machinery exists to prevent.
+    //
+    // Twitter may need an existing authenticated tab fallback; allow enough time
+    // for it to load. Injected collection (Twitter/Douyin) is not cancellable
+    // mid-injection — `chrome.scripting` has no abort — so those adapters check
+    // the signal between steps; the tab work is bounded by its own budget.
+    const abortController = new AbortController();
     const timeoutPromise = new Promise<FetchResult>((_, reject) => {
-      setTimeout(() => reject(new FetchTimeoutError('同步请求超时（已超过 45 秒未响应，请检查平台登录状态）')), 45_000);
+      setTimeout(() => {
+        abortController.abort();
+        reject(new FetchTimeoutError('同步请求超时（已超过 45 秒未响应，请检查平台登录状态）'));
+      }, 45_000);
     });
 
     // For normal (non-paginated) syncs, find the newest post already in DB to use as a watermark.
@@ -175,7 +240,13 @@ export async function updateChannel(
       }
     }
 
-    const mergedOptions: FetchOptions = { ...options, sinceTimestamp };
+    const mergedOptions: FetchOptions = {
+      ...options,
+      sinceTimestamp,
+      // Caller-supplied signal wins if present, so a future cancellation source
+      // (e.g. the user cancelling a run) composes with the timeout.
+      signal: options?.signal ?? abortController.signal,
+    };
     const result = await Promise.race([adapter.fetchLatest(channel, limit, mergedOptions), timeoutPromise]);
 
     if (result.error && result.posts.length === 0) {
@@ -306,32 +377,23 @@ export async function updateChannel(
         }
       }
 
-      // Filter out deleted posts by default; if restoreDeleted is true, clear them from deletedPostIds
+      // Suppression filter (I7) — default path. The suppression is keyed by
+      // `Post.id`, not by channel: a post deleted under one channel must stay
+      // hidden even if the same id arrives through another one (Twitter
+      // rename), so a `where('channelId')` lookup was the wrong shape.
+      //
+      // FAIL CLOSED (I10): a read failure must abort the write, not proceed
+      // with the unfiltered batch. The old `catch {}` here resurrected every
+      // deletion the moment IndexedDB hiccuped, and the log could not tell.
       if (!options?.restoreDeleted) {
-        try {
-          // channelId index on deletedPostIds — a full-table primaryKeys() scan
-          // walked every tombstone in the database for each channel sync.
-          const deletedKeys = await db.deletedPostIds
-            .where('channelId')
-            .equals(channel.id)
-            .primaryKeys();
-          if (deletedKeys.length > 0) {
-            const deletedSet = new Set(deletedKeys);
-            newPosts = newPosts.filter(p => !deletedSet.has(p.id));
-          }
-        } catch {
-          // Tombstone read failed: keep posts rather than resurrect deletions.
+        const suppressed = await getSuppressedPostIds(newPosts.map(p => p.id));
+        if (suppressed.size > 0) {
+          newPosts = newPosts.filter(p => !suppressed.has(p.id));
         }
       } else {
-        try {
-          const fetchedIds = newPosts.map(p => p.id);
-          if (fetchedIds.length > 0) {
-            await db.deletedPostIds.bulkDelete(fetchedIds);
-          }
-        } catch {
-          // Tombstone clear failed: restore still proceeds; the stale
-          // tombstone will filter this post on the next ordinary sync.
-        }
+        // restoreDeleted: the user explicitly asked for these back, so the
+        // suppression is cleared for exactly the ids the adapter returned.
+        await clearSuppressions(newPosts.map(p => p.id));
       }
 
       enhancedPosts = newPosts.map((p) => ({
@@ -403,33 +465,24 @@ export async function updateChannel(
     if (result.authorMeta?.name) {
       const authName = result.authorMeta.name.trim();
       const currentName = channel.displayName || '';
-      // These prefixes must cover every placeholder `urlParser.ts` generates
-      // (14 of them). Two have been missing in production: `Withny_` until that
-      // platform was removed (2026-09-12), and `RSS_` / `YouTube视频_` until now.
+      // `nameSource` answers this directly: only a name WE generated may be
+      // replaced by the platform's. A user-renamed channel (`user`) or one
+      // already carrying the platform's own name (`platform`) is left alone —
+      // including a deliberate name like `Pixiv作品_集`, which the old
+      // prefix-matching heuristic would have overwritten on every sync.
       //
-      // The trap is that `startsWith` is case-sensitive: `'YouTube视频_x'` does
-      // NOT start with the platform key `youtube`, and `'RSS_x'` does not start
-      // with `rss` — which is exactly why `Pixiv` and `Fantia` are spelled out
-      // here in their generated capitalisation. `startsWith(channel.platform)`
-      // below only ever helps platforms whose key is already lowercase.
+      // A row from before the field existed has no `nameSource`, so it falls
+      // back to the shape check ONCE: the moment a name is written here it is
+      // stamped `platform`, and the row never consults the heuristic again.
+      // That is what makes this self-clearing rather than a second lasting rule.
       const isPlaceholderName =
-        !currentName ||
-        currentName === channel.accountId ||
-        currentName === channel.accountId.replace(/^@/, '') ||
-        currentName === `@${channel.accountId.replace(/^@/, '')}` ||
-        currentName.startsWith(channel.platform) ||
-        currentName.startsWith('Channel_') ||
-        currentName.startsWith('RSS_') ||
-        currentName.startsWith('YouTube视频_') ||
-        currentName.startsWith('B站') ||
-        currentName.startsWith('小红书') ||
-        currentName.startsWith('微博') ||
-        currentName.startsWith('抖音') ||
-        currentName.startsWith('Pixiv') ||
-        currentName.startsWith('Fantia');
+        channel.nameSource === undefined
+          ? legacyPlaceholderName(currentName, channel.platform, channel.accountId)
+          : channel.nameSource === 'generated';
 
       if (isPlaceholderName && authName) {
         updates.displayName = authName;
+        updates.nameSource = 'platform';
       }
     }
     // Always update avatarUrl on channel (not just when empty, to stay fresh)
@@ -450,37 +503,17 @@ export async function updateChannel(
         }
         if (result.authorMeta?.name) {
           const authName = result.authorMeta.name.trim();
+          // Same rule as the channel above, same self-clearing fallback for
+          // rows written before `nameSource` existed. The old separate
+          // hand-written list of creator-side prefixes is gone with it.
           const isDefaultCreatorName =
-            !creator.name ||
-            creator.name === '新创作者' ||
-            creator.name === '未命名创作者' ||
-            creator.name === channel.accountId ||
-            creator.name === channel.accountId.replace(/^@/, '') ||
-            // Same rule as the channel list above, and the same trap: this is a
-            // SEPARATE hand-written list, so keeping it in step with
-            // `urlParser.ts` is manual. It had drifted further — it only ever
-            // covered the "creator page" placeholders (`Pixiv画师_`,
-            // `Fantia俱乐部_`, `小红书_`, `微博_`) and none of the
-            // "single work" ones, so following a creator from one artwork pinned
-            // `Pixiv作品_12345` as their name permanently.
-            creator.name.startsWith('Channel_') ||
-            creator.name.startsWith('RSS_') ||
-            creator.name.startsWith('YouTube视频_') ||
-            creator.name.startsWith('B站用户_') ||
-            creator.name.startsWith('B站稿件_') ||
-            creator.name.startsWith('小红书用户_') ||
-            creator.name.startsWith('小红书笔记_') ||
-            creator.name.startsWith('微博用户_') ||
-            creator.name.startsWith('微博_') ||
-            creator.name.startsWith('抖音用户_') ||
-            creator.name.startsWith('抖音作品_') ||
-            creator.name.startsWith('Pixiv画师_') ||
-            creator.name.startsWith('Pixiv作品_') ||
-            creator.name.startsWith('Fantia俱乐部_') ||
-            creator.name.startsWith('Fantia投稿_');
+            creator.nameSource === undefined
+              ? legacyCreatorPlaceholderName(creator.name, channel.accountId)
+              : creator.nameSource === 'generated';
 
           if (isDefaultCreatorName && authName) {
             creatorUpdates.name = authName;
+            creatorUpdates.nameSource = 'platform';
           }
         }
         if (Object.keys(creatorUpdates).length > 0) {
@@ -495,8 +528,7 @@ export async function updateChannel(
     // adapter is expected to filter already-known posts away, without one it
     // returned nothing on a first/forced sync — the case worth investigating.
     const watermark = sinceTimestamp
-      // Timestamps may be seconds or milliseconds depending on the adapter.
-      ? new Date(sinceTimestamp < 1e12 ? sinceTimestamp * 1000 : sinceTimestamp).toLocaleString('zh-CN')
+      ? new Date(toEpochMsOr(sinceTimestamp, sinceTimestamp)).toLocaleString('zh-CN')
       : '无（首次或强制同步）';
     devLog.info(
       'channelSync',
@@ -514,17 +546,49 @@ export async function updateChannel(
         `仅原创=${mergedOptions.onlyOriginal ? '是' : '否'}`,
       ].join('，'),
     );
+
+    // A degraded result still wrote its posts, so it is not an error — but it
+    // must not read as a clean sync either (audit P1-3). `warn`, because the
+    // user-visible effect is "this creator seems to have posted less", which is
+    // exactly the symptom the log needs to be able to explain.
+    if (result.degraded) {
+      devLog.warn(
+        'channelSync',
+        `${channel.platform}/${channel.displayName || channel.accountId} 同步结果不完整`,
+        (result.warnings ?? ['平台的部分数据源未返回，结果可能偏少']).join('；'),
+      );
+    }
     return {
       ...result,
       posts: enhancedPosts,
       totalFetched: result.posts?.length || 0,
     };
   } catch (err: unknown) {
+    // Failure-domain split (AUDIT P1-1). A write failure used to be reported as
+    // 「平台网络错误」, which is not just wrong wording: `code` drives the
+    // platform cool-down and the history-end decision, so a local storage
+    // problem cooled down a platform that was never contacted. Dexie rejects
+    // with an Error wrapping the DOMException, and quota/abort surface as
+    // `name` variants, so both are inspected.
     const structured = err instanceof FetchTimeoutError
       ? fetchError('timeout', err.message)
-      : err instanceof Error
-        ? fetchError('network', err.message)
-        : fetchError('network', '未知异常');
+      : isStorageFailure(err)
+        ? fetchError('storage', `本地数据库写入失败：${err instanceof Error ? err.message : String(err)}`)
+        : err instanceof Error
+          ? fetchError('network', err.message)
+          : fetchError('network', '未知异常');
+    // A storage failure is local, so it must not be written as the platform's
+    // error message and must not feed any platform-scoped policy — but it also
+    // cannot be stored (the write is what failed), so the user sees it in the
+    // log and the channel keeps whatever status it had.
+    if (structured.code === 'storage') {
+      devLog.error(
+        'channelSync',
+        `${channel.platform}/${channel.displayName || channel.accountId} 本地存储失败`,
+        structured.message,
+      );
+      return { posts: [], error: structured };
+    }
     await db.channels.update(channel.id, {
       status: 'error',
       errorMessage: structured.message,

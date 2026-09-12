@@ -1,5 +1,5 @@
 import type { Channel, Post } from '../types';
-import type { PlatformAdapter, FetchResult } from './types';
+import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
@@ -9,7 +9,8 @@ import { devLog } from '../utils/devLog';
 export const youtubeAdapter: PlatformAdapter = {
   platform: 'youtube',
 
-  async fetchLatest(channel: Channel, limit: number = 10): Promise<FetchResult> {
+  async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
+    const signal = options?.signal;
     try {
       let channelId = channel.accountId;
       let pageAuthorTitle = '';
@@ -20,6 +21,7 @@ export const youtubeAdapter: PlatformAdapter = {
         try {
           const resp = await bgFetch(`https://www.youtube.com/${channelId}`, {
             headers: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' },
+            signal,
           });
           if (resp.ok && resp.data) {
             const html = resp.data;
@@ -64,7 +66,7 @@ export const youtubeAdapter: PlatformAdapter = {
 
       // Fetch official channel RSS
       const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
-      const res = await bgFetch(rssUrl);
+      const res = await bgFetch(rssUrl, { signal });
       if (!res.ok) {
         throw new Error(`YouTube RSS 接口响应状态: HTTP ${res.status}`);
       }

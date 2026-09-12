@@ -1,6 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { handleProxyImage } from '../src/infrastructure/chrome/messages/proxyImage';
-import { handleBgFetch } from '../src/infrastructure/chrome/messages/bgFetch';
+import { handleBgFetch, handleBgFetchAbort } from '../src/infrastructure/chrome/messages/bgFetch';
 import { handleTwitterTimeline } from '../src/infrastructure/chrome/messages/twitterTimeline';
 import { handleDouyinSnapshot, sweepOrphanDouyinTempTab } from '../src/infrastructure/chrome/messages/douyinSnapshot';
 import { isExtensionPageSender } from '../src/infrastructure/chrome/messages/senderGuard';
@@ -25,6 +25,7 @@ const SENDER_POLICY: Record<string, 'page'> = {
   UPDATE_AUTO_SYNC: 'page',
   OPEN_DASHBOARD: 'page',
   BG_FETCH: 'page',
+  BG_FETCH_ABORT: 'page',
   PROXY_IMAGE: 'page',
   FETCH_TWITTER_TIMELINE: 'page',
   FETCH_DOUYIN_SNAPSHOT: 'page',
@@ -100,6 +101,11 @@ export default defineBackground(() => {
 
     if (type === 'BG_FETCH') {
       return handleBgFetch(message, sendResponse);
+    }
+
+    if (type === 'BG_FETCH_ABORT') {
+      sendResponse(handleBgFetchAbort(message));
+      return false;
     }
 
     if (type === 'PROXY_IMAGE') {

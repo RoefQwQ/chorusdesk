@@ -13,7 +13,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-vue-next';
-import { PLATFORM_REGISTRY, type AppSettings, type Creator, type DeletedPostRecord, type Post } from '../../../src/types';
+import { PLATFORM_REGISTRY, type AppSettings, type Creator, type RecycleSnapshot, type Post } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import ImageCacheSettings from '../components/ImageCacheSettings.vue';
 import AppSelect from '../components/AppSelect.vue';
@@ -34,8 +34,8 @@ export interface SettingsViewContext {
   platformLoginStatus: Record<string, boolean>;
   isCheckingLogins: boolean;
   deletedPostCount: number;
-  deletedPostsList: DeletedPostRecord[];
-  filteredDeletedPostsList: DeletedPostRecord[];
+  deletedPostsList: RecycleSnapshot[];
+  filteredDeletedPostsList: RecycleSnapshot[];
   deletedPostsSearchQuery: string;
   isHealingMedia: boolean;
   isCleaningStorage: boolean;
@@ -52,8 +52,8 @@ export interface SettingsViewContext {
   onCleanupPosts: (days: number) => void | Promise<void>;
   onRestoreAll: () => void | Promise<void>;
   onEmptyRecycleBin: () => void | Promise<void>;
-  onRestoreOne: (record: DeletedPostRecord) => void | Promise<void>;
-  onPermanentDelete: (record: DeletedPostRecord) => void | Promise<void>;
+  onRestoreOne: (record: RecycleSnapshot) => void | Promise<void>;
+  onPermanentDelete: (record: RecycleSnapshot) => void | Promise<void>;
   onSearchDeleted: (q: string) => void;
 }
 

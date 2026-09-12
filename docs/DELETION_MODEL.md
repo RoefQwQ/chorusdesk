@@ -1,9 +1,9 @@
-# Deletion domain — 状态模型与不变量（语义已确认，未实现）
+# Deletion domain — 状态模型与不变量（**已实现**）
 
-> **状态：语义已由用户确认（2026-09-12，见 §6），尚未写任何生产代码。** 本文件先于 schema 存在，理由见 §7。
+> **状态：已实现（2026-09-12）。** v6 拆表、备份 1.1、不变量测试全部落地；
+> 下面 §7 的五个步骤全部完成。实现位置见 §9。
 >
-> 背景：[`AUDIT_2026-09-12.md`](AUDIT_2026-09-12.md) §2 的 P0-1…P0-5。**本文件是那些条目的设计前置**，
-> 不是它们的替代。
+> 背景：[`AUDIT_2026-09-12.md`](AUDIT_2026-09-12.md) §2 的 P0-1…P0-5。
 >
 > **用户已定的产品决策（2026-09-12）**：
 > ① 取关一个创作者后再重新关注，此前删掉的动态 **不回来**——这一条决定了 suppression 的
@@ -271,3 +271,25 @@ v4 的测试是那样写的（为独立钉住 schema），**v6 的测试必须�
 | §4.1 I8 | P0-4（+ §6 方案 A） |
 | §4.2 I10 | P0-2 同源（`channelSync.ts:322` fail-open） |
 | §7 ⑤（恢复快照 / 合并导入分离） | P0-5 |
+
+---
+
+## 9. 实现（2026-09-12）
+
+§7 的五步全部完成，逐条对应实现位置：
+
+| 步骤 | 产物 |
+|---|---|
+| ② 不变量测试（先红） | `tests/deletionInvariants.test.ts` — 16 例，经 `postService`/`channelSync`/`creatorService`/`channelService`/`backupService` 公开入口观察。**9 例在实现前实测为红**（I2/I3/I5/I6/I8/I10/I11/I12 + cascade），逐条记录在文件头。变异验证：把 `permanentlyDeletePost` 改成同时删抑制 → I2 失败；把 channelSync 的抑制过滤改回 `catch {}` 放行 → I10 失败；把 cascade 的快照清理删掉 → I12 失败 |
+| ③ v6 迁移 | `src/infrastructure/db/database.ts` — `migrateDeletionSplit`（导出，测试直接调用，规则 22）；`version(6)` 建 `postSuppressions` / `recycleSnapshots` 并 `deletedPostIds: null`。**迁移携带 `channelId`/`creatorId`**：这两个字段是 §6 问题 5 取关提示的计数依据，丢弃它们会让 v6 之前的所有删除在提示里计为 0（对抗性审查发现并已修） |
+| ③ 两表实现 | `postRepository.ts`：`delete`/`restore`/`restoreAll` 各自单事务；`permanentlyDelete`/`clearDeletedPostRecords` 只动快照；`getSuppressedPostIds`/`clearSuppressions` 供同步层使用；`countSuppressionsForChannels`/`ForCreator` 供取关提示 |
+| ④ 备份 1.1 | `backupRepository.ts`：`FeedBackup.suppressions`，`SUPPORTED_BACKUP_VERSIONS = ['1.0','1.1']`（显式白名单，不是相等判断），`restoreBackup(data,{clearFirst})` 把清库与写入放进**同一个事务** |
+| ⑤ 恢复快照 / 合并导入 | `backupService.restore(data, mode)`；UI 在导入时询问，并对旧格式文件明确提示「恢复快照会同时清空当前删除记录」 |
+
+**唯一未按原设计的地方**：`PostSuppression` 多了 `channelId`/`creatorId` 两个**参考字段**（非身份，
+§3.3 原本只给 `postId`+`platform`+`suppressedAt`）。加它们是因为 §6 问题 5 的提示要在快照被
+「彻底删除」之后仍能计数——那时唯一还知道归属的行就是抑制本身。身份仍是 `postId`，见 §3.2。
+
+**一处刻意的行为，不是缺陷**：以 `clearFirst` 导入一份 1.0 文件会清空删除黑名单。这就是
+「库变成该文件」的含义（文件里没有这一节），UI 现在会明确提示。**不要**改成保留文件里没有的行——
+那会让「恢复快照」变成静默合并。

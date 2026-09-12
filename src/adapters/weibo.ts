@@ -12,6 +12,7 @@ export const weiboAdapter: PlatformAdapter = {
   platform: 'weibo',
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
+    const signal = options?.signal;
     try {
       const uid = channel.accountId.trim();
       const page = options?.cursor ? Math.max(Number(options.cursor) || 1, 1) : 1;
@@ -19,6 +20,7 @@ export const weiboAdapter: PlatformAdapter = {
       // 1. Fetch user container info via mobile API
       const indexUrl = `https://m.weibo.cn/api/container/getIndex?type=uid&value=${encodeURIComponent(uid)}`;
       const indexRes = await bgFetch(indexUrl, {
+        signal,
         headers: {
           Accept: 'application/json, text/plain, */*',
           Referer: `https://m.weibo.cn/u/${uid}`,
@@ -55,6 +57,7 @@ export const weiboAdapter: PlatformAdapter = {
       // 2. Fetch timeline cards
       const timelineUrl = `https://m.weibo.cn/api/container/getIndex?type=uid&value=${encodeURIComponent(uid)}&containerid=${encodeURIComponent(containerId)}&page=${page}`;
       const timelineRes = await bgFetch(timelineUrl, {
+        signal,
         headers: {
           Accept: 'application/json, text/plain, */*',
           Referer: `https://m.weibo.cn/u/${uid}`,
@@ -180,6 +183,7 @@ export const weiboAdapter: PlatformAdapter = {
       const uid = channel.accountId.trim();
       const ajaxUrl = `https://weibo.com/ajax/statuses/mymblog?uid=${encodeURIComponent(uid)}&page=${page}&feature=0`;
       const res = await bgFetch(ajaxUrl, {
+        signal: options?.signal,
         headers: {
           Referer: `https://weibo.com/u/${uid}`,
           Accept: 'application/json, text/plain, */*',

@@ -6,6 +6,7 @@ import { toSecureMediaUrl, proxyImage, isImageFailed, markImageFailed } from '..
 import { imageCacheService } from '../../../src/services/imageCache';
 import { recordMediaProbe } from '../../../src/utils/mediaProbeLog';
 import { shouldShowTitle, showsFullBody, standaloneMedia } from '../../../src/utils/postText';
+import { toEpochMs } from '../../../src/utils/timestamp';
 
 const props = withDefaults(defineProps<{
   post: Post;
@@ -386,8 +387,9 @@ function handleMediaLoad(originalUrl: string, mediaIndex: number = 0) {
 }
 
 const formatTime = (timestamp: number) => {
-  if (!timestamp) return '未知时间';
-  const date = new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp);
+  const ms = toEpochMs(timestamp);
+  if (ms === null) return '未知时间';
+  const date = new Date(ms);
   const diff = Date.now() - date.getTime();
   if (diff < 60_000) return '刚刚';
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;

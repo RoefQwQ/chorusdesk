@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
-import type { Post, DeletedPostRecord } from '../src/types';
-import { migrateStoredTweetLinks } from '../src/infrastructure/db/database';
+import type { Post } from '../src/types';
+import { migrateStoredTweetLinks, migrateDeletionSplit } from '../src/infrastructure/db/database';
 
 /**
  * Permanent regression test for the Dexie v3 → v4 migration
@@ -64,7 +64,7 @@ function openV4Database(): Dexie {
       post.isRead = post.isRead ? 1 : 0;
       post.isBookmarked = post.isBookmarked ? 1 : 0;
     });
-    await tx.table('deletedPostIds').toCollection().modify((record: DeletedPostRecord) => {
+    await tx.table('deletedPostIds').toCollection().modify((record: { postData?: Post }) => {
       if (record.postData) {
         record.postData.isRead = record.postData.isRead ? 1 : 0;
         record.postData.isBookmarked = record.postData.isBookmarked ? 1 : 0;
@@ -351,5 +351,148 @@ describe('Dexie v4 → v5 migration (X appended t.co links)', () => {
     await again.open();
     expect((await again.table('posts').get('twitter_appended')).content).toBe('caption');
     again.close();
+  });
+});
+
+/**
+ * Permanent regression test for the Dexie v5 → v6 migration (DELETION_MODEL §5).
+ *
+ * One table held two concepts with different lifecycles: 「不要再同步这条」
+ * (long-lived) and 「还能不能找回」 (short-lived). 彻底删除 and 清空回收站 dropped
+ * the whole row, so they silently lifted the sync blacklist and deleted posts
+ * came back on the next sync.
+ *
+ * v6 splits it into `postSuppressions` + `recycleSnapshots` and drops
+ * `deletedPostIds`. Every pre-v6 row played both roles, so the mapping is a
+ * one-to-one copy into each table — lossless, no inference.
+ *
+ * The version chain is declared inline (that pins the schema shape), but the
+ * upgrade callback is the PRODUCTION `migrateDeletionSplit` — rule 22: a test
+ * that re-implements the migration tests a copy, not the shipped rule.
+ */
+const splitV6dbName = 'ChorusMigrationV6TestDB';
+
+/** v5 = the schema immediately before the split. */
+function openV5ForV6(): Dexie {
+  const db = new Dexie(splitV6dbName);
+  db.version(1).stores({
+    creators: 'id, name, *tags, createdAt, sortOrder',
+    channels: 'id, creatorId, platform, accountId, status, lastCheckAt',
+    posts: 'id, creatorId, channelId, platform, publishedAt, fetchedAt, isRead, isBookmarked',
+    settings: 'key',
+  });
+  db.version(2).stores({
+    posts: 'id, creatorId, channelId, platform, publishedAt, fetchedAt, isRead, isBookmarked, [channelId+publishedAt]',
+  });
+  db.version(3).stores({ deletedPostIds: 'id, channelId, creatorId, deletedAt' });
+  db.version(4).upgrade(async (tx) => {
+    await tx.table('posts').toCollection().modify((post: Post) => {
+      post.isRead = post.isRead ? 1 : 0;
+      post.isBookmarked = post.isBookmarked ? 1 : 0;
+    });
+  });
+  db.version(5).upgrade(migrateStoredTweetLinks);
+  return db;
+}
+
+/** v6 = production schema, production upgrade callback. */
+function openV6Database(): Dexie {
+  const db = openV5ForV6();
+  db.version(6).stores({
+    postSuppressions: 'postId, platform, suppressedAt',
+    recycleSnapshots: 'id, channelId, creatorId, deletedAt',
+    deletedPostIds: null,
+  }).upgrade(migrateDeletionSplit);
+  return db;
+}
+
+beforeAll(async () => {
+  await Dexie.delete(splitV6dbName);
+  const v5 = openV5ForV6();
+  await v5.open();
+  await v5.table('deletedPostIds').bulkPut([
+    {
+      // The common case: a full snapshot, both a suppression and a snapshot.
+      id: 'bilibili_split_a',
+      channelId: 'bilibili:1',
+      creatorId: 'creator-1',
+      platform: 'bilibili',
+      title: '拆分样例 A',
+      deletedAt: 1_700_000_300_000,
+      postData: { ...v4Post({ id: 'bilibili_split_a' }), platform: 'bilibili' },
+    },
+    {
+      // A row with no snapshot (already 彻底删除-ed under the old model).
+      id: 'weibo_split_b',
+      channelId: 'weibo:9',
+      creatorId: 'creator-2',
+      platform: 'weibo',
+      title: '拆分样例 B',
+      deletedAt: 1_700_000_400_000,
+    },
+  ]);
+  v5.close();
+});
+
+describe('Dexie v5 → v6 migration (suppression / snapshot split)', () => {
+  it('copies every row into both tables (lossless)', async () => {
+    const v6 = openV6Database();
+    await v6.open();
+
+    const suppressions = await v6.table('postSuppressions').toArray();
+    const snapshots = await v6.table('recycleSnapshots').toArray();
+
+    expect(suppressions.map((r) => r.postId).sort()).toEqual(['bilibili_split_a', 'weibo_split_b']);
+    expect(snapshots.map((r) => r.id).sort()).toEqual(['bilibili_split_a', 'weibo_split_b']);
+    v6.close();
+  });
+
+  it('keeps the platform (stored redundantly, §6 问题 2) and the snapshot body', async () => {
+    const v6 = openV6Database();
+    await v6.open();
+
+    const suppression = await v6.table('postSuppressions').get('bilibili_split_a');
+    expect(suppression.platform).toBe('bilibili');
+    expect(suppression.suppressedAt).toBe(1_700_000_300_000);
+
+    const snapshot = await v6.table('recycleSnapshots').get('bilibili_split_a');
+    expect(snapshot.channelId).toBe('bilibili:1');
+    expect(snapshot.title).toBe('拆分样例 A');
+    expect(snapshot.postData?.id).toBe('bilibili_split_a');
+    v6.close();
+  });
+
+  it('carries channelId / creatorId into the suppression (the unfollow prompt counts them)', async () => {
+    // `postRepository.deletePostAndTombstone` writes these on every new
+    // suppression, and `countSuppressionsForCreator` / `...ForChannels` read
+    // them. Dropping them in the migration would make every PRE-v6 deletion
+    // invisible to the unfollow prompt's count — the user would be told nothing
+    // is being kept deleted while those deletions all still stand (§6 问题 5).
+    const v6 = openV6Database();
+    await v6.open();
+
+    const suppression = await v6.table('postSuppressions').get('bilibili_split_a');
+    expect(suppression.channelId).toBe('bilibili:1');
+    expect(suppression.creatorId).toBe('creator-1');
+    v6.close();
+  });
+
+  it('drops the old table entirely', async () => {
+    const v6 = openV6Database();
+    await v6.open();
+
+    expect(v6.tables.map((t) => t.name)).not.toContain('deletedPostIds');
+    v6.close();
+  });
+
+  it('preserves a suppression whose snapshot is absent (the 彻底删除 case)', async () => {
+    const v6 = openV6Database();
+    await v6.open();
+
+    const suppression = await v6.table('postSuppressions').get('weibo_split_b');
+    expect(suppression?.platform).toBe('weibo');
+    const snapshot = await v6.table('recycleSnapshots').get('weibo_split_b');
+    expect(snapshot?.postData).toBeUndefined();
+    v6.close();
   });
 });

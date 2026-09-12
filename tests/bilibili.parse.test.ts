@@ -181,15 +181,36 @@ describe('bilibili — parsing a captured space-dynamic payload', () => {
     expect(res.error?.code).toBe('auth');
   });
 
-  it('swallows a rejected dynamic feed when medialist answers code 0 with an empty list', async () => {
-    // Recorded as found; the `mediaSucceeded` reasoning is deliberate (see the adapter's
-    // comment). Kept so the behaviour is visible, and it uses the REAL 412 shape now.
+  it('a refused dynamic feed is NOT a successful empty, even when medialist says code 0', async () => {
+    // THE B33 GAP, closed. Medialist covers VIDEO UPLOADS ONLY — it cannot see
+    // image/text dynamics. So `medialist code 0 + empty list` while the dynamic
+    // feed is risk-controlled (-412) means "the source that would have held the
+    // content was refused", not "this account has no content". An account that
+    // posts only image/text dynamics is exactly the case that was reported as
+    // 「账号可能无投稿或已注销」 (AGENTS rule 13: an empty platform result must
+    // name why it is empty, and a fake empty success can park a cursor at
+    // __END__ unrecoverably).
     served['feed/space'] = { body: JSON.stringify({ code: -412, message: 'request was banned' }), ok: false, status: 412 };
+    served['medialist'] = { body: JSON.stringify({ code: 0, data: { media_list: [] } }), ok: true, status: 200 };
 
     const res = await bilibiliAdapter.fetchLatest(channel, 10);
 
-    expect(res.error).toBeUndefined();
     expect(res.posts).toEqual([]);
-    expect(res.totalFetched).toBe(0);
+    // It must surface the dynamic feed's refusal — and specifically must not
+    // claim the account is absent.
+    expect(res.error).toBeTruthy();
+    expect(res.error!.code).not.toBe('not_found');
+  });
+
+  it('still treats a genuine empty as empty when BOTH sources answered', async () => {
+    // The credible case: the dynamic feed answered successfully with no items,
+    // and medialist agrees. That is a real "this account has no content".
+    served['feed/space'] = JSON.stringify({ code: 0, data: { items: [], has_more: false } });
+    served['medialist'] = { body: JSON.stringify({ code: 0, data: { media_list: [] } }), ok: true, status: 200 };
+
+    const res = await bilibiliAdapter.fetchLatest(channel, 10);
+
+    expect(res.posts).toEqual([]);
+    expect(res.error).toBeUndefined();
   });
 });

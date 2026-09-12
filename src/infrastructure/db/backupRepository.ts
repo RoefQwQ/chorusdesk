@@ -1,24 +1,35 @@
-import type { AppSettings, Channel, Creator, Post } from '../../types';
+import type { AppSettings, Channel, Creator, Post, PostSuppression } from '../../types';
 import { db } from './database';
 import { getSettings, saveSettings } from './settingsRepository';
 
 /**
- * Backup file format — DO NOT CHANGE. The JSON layout, `version: '1.0'`
- * marker and `exportedAt` field are written/read by the existing dashboard
- * export/import flow and must stay byte-compatible with previously exported
- * backups.
+ * Backup file format.
+ *
+ * 1.0 → 1.1 (2026-09-12, AUDIT §6 方案 A): adds `suppressions`, the record of
+ * what the user explicitly deleted. Without it a backup carried whom I follow,
+ * what I saved and what I read — but not 「不要再给我看」, so import + sync
+ * resurrected deleted posts. Both versions are accepted; the version gate
+ * (`parseBackup`) is an explicit allowlist, not an equality check.
+ *
+ * `version` and `exportedAt` are read/written by the dashboard export/import
+ * flow and stay compatible with previously exported files.
  */
 export interface FeedBackup {
-  version: '1.0';
+  version: '1.1';
   exportedAt: string;
   creators: Creator[];
   channels: Channel[];
   settings: AppSettings;
   posts: Post[];
+  /** The deletion blacklist. Absent in 1.0 files (imported as empty). */
+  suppressions: PostSuppression[];
 }
 
+/** Format versions this build can read. */
+export const SUPPORTED_BACKUP_VERSIONS = ['1.0', '1.1'] as const;
+
 /** Current backup format version this build reads and writes. */
-export const CURRENT_BACKUP_VERSION = '1.0';
+export const CURRENT_BACKUP_VERSION = '1.1';
 
 /**
  * Shape accepted on restore — every data section is optional so that files
@@ -30,6 +41,7 @@ export interface RestorableBackup {
   channels?: Channel[];
   settings?: Partial<AppSettings>;
   posts?: Post[];
+  suppressions?: PostSuppression[];
 }
 
 export type BackupParseResult =
@@ -49,6 +61,7 @@ const RECORD_REQUIREMENTS: readonly RecordRequirements[] = [
   { store: 'creators', requiredFields: ['id', 'name'] },
   { store: 'channels', requiredFields: ['id', 'creatorId', 'platform', 'accountId'] },
   { store: 'posts', requiredFields: ['id', 'channelId', 'platform', 'publishedAt'] },
+  { store: 'suppressions', requiredFields: ['postId', 'platform', 'suppressedAt'] },
 ];
 
 /**
@@ -93,22 +106,63 @@ export async function createBackup(): Promise<FeedBackup> {
     channels: await db.channels.toArray(),
     settings: await getSettings(),
     posts: await db.posts.toArray(),
+    suppressions: await db.postSuppressions.toArray(),
   };
 }
 
 /**
- * Restore a previously parsed backup into the database inside one
- * transaction, overwriting existing keys (bulkPut semantics). Only arrays
- * that are present in the file are touched; a missing `settings` object is
- * left as-is. Tombstone records are never part of a backup (legacy format).
+ * Restore a previously parsed backup into the database.
+ *
+ * `clearFirst` turns it into a snapshot restore (P0-5 恢復快照) instead of the
+ * overlay import the old single code path always did. The wipe is inside the
+ * SAME transaction as the write, deliberately: as two transactions there is a
+ * window in which the library is empty, and a failure in the second one would
+ * leave it that way — a "restore" that destroyed the user's data. Dexie aborts
+ * the whole transaction on any failure, so either the library becomes the file
+ * or it is untouched.
+ *
+ * **A `clearFirst` restore of a 1.0 file clears the deletion blacklist.** That
+ * is the meaning of "the library becomes this file": the file has no
+ * `suppressions` section, so there is nothing to re-insert and the blacklist is
+ * empty afterwards. It is not an oversight to be papered over — the user asked
+ * for that file's state, and a 1.0 file predates the feature. The UI's confirm
+ * text says the current data will be cleared, which covers it; do not "fix" this
+ * by preserving rows the file does not carry, which would make 「恢复快照」
+ * silently merge.
+ *
+ * Only arrays present in the file are written, so a partial file leaves the
+ * sections it does not mention alone on the MERGE path; with `clearFirst` those
+ * sections are empty by construction.
+ *
+ * Recycle-bin snapshots are never part of a backup: they are a convenience view
+ * over content the feed can re-fetch, not user intent. The suppressions are the
+ * intent, and format 1.1 carries them.
  */
-export async function restoreBackup(data: RestorableBackup): Promise<void> {
-  await db.transaction('rw', [db.creators, db.channels, db.posts, db.settings], async () => {
-    if (Array.isArray(data.creators)) await db.creators.bulkPut(data.creators);
-    if (Array.isArray(data.channels)) await db.channels.bulkPut(data.channels);
-    if (Array.isArray(data.posts)) await db.posts.bulkPut(data.posts);
-    if (data.settings && typeof data.settings === 'object') await saveSettings(data.settings);
-  });
+export async function restoreBackup(
+  data: RestorableBackup,
+  { clearFirst = false }: { clearFirst?: boolean } = {},
+): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.creators, db.channels, db.posts, db.settings, db.postSuppressions, db.recycleSnapshots],
+    async () => {
+      if (clearFirst) {
+        await Promise.all([
+          db.creators.clear(),
+          db.channels.clear(),
+          db.posts.clear(),
+          db.settings.clear(),
+          db.postSuppressions.clear(),
+          db.recycleSnapshots.clear(),
+        ]);
+      }
+      if (Array.isArray(data.creators)) await db.creators.bulkPut(data.creators);
+      if (Array.isArray(data.channels)) await db.channels.bulkPut(data.channels);
+      if (Array.isArray(data.posts)) await db.posts.bulkPut(data.posts);
+      if (Array.isArray(data.suppressions)) await db.postSuppressions.bulkPut(data.suppressions);
+      if (data.settings && typeof data.settings === 'object') await saveSettings(data.settings);
+    },
+  );
 }
 
 /**
@@ -132,14 +186,14 @@ export function parseBackup(raw: unknown): BackupParseResult {
   if (data.version === undefined) {
     return { ok: false, error: '备份格式无效：缺少 version 字段（可能不是本扩展导出的备份）' };
   }
-  if (data.version !== CURRENT_BACKUP_VERSION) {
+  if (!SUPPORTED_BACKUP_VERSIONS.includes(data.version as (typeof SUPPORTED_BACKUP_VERSIONS)[number])) {
     return {
       ok: false,
-      error: `备份版本不兼容：文件为 ${String(data.version)}，本扩展支持 ${CURRENT_BACKUP_VERSION}`,
+      error: `备份版本不兼容：文件为 ${String(data.version)}，本扩展支持 ${SUPPORTED_BACKUP_VERSIONS.join(' / ')}`,
     };
   }
 
-  for (const store of ['creators', 'channels', 'posts'] as const) {
+  for (const store of ['creators', 'channels', 'posts', 'suppressions'] as const) {
     if (data[store] !== undefined && !Array.isArray(data[store])) {
       return { ok: false, error: `备份格式无效：${store} 应为数组` };
     }
@@ -168,6 +222,7 @@ export function parseBackup(raw: unknown): BackupParseResult {
       channels: data.channels as Channel[] | undefined,
       settings: data.settings as Partial<AppSettings> | undefined,
       posts: data.posts as Post[] | undefined,
+      suppressions: data.suppressions as PostSuppression[] | undefined,
     },
   };
 }

@@ -1,12 +1,13 @@
 import { ref, type Ref, type ShallowRef } from 'vue';
 import type { Creator, Channel, Post, AccountRole } from '../../../src/types';
 import { ACCOUNT_ROLE_LABELS, ACCOUNT_ROLE_ORDER } from '../../../src/types';
-import { creatorService, channelService } from '../../../src/application';
+import { creatorService, channelService, postService } from '../../../src/application';
 import { updateChannel } from '../../../src/sync';
 import { parseProfileUrl } from '../../../src/utils/urlParser';
 import { errorMessage } from '../../../src/utils/errorMessage';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import type { AddModalOpenRequest, AddModalSubmitPayload } from '../types/modal';
+import { dialog } from './useDialog';
 
 export interface CreatorsManagerDependencies {
   creators: Ref<Creator[]>;
@@ -115,16 +116,20 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
     try {
       const parsed = parseProfileUrl(urlValue);
       if (!parsed) {
-        alert('无法识别该网址，请确保输入支持的创作者主页、作品链接或 RSS 源。');
+        await dialog.alert('无法识别该网址，请确保输入支持的创作者主页、作品链接或 RSS 源。');
         return;
       }
 
       let creatorId = payload.creatorId;
 
       if (payload.mode === 'new' || !creatorId) {
+        const typedName = payload.name.trim();
         const newCreator: Creator = {
           id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-          name: payload.name.trim() || parsed.suggestedName || '未命名创作者',
+          name: typedName || parsed.suggestedName || '未命名创作者',
+          // A typed name belongs to the user; anything from `suggestedName` is
+          // ours and may be replaced by the platform's real nickname.
+          nameSource: typedName ? 'user' : 'generated',
           avatar: '',
           tags: payload.tags.split(/[,，\s]+/).filter(Boolean),
           createdAt: Date.now(),
@@ -145,6 +150,9 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
         platform: parsed.platform,
         accountId: parsed.accountId,
         displayName: parsed.suggestedName || parsed.accountId,
+        // There is no "let the user name a channel" flow, so a new channel's
+        // name is always ours to replace with the platform's own.
+        nameSource: 'generated',
         profileUrl: parsed.cleanUrl,
         label: roleLabel,
         accountRole: payload.role,
@@ -159,33 +167,51 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
       addModalOpenRequest.value = null;
       await reloadData();
     } catch (err: unknown) {
-      alert('添加失败：' + errorMessage(err));
+      await dialog.alert('添加失败：' + errorMessage(err));
     } finally {
       isSubmittingAdd.value = false;
     }
   }
 
   // ---- Delete creator / channel (cascade) ----
+  //
+  // Q5 (DELETION_MODEL §6): the suppression survives the unfollow silently, so
+  // a user who deleted posts here has no way to know they stay deleted after
+  // re-following. The confirmation names the count when there is one, and says
+  // nothing extra when there is not (an always-on notice for N = 0 is noise).
   async function deleteCreator(creatorId: string) {
-    if (!confirm('确定要删除此博主档案吗？相关的渠道与历史动态也将一并移除。')) return;
+    const suppressed = await postService.suppressionsUnderCreator(creatorId);
+    const note = suppressed > 0
+      ? `\n\n该创作者下你删过的 ${suppressed} 条动态仍保持删除状态，重新关注后也不会再出现。`
+      : '';
+    if (!(await dialog.confirm(`确定要删除此博主档案吗？相关的渠道与历史动态也将一并移除。${note}`))) return;
     await creatorService.deleteCascade(creatorId);
     await reloadData();
   }
 
   async function deleteCreatorsBatch(creatorIds: string[]) {
     if (creatorIds.length === 0) return;
-    if (!confirm(`确定要批量移除选中的 ${creatorIds.length} 位创作者档案及其全部绑定账号与已缓存作品吗？`)) {
+    let suppressed = 0;
+    for (const id of creatorIds) suppressed += await postService.suppressionsUnderCreator(id);
+    const note = suppressed > 0
+      ? `\n\n这些创作者下你删过的 ${suppressed} 条动态仍保持删除状态，重新关注后也不会再出现。`
+      : '';
+    if (!(await dialog.confirm(`确定要批量移除选中的 ${creatorIds.length} 位创作者档案及其全部绑定账号与已缓存作品吗？${note}`))) {
       return;
     }
     for (const id of creatorIds) {
       await creatorService.deleteCascade(id);
     }
     await reloadData();
-    alert('批量删除完成。');
+    await dialog.alert('批量删除完成。');
   }
 
   async function deleteChannel(channelId: string) {
-    if (!confirm('确定移除此平台账号吗？')) return;
+    const suppressed = await postService.suppressionsUnderChannels([channelId]);
+    const note = suppressed > 0
+      ? `\n\n该账号下你删过的 ${suppressed} 条动态仍保持删除状态，重新绑定后也不会再出现。`
+      : '';
+    if (!(await dialog.confirm(`确定移除此平台账号吗？${note}`))) return;
     await channelService.deleteCascade(channelId);
     await reloadData();
   }
@@ -209,13 +235,13 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
       await reloadData();
       editingTagCreator.value = null;
     } catch (err: unknown) {
-      alert('修改标签失败：' + errorMessage(err));
+      await dialog.alert('修改标签失败：' + errorMessage(err));
     }
   }
 
   // ---- Global tag management: Delete a tag from all creators in the library ----
   async function deleteGlobalTag(tagToDelete: string) {
-    if (!confirm(`确定要从系统全库中移除标签【#${tagToDelete}】吗？\n所有包含该标签的创作者都将自动取消此标签关联。`)) {
+    if (!(await dialog.confirm(`确定要从系统全库中移除标签【#${tagToDelete}】吗？\n所有包含该标签的创作者都将自动取消此标签关联。`))) {
       return;
     }
     try {
@@ -224,7 +250,7 @@ export function useCreatorsManager(deps: CreatorsManagerDependencies) {
       clearTagFromFilters(tagToDelete);
       await reloadData();
     } catch (err: unknown) {
-      alert('移除标签失败：' + errorMessage(err));
+      await dialog.alert('移除标签失败：' + errorMessage(err));
     }
   }
 

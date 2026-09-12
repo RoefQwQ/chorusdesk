@@ -1,4 +1,14 @@
-export type Platform =
+/**
+ * The platforms this build actually ships an adapter for.
+ *
+ * Kept separate from `Platform` because the two answer different questions and
+ * conflating them is how `Platform` lost its exhaustiveness (audit P1-7):
+ * `(string & {})` makes `const p: Platform = 'anything'` legal, so a `switch`
+ * over it can never be proven complete. Stored data must stay open — a channel
+ * bound before a platform was removed still holds its key (Withny) — but
+ * decisions about *our* behaviour belong on the closed set.
+ */
+export type KnownPlatform =
   | 'bilibili'
   | 'youtube'
   | 'twitter'
@@ -7,11 +17,31 @@ export type Platform =
   | 'xiaohongshu'
   | 'weibo'
   | 'douyin'
-  | 'rss'
-  | (string & {});
+  | 'rss';
+
+/** Any platform key: the known set, plus legacy/stored values we no longer ship. */
+export type Platform = KnownPlatform | (string & {});
+
+/** True when `platform` is one we ship an adapter for (narrows the type). */
+export function isKnownPlatform(platform: string): platform is KnownPlatform {
+  return (KNOWN_PLATFORMS as readonly string[]).includes(platform);
+}
+
+/** Runtime mirror of `KnownPlatform`, in registry display order. */
+export const KNOWN_PLATFORMS = [
+  'bilibili',
+  'youtube',
+  'twitter',
+  'pixiv',
+  'fantia',
+  'xiaohongshu',
+  'weibo',
+  'douyin',
+  'rss',
+] as const satisfies readonly KnownPlatform[];
 
 export interface PlatformMeta {
-  key: Platform;
+  key: KnownPlatform;
   name: string;
   domain: string;
   color: string;
@@ -119,7 +149,7 @@ export const PLATFORM_REGISTRY: Record<string, PlatformMeta> = {
     urlPlaceholder: 'https://www.douyin.com/user/MS4wLjABAAAA...',
     authType: 'none',
     authTypeName: '打开的抖音页面',
-    description: '支持创作者短视频与图文作品归集。抖音作品列表只能在真实页面中加载，同步前请先在浏览器打开该创作者主页。',
+    description: '支持创作者短视频与图文作品归集。抖音作品列表只能在真实页面中加载（后台直连会被反爬拦截）；手动同步无需前置条件，扩展会自行开一个临时页面采集并在结束后关闭。',
   },
   rss: {
     key: 'rss',
@@ -135,9 +165,29 @@ export const PLATFORM_REGISTRY: Record<string, PlatformMeta> = {
   },
 };
 
+/**
+ * Where a displayed name came from.
+ *
+ * The sync layer may overwrite a name only when it is not the user's own — and
+ * the old way of deciding that was a hand-written list of every generated
+ * placeholder prefix (`Pixiv作品_`, `B站用户_`, …), kept in step with
+ * `urlParser.ts` by memory. It drifted twice (Withny, then eight prefixes at
+ * once) and silently pinned machine names, because nothing fails when the lists
+ * disagree (audit P1-5, AGENTS rule 9/32).
+ *
+ * `generated` is set at creation from `urlParser.suggestedName`; the sync layer
+ * writes `platform` the moment it has an authoritative nickname; the UI sets
+ * `user` whenever the person edits the name. Absent = a row written before this
+ * field existed, which the sync layer still treats as "maybe generated" using
+ * the old heuristic so pre-existing placeholders can be repaired once.
+ */
+export type NameSource = 'generated' | 'platform' | 'user';
+
 export interface Creator {
   id: string; // uuid
   name: string; // 主展示名
+  /** Where `name` came from; absent on rows written before the field existed. */
+  nameSource?: NameSource;
   avatar: string; // 主头像
   primaryAvatarUrl?: string; // 用户选择的主头像来源
   tags: string[]; // 自定义标签，如 ['ASMR', '插画', 'VUP']
@@ -182,6 +232,8 @@ export interface Channel {
   platform: Platform;
   accountId: string; // 平台内ID/用户名
   displayName: string; // 平台昵称
+  /** Where `displayName` came from; see `NameSource`. */
+  nameSource?: NameSource;
   label?: string; // 用户自定义账号角色标签，例如 "主账号", "日常摸鱼号", "里号/R18", "熟肉切片"
   accountRole?: AccountRole;
   profileUrl: string; // 原始主页链接
@@ -248,10 +300,45 @@ export interface AppSettings {
   platformOrder?: string[];
 }
 
-export interface DeletedPostRecord {
-  id: string; // 唯一动态内联ID，如 "xiaohongshu_66d01..." 或 "bilibili_123456"
+/**
+ * A suppressed post: 「这条内容不许通过同步再出现」.
+ *
+ * Independent of the recycle bin on purpose. `postSuppression` is created by a
+ * delete and cleared ONLY by an explicit restore; `permanentlyDelete` (drop the
+ * snapshot) and `emptyRecycleBin` (drop every snapshot) leave it in place. The
+ * earlier single-row design made those two actions lift the sync blacklist, so
+ * a deleted post came back on the next sync — see `DELETION_MODEL.md` §1.
+ *
+ * `postId` is the whole identity: `Post.id` is globally unique and carries no
+ * channelId, so a suppression survives unfollow → re-follow, a Twitter rename,
+ * and a backup round-trip (DELETION_MODEL §3.2).
+ */
+export interface PostSuppression {
+  postId: string;
+  /** Stored redundantly rather than inferred from the id prefix (§6 问题 2). */
+  platform: Platform;
+  suppressedAt: number;
+  /**
+   * Reference-only attribution, NOT part of the identity.
+   *
+   * Needed to answer 「这个创作者下还有多少条删除生效」 for the unfollow prompt
+   * (§6 问题 5) after the snapshot is gone — 彻底删除 keeps the suppression but
+   * drops the only other row that knew the channel. Both may drift (Twitter
+   * rename, §6 问题 4); nothing keys off them.
+   */
   channelId?: string;
   creatorId?: string;
+}
+
+/**
+ * The recycle-bin half: 「这条内容还能不能找回」. Cleared by 彻底删除 / 清空回收站
+ * / 恢复; carries the display fields the recycle-bin list needs.
+ */
+export interface RecycleSnapshot {
+  id: string;
+  channelId?: string;
+  creatorId?: string;
+  /** Display info for the recycle-bin list (badge) — not used for filtering. */
   platform?: Platform;
   title?: string;
   deletedAt: number;

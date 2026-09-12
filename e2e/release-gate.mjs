@@ -462,7 +462,7 @@ async function killChrome(child, cdp) {
  * addressable from Node at all — `DOM.querySelector` needs a selector, and the
  * buttons here are identified by their visible text.
  */
-async function clickLocated(target, locator, label) {
+async function clickLocated(target, locator, label, cdp) {
   const MARK = 'data-e2e-gate-click';
   // Arm one-shot listeners on the target element so delivery is observable.
   // Without this, a click that never reached the page is indistinguishable from
@@ -635,6 +635,63 @@ async function setFileInput(target, selector, filePath) {
   await target.send('DOM.setFileInputFiles', { nodeId, files: [filePath] });
 }
 
+/**
+ * Answer the app's OWN dialog (audit P2-20 replaced native `alert`/`confirm`
+ * with an in-page `DialogHost`).
+ *
+ * This used to need no code: a native `confirm()` surfaced as
+ * `Page.javascriptDialogOpening` and the handler above auto-accepted it. An
+ * in-page dialog is just DOM, so the gate must click its button like a user —
+ * and the click must go through the same real-input path as everything else.
+ *
+ * `which` selects the button by its label; `等待` is handled by the caller's own
+ * wait, since a dialog appears only after the action that triggers it.
+ */
+async function answerDialog(target, which, cdp) {
+  const label = which === 'cancel' ? ['取消', '算了'] : ['确定', '知道了', '继续'];
+  const locator = `() => {
+    const buttons = [...document.querySelectorAll('[role=alertdialog] button, [role=dialog] button')];
+    const labels = ${JSON.stringify(label)};
+    return buttons.find((b) => labels.includes((b.textContent || '').trim())) || null;
+  }`;
+  await clickLocated(target, locator, `dialog ${which}`, cdp);
+}
+
+/**
+ * Dismiss every queued dialog, until none is present.
+ *
+ * One user action can raise two in a row — importing a backup asks how to apply
+ * it, and the success notice follows immediately. Leaving the second one open
+ * puts its overlay over the card the next step wants to click, and the click
+ * then lands on the overlay: `Input.dispatchMouseEvent` succeeds while the
+ * button's own listeners never fire (measured: mousedown=0 after 5 attempts,
+ * with the geometry looking perfect). That is indistinguishable from an
+ * environment problem unless you know the overlay is there.
+ */
+async function dismissDialogs(target, cdp, max = 5) {
+  for (let i = 0; i < max; i++) {
+    const before = await target.eval(`(document.querySelector('[role=alertdialog]')?.textContent || '')`);
+    if (!before) return i;
+    await answerDialog(target, 'confirm', cdp);
+    // Wait for THIS dialog to be gone or replaced. Checking for simple absence
+    // is wrong when two dialogs are queued: the service advances to the next one
+    // synchronously, so there is no frame in which no dialog exists.
+    const progressed = await target
+      .wait('the dialog to close or change', () =>
+        target.eval(`(document.querySelector('[role=alertdialog]')?.textContent || '') !== ${JSON.stringify(before)}`),
+      )
+      .catch(() => null);
+    if (progressed === null) {
+      throw new Error(
+        `dialog did not respond to its confirm button; still showing: ${await target.eval(
+          `(document.querySelector('[role=alertdialog]')?.textContent || '').slice(0, 120)`,
+        )}`,
+      );
+    }
+  }
+  return max;
+}
+
 // ---------------------------------------------------------------- in-page probes
 
 /** Reads the extension's own Dexie tables through raw IndexedDB. */
@@ -763,6 +820,18 @@ function fixture() {
     // Only the values asserted on: the export merges these over the defaults,
     // so the stored settings object is not (and need not be) what comes back.
     settings: { itemsPerFetch: 25, enableAutoSync: false },
+    // The deletion blacklist (format 1.1). A real user's backup must carry what
+    // they explicitly deleted; the round-trip below asserts it survives import,
+    // which is the whole point of AUDIT §6 方案 A.
+    suppressions: [
+      {
+        postId: 'gate_post_deleted',
+        platform: 'bilibili',
+        suppressedAt: now,
+        channelId: 'bilibili:GATE0001',
+        creatorId: 'gate_creator',
+      },
+    ],
   };
 }
 
@@ -997,7 +1066,7 @@ try {
   const seeded = await step('backup.seed-fixture', ['dashboard.mounts', 'backup.arm-downloads'], async () => {
     // Stay on the settings tab from here on: the feed marks rendered posts as
     // read, which would change the very rows this round trip compares.
-    await clickLocated(dashboard, LOCATE.settingsTab, '设置 tab');
+    await clickLocated(dashboard, LOCATE.settingsTab, '设置 tab', cdp);
     await dashboard.wait('the backup card to render', () =>
       dashboard.eval(`[...document.querySelectorAll('button')].some((b) => (b.textContent||'').includes('下载 JSON 备份'))`),
     );
@@ -1005,6 +1074,18 @@ try {
     const data = fixture();
     fs.writeFileSync(fixturePath, JSON.stringify(data, null, 2));
     await setFileInput(dashboard, 'input[type=file][accept=".json"]', fixturePath);
+    // The import asks how to apply the file (P0-5 replace vs merge), then shows
+    // a success notice. Accepting "replace" matches the old auto-accept and is
+    // what a fresh profile wants; both dialogs must go before the next step
+    // clicks anything.
+    await dashboard.wait('the import dialog to appear', () =>
+      dashboard.eval(`Boolean(document.querySelector('[role=alertdialog]'))`),
+    );
+    await dismissDialogs(dashboard, cdp);
+    // Clicking inside the dialog raises the window (measured: `normal` right
+    // after the dialog cycle), and a raised window stops receiving synthetic
+    // input once it is off-screen. Put it back before the next click.
+    await hideWindow(cdp);
     const rows = await dashboard.wait('the fixture rows to land in the database', async () => {
       const stores = await dashboard.eval(readStores(['creators', 'channels', 'posts']));
       return stores.creators.length === 1 && stores.channels.length === 1 && stores.posts.length === 2
@@ -1016,7 +1097,7 @@ try {
   });
 
   const exported = await step('backup.export', ['backup.seed-fixture'], async () => {
-    await clickLocated(dashboard, LOCATE.exportBackup, '下载 JSON 备份');
+    await clickLocated(dashboard, LOCATE.exportBackup, '下载 JSON 备份', cdp);
     const file = await (async () => {
       const deadline = Date.now() + WAIT_TIMEOUT_MS;
       for (;;) {
@@ -1042,11 +1123,15 @@ try {
       }
     })();
 
-    assert(file.data.version === '1.0', `exported version is ${JSON.stringify(file.data.version)}`);
+    assert(file.data.version === '1.1', `exported version is ${JSON.stringify(file.data.version)}`);
     assert(file.data.exportedAt, 'exported backup has no exportedAt');
     for (const section of ['creators', 'channels', 'posts']) {
       assert(Array.isArray(file.data[section]), `exported ${section} is not an array`);
     }
+    // 1.1 adds the deletion blacklist (AUDIT §6 方案 A): a backup that omits what
+    // the user explicitly deleted is not a backup of their state, so a missing
+    // section here is a regression of the fix, not a formatting detail.
+    assert(Array.isArray(file.data.suppressions), 'exported suppressions is not an array');
     assert(file.data.settings && typeof file.data.settings === 'object', 'exported settings is not an object');
     detail(`${file.name}, ${file.bytes} B, creators=${file.data.creators.length} channels=${file.data.channels.length} posts=${file.data.posts.length}`);
     return file;
@@ -1078,6 +1163,13 @@ try {
   await step('backup.reimport-restores', ['backup.destroy'], async () => {
     const exportedPath = path.join(downloadsDir, exported.name);
     await setFileInput(dashboard, 'input[type=file][accept=".json"]', exportedPath);
+    // The library is empty at this point (backup.destroy cleared it), so either
+    // mode restores the same rows; choose replace, which is the snapshot restore.
+    await dashboard.wait('the import dialog to appear', () =>
+      dashboard.eval(`Boolean(document.querySelector('[role=alertdialog]'))`),
+    );
+    await dismissDialogs(dashboard, cdp);
+    await hideWindow(cdp);
     const rows = await dashboard.wait('the exported file to restore the rows', async () => {
       const stores = await dashboard.eval(readStores(['creators', 'channels', 'posts']));
       return stores.posts.length === 2 ? stores : null;
@@ -1094,7 +1186,16 @@ try {
       settingsRow?.value?.itemsPerFetch === 25,
       `restored settings lost itemsPerFetch=25 (got ${JSON.stringify(settingsRow?.value?.itemsPerFetch)})`,
     );
-    detail('rows and settings restored from the exported file');
+    // The deletion blacklist must survive the round trip: this is the defect
+    // 方案 A fixes (a backup that dropped it resurrected deleted posts on the
+    // next sync).
+    const restoredSuppressions = (await dashboard.eval(readStores(['postSuppressions']))).postSuppressions;
+    assert(
+      restoredSuppressions.some((r) => r.postId === 'gate_post_deleted'),
+      `restored suppressions missing the fixture entry: ${JSON.stringify(restoredSuppressions)}`,
+    );
+
+    detail('rows, settings and the deletion blacklist restored from the exported file');
   });
 
   // --- alarm: the regression AGENTS rule 7 records -------------------------
@@ -1125,7 +1226,7 @@ try {
   const alarmIn = (list) => (Array.isArray(list) ? list.find((a) => a.name === ALARM_NAME) : undefined);
 
   const enabled = await step('alarm.enable-auto-sync', ['backup.reimport-restores'], async () => {
-    await clickLocated(dashboard, LOCATE.autoSyncSwitch, '后台自动更新 switch');
+    await clickLocated(dashboard, LOCATE.autoSyncSwitch, '后台自动更新 switch', cdp);
     // Read the persisted setting first: it separates "the toggle did not land"
     // from "the toggle landed and the worker still did not create the alarm".
     const stored = await dashboard.wait('enableAutoSync to be persisted', async () => {
@@ -1263,7 +1364,7 @@ try {
   // periodic work, which only happens if the alarm is actually gone.
   await step('alarm.cleared-when-disabled', ['alarm.enable-auto-sync'], async () => {
     assert(enabled, 'no alarm existed after the settings change');
-    await clickLocated(dashboard, LOCATE.autoSyncSwitch, '后台自动更新 switch (off)');
+    await clickLocated(dashboard, LOCATE.autoSyncSwitch, '后台自动更新 switch (off)', cdp);
     const cleared = await dashboard.wait('the alarm to be cleared', async () => {
       const list = await readAlarms();
       return alarmIn(list) ? null : true;

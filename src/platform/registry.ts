@@ -1,4 +1,4 @@
-import type { Platform } from '../types';
+import type { KnownPlatform, Platform } from '../types';
 import type { PlatformAdapter } from '../adapters/types';
 import { bilibiliAdapter } from '../adapters/bilibili';
 import { youtubeAdapter } from '../adapters/youtube';
@@ -10,7 +10,14 @@ import { weiboAdapter } from '../adapters/weibo';
 import { douyinAdapter } from '../adapters/douyin';
 import { rssAdapter } from '../adapters/rss';
 
-const ADAPTER_MAP: Record<string, PlatformAdapter> = {
+/**
+ * Keyed by `KnownPlatform`, not `Platform`: `Record<Platform, …>` accepts any
+ * string key and therefore cannot report a missing platform, which is how
+ * "add a platform" stayed a 6–8 touch-point list with no compiler help
+ * (audit P1-12). With the closed key set, a new member of `KnownPlatform` is a
+ * type error here until an adapter exists for it.
+ */
+const ADAPTER_MAP: Record<KnownPlatform, PlatformAdapter> = {
   bilibili: bilibiliAdapter,
   youtube: youtubeAdapter,
   twitter: twitterAdapter,
@@ -26,5 +33,5 @@ export function getAdapter(platform: Platform): PlatformAdapter | undefined {
   // No silent fallback: an unknown platform must surface as an unsupported
   // error (channelSync handles a missing adapter) rather than silently
   // fetching the channel's URL as RSS.
-  return ADAPTER_MAP[platform];
+  return ADAPTER_MAP[platform as KnownPlatform];
 }

@@ -3,6 +3,8 @@
  * Sanitizes folder and file names across Windows and POSIX operating systems.
  */
 
+import { toEpochMs } from '../../utils/timestamp';
+
 // Reserved characters in Windows file systems: \ / : * ? " < > |
 const ILLEGAL_CHARACTERS = /[\\/:*?"<>|\r\n\t]/g;
 
@@ -38,8 +40,9 @@ export const PLATFORM_DIR_NAMES: Record<string, string> = {
  * Format timestamp into YYYYMMDD
  */
 export function formatDateSegment(timestamp?: number): string {
-  if (!timestamp) return 'nodate';
-  const date = new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp);
+  const ms = toEpochMs(timestamp);
+  if (ms === null) return 'nodate';
+  const date = new Date(ms);
   if (isNaN(date.getTime())) return 'nodate';
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');

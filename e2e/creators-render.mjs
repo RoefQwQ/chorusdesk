@@ -108,7 +108,8 @@ ws.addEventListener('message', (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && pending.has(m.id)) {
     const p = pending.get(m.id); pending.delete(m.id);
-    m.error ? p.reject(new Error(`${m.method}: ${m.error.message}`)) : p.resolve(m.result);
+    if (m.error) p.reject(new Error(`${m.method}: ${m.error.message}`));
+    else p.resolve(m.result);
   }
 });
 await new Promise((r) => ws.addEventListener('open', r));
@@ -133,19 +134,16 @@ await send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, de
 //
 // Runs AFTER the target exists: creating a target restores the window, so
 // minimizing before it would be undone immediately (measured in the release gate).
-await new Promise(async (resolve) => {
-  try {
-    const { targetInfos } = await send('Target.getTargets');
-    const page = targetInfos.find((t) => t.type === 'page');
-    if (page) {
-      const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.targetId });
-      await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-    }
-  } catch {
-    /* cosmetic only */
+try {
+  const { targetInfos } = await send('Target.getTargets');
+  const page = targetInfos.find((t) => t.type === 'page');
+  if (page) {
+    const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.targetId });
+    await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
   }
-  resolve();
-});
+} catch {
+  /* cosmetic only */
+}
 
 
 async function evaluate(expression) {

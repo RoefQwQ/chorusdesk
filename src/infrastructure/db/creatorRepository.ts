@@ -21,16 +21,17 @@ export async function updateCreatorRecord(id: string, changes: Partial<Creator>)
 
 /**
  * Delete a creator together with every bound channel and all of that
- * channel's cached posts, in one transaction. Tombstones in
- * `deletedPostIds` are intentionally left untouched (legacy behavior).
+ * channel's cached posts, in one transaction. Recycle snapshots under those
+ * channels go too (I12); suppressions stay (I9).
  */
 export async function deleteCreatorCascade(creatorId: string): Promise<void> {
-  await db.transaction('rw', [db.creators, db.channels, db.posts], async () => {
+  await db.transaction('rw', [db.creators, db.channels, db.posts, db.recycleSnapshots], async () => {
     await db.creators.delete(creatorId);
     const channels = await db.channels.where('creatorId').equals(creatorId).toArray();
     for (const channel of channels) {
       await db.channels.delete(channel.id);
       await db.posts.where('channelId').equals(channel.id).delete();
+      await db.recycleSnapshots.where('channelId').equals(channel.id).delete();
     }
   });
 }

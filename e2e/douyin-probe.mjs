@@ -8,7 +8,6 @@ const ws = await import('ws');
 const socket = new ws.WebSocket(wsUrl);
 let msgId = 0;
 const pending = new Map();
-const replies = [];
 const consoleLogs = [];
 
 function send(method, params = {}) {

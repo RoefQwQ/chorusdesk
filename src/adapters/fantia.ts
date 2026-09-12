@@ -60,6 +60,7 @@ export const fantiaAdapter: PlatformAdapter = {
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     try {
       const clubId = channel.accountId;
+      const signal = options?.signal;
 
       // Fetch fanclub detail (embeds recent_posts) via Background fetch to bypass CORS
       const apiUrl = `https://fantia.jp/api/v1/fanclubs/${encodeURIComponent(clubId)}`;
@@ -68,6 +69,7 @@ export const fantiaAdapter: PlatformAdapter = {
           'Accept': 'application/json, text/plain, */*',
           'X-Requested-With': 'XMLHttpRequest',
         },
+        signal,
       });
 
       if (!res.ok) {
@@ -163,7 +165,7 @@ export const fantiaAdapter: PlatformAdapter = {
 
       // Fill image posts' media from their detail pages (the fanclub API only
       // carries a single thumb per post).
-      await enrichFantiaPostMedia(enrichTargets);
+      await enrichFantiaPostMedia(enrichTargets, signal);
 
       // No cursor pagination available on this endpoint
       const hasMore = false;
@@ -201,7 +203,7 @@ const FANTIA_ENRICH_INTERVAL_MS = 1200;
  * media is that single thumb are candidates; failures are silent (the thumb
  * stays, a later round retries).
  */
-async function enrichFantiaPostMedia(posts: Post[]): Promise<void> {
+async function enrichFantiaPostMedia(posts: Post[], signal?: AbortSignal): Promise<void> {
   const candidates = posts.filter(
     (p) =>
       p.mediaList.length <= 1 &&
@@ -224,6 +226,7 @@ async function enrichFantiaPostMedia(posts: Post[]): Promise<void> {
           Accept: 'application/json, text/plain, */*',
           'X-Requested-With': 'XMLHttpRequest',
         },
+        signal,
       });
       if (!res.ok) continue;
 

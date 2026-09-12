@@ -10,14 +10,18 @@ export async function putChannel(channel: Channel): Promise<void> {
 }
 
 /**
- * Delete a channel and every cached post belonging to it, in one
- * transaction. Tombstones in `deletedPostIds` are intentionally left
- * untouched (legacy behavior).
+ * Delete a channel and every cached post belonging to it, in one transaction.
+ *
+ * Recycle snapshots under this channel go with it (I12: a snapshot whose parent
+ * is gone can never be restored into a working feed, and leaving it produces a
+ * 「动态已定向找回」 that writes a dangling row). Suppressions are deliberately
+ * KEPT — a re-follow must not resurrect what the user deleted (I9, §6 问题 5).
  */
 export async function deleteChannelCascade(channelId: string): Promise<void> {
-  await db.transaction('rw', [db.channels, db.posts], async () => {
+  await db.transaction('rw', [db.channels, db.posts, db.recycleSnapshots], async () => {
     await db.channels.delete(channelId);
     await db.posts.where('channelId').equals(channelId).delete();
+    await db.recycleSnapshots.where('channelId').equals(channelId).delete();
   });
 }
 

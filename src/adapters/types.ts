@@ -17,6 +17,15 @@ export interface FetchOptions {
    * and sliced. Absent/0 = unconstrained.
    */
   maxNewPosts?: number;
+  /**
+   * Cancels the in-flight acquisition.
+   *
+   * Set by `channelSync` when its 45s budget expires, so the request actually
+   * stops instead of merely being stopped waiting for (AUDIT P1-2). Adapters
+   * pass it to `bgFetch`. Page-driven platforms cannot honour it mid-injection
+   * (`chrome.scripting` is not cancellable) — they check it between steps.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -31,7 +40,17 @@ export type FetchErrorCode =
   | 'parse'
   | 'timeout'
   | 'not_found'
-  | 'unsupported';
+  | 'unsupported'
+  /**
+   * Our own storage failed (IndexedDB write/read), not the platform's network.
+   *
+   * It must not be classified as `network`: `code` is not a message — it drives
+   * the platform cool-down (`batchSync` calls `noteRateLimit` on `rate_limit`,
+   * clears on success), the history-end decision and the user-facing wording.
+   * A quota error reported as「平台网络错误」would cool down a platform that was
+   * never contacted and hide a local disk problem. (AUDIT P1-1.)
+   */
+  | 'storage';
 
 export interface FetchError {
   /** Machine-readable failure class; drives sync-layer policy, not display. */
@@ -56,6 +75,23 @@ export interface FetchResult {
   error?: FetchError;
   /** Total raw posts returned by adapter in this batch before DB deduplication */
   totalFetched?: number;
+  /**
+   * Set when the adapter returned content, but at least one of its sources
+   * failed — the result is real but incomplete.
+   *
+   * This is the failure that has no other symptom: a multi-source platform
+   * (bilibili dynamic + medialist, XHS list + enrichment, Twitter tab + direct)
+   * whose supplementary source is down returns a valid, shorter page. Nothing
+   * reports an error and `hasMore` is honest about the page, so the user reads
+   * "this creator did not post" and the log says 同步完成 (audit P1-3).
+   *
+   * Distinct from `error` on purpose: a degraded result still WRITES its posts
+   * (partial data beats none), whereas an `error` result with no posts does not.
+   * The sync layer logs these and never lets one masquerade as a clean sync.
+   */
+  degraded?: boolean;
+  /** Human-readable notes on what was missing, for the Developer Log. */
+  warnings?: string[];
 }
 
 export interface PlatformAdapter {

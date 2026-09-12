@@ -142,7 +142,8 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
       let targetCreatorId = selectedCreatorId.value;
 
       if (mode.value === 'new' || !targetCreatorId) {
-        const creatorName = newCreatorName.value.trim() || deps.activeDisplayName.value || current.suggestedName || '新创作者';
+        const typedName = newCreatorName.value.trim();
+        const creatorName = typedName || deps.activeDisplayName.value || current.suggestedName || '新创作者';
         const tags = newCreatorTags.value
           .split(/[,，\s]+/)
           .map(t => t.trim())
@@ -151,6 +152,9 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
         const newCreator: Creator = {
           id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
           name: creatorName,
+          // A name the user typed is theirs; a page-detected/suggested one is
+          // ours to replace with the platform's real nickname on first sync.
+          nameSource: typedName ? 'user' : 'generated',
           avatar: deps.detectedAuthorMeta.value.avatar || '',
           tags,
           createdAt: Date.now(),
@@ -175,6 +179,9 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
         platform: current.platform,
         accountId: current.accountId,
         displayName: channelDisplayName,
+        // Derived from detected page metadata or the parser, never typed —
+        // so the platform's own nickname may replace it on the first sync.
+        nameSource: 'generated',
         avatarUrl: deps.detectedAuthorMeta.value.avatar || undefined,
         profileUrl: current.cleanUrl,
         label: roleLabel,

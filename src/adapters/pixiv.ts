@@ -14,18 +14,21 @@ export const pixivAdapter: PlatformAdapter = {
 
       // 1. Fetch user illust list via Background Fetch (bypasses CORS & uses session cookie)
       const profileUrl = `https://www.pixiv.net/ajax/user/${uid}/profile/all`;
+      const signal = options?.signal;
       const [res, userRes] = await Promise.all([
         bgFetch(profileUrl, {
           headers: {
             'Accept': 'application/json',
             'Referer': `https://www.pixiv.net/users/${uid}`,
           },
+          signal,
         }),
         bgFetch(`https://www.pixiv.net/ajax/user/${uid}?full=1`, {
           headers: {
             'Accept': 'application/json',
             'Referer': `https://www.pixiv.net/users/${uid}`,
           },
+          signal,
         }).catch(() => null),
       ]);
 
@@ -103,7 +106,7 @@ export const pixivAdapter: PlatformAdapter = {
       // Fill real previews and all pages of multi-page works from the ajax
       // endpoint — the profile/all API only returns ids, and the embed badge
       // preview is not the work itself.
-      await enrichPixivWorkMedia(enrichTargets);
+      await enrichPixivWorkMedia(enrichTargets, signal);
 
       const nextOffset = offset + targetIds.length;
       const hasMore = nextOffset < allIds.length;
@@ -142,7 +145,7 @@ const PIXIV_ENRICH_INTERVAL_MS = 1200;
  * every other pximg URL in the app; failures are silent (the embed badge
  * stays, a later round retries).
  */
-async function enrichPixivWorkMedia(posts: Post[]): Promise<void> {
+async function enrichPixivWorkMedia(posts: Post[], signal?: AbortSignal): Promise<void> {
   let fetched = 0;
 
   for (const post of posts) {
@@ -159,6 +162,7 @@ async function enrichPixivWorkMedia(posts: Post[]): Promise<void> {
           Accept: 'application/json',
           Referer: `https://www.pixiv.net/artworks/${id}`,
         },
+        signal,
       });
       if (!res.ok) continue;
 
@@ -209,6 +213,7 @@ async function enrichPixivWorkMedia(posts: Post[]): Promise<void> {
       await new Promise((r) => setTimeout(r, PIXIV_ENRICH_INTERVAL_MS));
       const pagesRes = await bgFetch(`https://www.pixiv.net/ajax/illust/${id}/pages`, {
         headers: { Accept: 'application/json', Referer: `https://www.pixiv.net/artworks/${id}` },
+        signal,
       });
       if (!pagesRes.ok) continue;
       let pagesJson: unknown;

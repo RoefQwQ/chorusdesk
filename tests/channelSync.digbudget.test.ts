@@ -84,12 +84,9 @@ vi.mock('../src/infrastructure/db/database', () => ({
       get: vi.fn(async () => undefined),
       update: vi.fn(async () => {}),
     },
-    deletedPostIds: {
-      where: () => ({
-        equals: () => ({
-          primaryKeys: async () => [],
-        }),
-      }),
+    postSuppressions: {
+      bulkGet: async (ids: string[]) => ids.map(() => undefined),
+      bulkDelete: async () => {},
     },
   },
 }));

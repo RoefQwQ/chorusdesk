@@ -68,6 +68,7 @@ export const bilibiliAdapter: PlatformAdapter = {
   platform: 'bilibili',
 
   async fetchLatest(channel: Channel, limit: number = 15, options?: FetchOptions): Promise<FetchResult> {
+    const signal = options?.signal;
     const uid = channel.accountId;
     let authorName = channel.displayName;
     let authorAvatar = toSecureMediaUrl(channel.avatarUrl);
@@ -97,6 +98,12 @@ export const bilibiliAdapter: PlatformAdapter = {
     // does, it is the authoritative source: an empty list means "no videos", which
     // must not be re-reported as a permission error from the risk-controlled dynamic feed.
     let mediaSucceeded = false;
+    // Whether the PRIMARY dynamic feed answered with usable data. Tracked
+    // separately from `lastDynamicCode` so a result built on the medialist
+    // supplement alone can be reported as degraded rather than as a clean sync
+    // (audit P1-3): the two sources cover different content, so losing the
+    // dynamic feed means the page is genuinely shorter, not merely filtered.
+    let dynamicSucceeded = false;
 
     // PRIMARY: Space dynamic feed (sorted newest-first, covers all dynamic types)
     try {
@@ -108,6 +115,7 @@ export const bilibiliAdapter: PlatformAdapter = {
           Origin: 'https://space.bilibili.com',
           'User-Agent': BILI_UA,
         },
+        signal,
       });
 
       if (!res.ok) {
@@ -130,6 +138,7 @@ export const bilibiliAdapter: PlatformAdapter = {
             `${String(json.message ?? '')}（频道 ${channel.displayName || channel.accountId}）`,
           );
         } else if (json.data) {
+          dynamicSucceeded = true;
           const data = asRecord(json.data);
           const items = Array.isArray(data.items) ? data.items : [];
           if (data.has_more) hasMore = true;
@@ -182,6 +191,7 @@ export const bilibiliAdapter: PlatformAdapter = {
             'Referer': `https://space.bilibili.com/${uid}/video`,
             'User-Agent': BILI_UA,
           },
+          signal,
         });
 
         if (!res.ok) {
@@ -239,17 +249,36 @@ export const bilibiliAdapter: PlatformAdapter = {
 
     // The medialist supplement above already ran whenever allPosts.length < limit
     // (which includes the empty case). Here we only decide the final error:
-    //  - medialist code 0 (authoritative): empty list = "no content", never a
-    //    permission error, even if the risk-controlled dynamic feed also failed;
+    //  - medialist code 0 (authoritative) and the dynamic feed also answered:
+    //    empty list = "no content", never a permission error;
     //  - medialist business code: report that as the real cause;
     //  - dynamic-feed hard failure only matters when medialist itself failed/errored.
     if (allPosts.length === 0) {
-      if (mediaSucceeded) {
-        // Medialist is authoritative and returned nothing (or only watermark-skipped items).
+      // A SUCCESSFUL EMPTY is only credible when BOTH sources answered.
+      //
+      // Medialist covers VIDEO UPLOADS ONLY — it does not see image/text
+      // dynamics. So "medialist said code 0 with an empty list" while the
+      // dynamic feed was risk-controlled (-412) is not "this account has no
+      // content": it is "the source that would have held the content was
+      // refused". The old code returned a successful empty result there, which
+      // is the shape AGENTS rule 13 forbids — an account that posts only
+      // image/text dynamics was reported as 「无投稿」, and `hasMore` from the
+      // failed feed never surfaced. Imaged-only + rate-limited is the exact
+      // combination.
+      if (mediaSucceeded && dynamicSucceeded) {
         return {
           posts: [],
           authorMeta: { name: authorName, avatar: authorAvatar },
           totalFetched: rawFetched,
+        };
+      }
+
+      // Medialist answered but the dynamic feed did not: name the dynamic
+      // feed's code, because THAT is the missing data source.
+      if (mediaSucceeded && !dynamicSucceeded && lastDynamicCode !== undefined) {
+        return {
+          posts: [],
+          error: biliCodeError(lastDynamicCode),
         };
       }
 
@@ -275,6 +304,18 @@ export const bilibiliAdapter: PlatformAdapter = {
       // sync log separate "the adapter filtered everything away" from "the
       // platform returned nothing".
       totalFetched: rawFetched,
+      // Partial result: content exists but the dynamic feed (which carries
+      // image/text posts, not just video uploads) did not answer, so this page
+      // is shorter than the account actually posted. Reported rather than
+      // silent — the whole point is that this failure otherwise has NO symptom
+      // (audit P1-3).
+      ...(dynamicSucceeded ? {} : {
+        degraded: true,
+        warnings: [
+          `动态接口未返回可用数据${lastDynamicCode === undefined ? '' : `（业务码 ${lastDynamicCode}）`}，` +
+          '本次仅有投稿列表可用，可能缺少图文动态。',
+        ],
+      }),
     };
   },
 
@@ -287,6 +328,7 @@ export const bilibiliAdapter: PlatformAdapter = {
     authorName?: string,
     authorAvatar?: string,
   ): Promise<FetchResult> {
+    const signal = options.signal;
     const allPosts: Post[] = [];
     const seenBvids = new Set<string>();
     let nextCursor: string | undefined;
@@ -301,6 +343,7 @@ export const bilibiliAdapter: PlatformAdapter = {
           'Referer': `https://space.bilibili.com/${uid}/dynamic`,
           'User-Agent': BILI_UA,
         },
+        signal,
       });
 
       if (res.ok && res.data) {

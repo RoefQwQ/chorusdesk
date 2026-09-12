@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { History, RefreshCw, Trash2, AlertCircle, ExternalLink } from 'lucide-vue-next';
 import { ACCOUNT_ROLE_BADGE_CLASS, ACCOUNT_ROLE_LABELS, PLATFORM_REGISTRY, type Channel } from '../../../../src/types';
+import { dialog } from '../../composables/useDialog';
 
 /**
  * 创作者卡片内单个已绑定账号行：角色徽章（点击轮换）、平台链接、同步
@@ -43,9 +44,9 @@ const platformName = computed(() => platformMeta.value?.name || props.channel.pl
 const lastSyncAt = computed(() => props.channel.lastSuccessAt ?? props.channel.lastCheckAt);
 
 /** 同步失败徽章点击后的详情弹窗（模板内无法直接调用 `alert`）。 */
-function showSyncError() {
+async function showSyncError() {
   const name = props.channel.displayName || props.channel.accountId;
-  alert(`【${name} 同步未成功】\n\n原因：${props.channel.errorMessage || '未知异常'}`);
+  await dialog.alert(`【${name} 同步未成功】\n\n原因：${props.channel.errorMessage || '未知异常'}`);
 }
 
 /**

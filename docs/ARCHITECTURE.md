@@ -267,18 +267,29 @@ version(4): 数据迁移（无 schema 变更）——posts 与 deletedPostIds.po
             旧值从未进入 index，`where('isRead')` 恒空 → 未读角标与收藏统计恒为 0）
 version(5): 数据迁移（无 schema 变更）——清理存量推文正文尾部的 t.co 链接
             （见 src/infrastructure/db/database.ts 的 migrateStoredTweetLinks）
+version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收站快照），
+            「彻底删除 / 清空回收站」会连带解除黑名单，删过的动态因此会从同步里复活。
+            拆为 postSuppressions 'postId, platform, suppressedAt'（只由显式恢复解除，
+            带 channelId/creatorId 参考字段供取关提示计数）与
+            recycleSnapshots 'id, channelId, creatorId, deletedAt'（可清），
+            deletedPostIds: null（整表删除，迁移不可回退）。
+            （见 database.ts 的 migrateDeletionSplit；设计与不变量见 docs/DELETION_MODEL.md）
 ```
 
-导出单例 `db`。表：`creators/channels/posts`（主键即业务 id）、`settings`（`{ key, value }` 行式存储）、`deletedPostIds`。
+导出单例 `db`。表：`creators/channels/posts`（主键即业务 id）、`settings`（`{ key, value }` 行式存储）、`postSuppressions`、`recycleSnapshots`。
 
 - `settingsRepository.ts`：`DEFAULT_SETTINGS`（默认 `enableAutoSync: false`、`requestDelayMs: 600`、`itemsPerFetch: 10` 等）；`getSettings()` 读 `settings` 表 `key === 'app_settings'` 并与默认值合并；`saveSettings(partial)` 先读后合并再 `put`。
 - `statsService.ts`：`getDatabaseStats()` 返回各表计数与 `navigator.storage.estimate()` 用量（失败静默为 0）。
 - `postRepository.ts`（动态生命周期，UI 通过它操作，不要绕过）：
-  - `cleanupOldPosts(days = 60)`：删除早于 cutoff 且**未收藏**的动态（`days === 0` 清所有未收藏）。
-  - `deletePostAndTombstone(post)`：从 `posts` 删除并把**完整快照**（`postData` 深拷贝）写入 `deletedPostIds`。
-  - `restoreDeletedPost(id)` / `restoreDeletedPostId` / `restoreDeletedPostIds(ids)` / `restoreAllDeletedPostIds()`：快照还原回 `posts` 并清墓碑。
-  - `permanentlyDeletePost(id)`：仅删墓碑、不还原。
+  - `cleanupOldPosts(days = 60)`：删除早于 cutoff 且**未收藏**的动态（`days === 0` 清所有未收藏）。**不建立抑制**——这是存储维护，不是「我不要这条内容」。
+  - `deletePostAndTombstone(post)`：单事务——从 `posts` 删除，写 `postSuppressions`（抑制）与 `recycleSnapshots`（完整快照深拷贝）。
+  - `restoreDeletedPost(id)`：单事务——快照写回 `posts` 并清除**抑制与快照**；父频道已不存在时丢弃该孤儿快照并返回 `null`。
+  - `restoreAllDeletedPostIds()`：单事务——全部快照写回，清空全部抑制与快照。
+  - `permanentlyDeletePost(id)`：**只删快照**，抑制保留（这正是「彻底删除后不会再出现」的实现）。
+  - `clearDeletedPostRecords()`：**只清快照**，抑制全部保留（「清空回收站」）。
   - `getDeletedPostCount()` / `getDeletedPostRecords()`：回收站计数/列表（按 `deletedAt` 倒序）。
+  - `getSuppressedPostIds(ids)` / `clearSuppressions(ids)`：同步层的抑制查询/解除（按 `postId`，非 channelId）。
+  - `countSuppressionsForChannels(ids)` / `countSuppressionsForCreator(id)`：取关提示的计数来源。
   - `healBrokenPostMedia()`：把小红书（等）动态媒体 URL 经 `toSecureMediaUrl` 重写自愈，返回修复条数。
 
 ### 4.5 Chrome 基础设施 `src/infrastructure/chrome/`
@@ -327,14 +338,18 @@ getAdapter(channel.platform)（缺失回退 rss）
  → db.channels.update(id, { status: 'updating', errorMessage: undefined })
  → 水位：普通同步（无 cursor/isHistory/restoreDeleted/forceRefresh）时
    取该频道 posts 中 publishedAt 最大者作为 sinceTimestamp（复合索引 [channelId+publishedAt]）
- → mergedOptions = { ...options, sinceTimestamp }
+ → mergedOptions = { ...options, sinceTimestamp, signal: options?.signal ?? 内部 AbortController.signal }
+   （45s 超时同时 abort 该 controller —— 超时是「真正取消」，不是「不再等待」）
  → Promise.race([adapter.fetchLatest(...), 45s 超时])
  ├─ result.error 且无 post → channel 置 error + 友好文案（429 → 限流提示），返回
+ │    写库失败归 storage（不是 network）：错误码驱动冷却，分类错了会冷却一个没被联系过的平台
  └─ 有 posts → 落库前过滤：
      1) forceRefresh：全部 upsert（自愈媒体）
      2) isHistory/cursor：已有 id 静默 upsert 自愈，只新增新 id（primaryKeys 判断，避免全量载入）
      3) 普通增量（sinceTimestamp>0）：丢弃 publishedAt <= 水位的
-     4) 墓碑：默认过滤 deletedPostIds；restoreDeleted 时 bulkDelete 对应墓碑
+     4) 抑制：按 postId 查 postSuppressions 并过滤（**不是按 channelId** —— 改名/跨频道仍拦得住）；
+        读取失败**向上抛**（fail closed）。restoreDeleted 时清除对应抑制
+ → 结果 degraded（部分数据源失败）时写 warn 日志，但仍落库
      → channelLabel 兜底补全 → db.posts.bulkPut
      → bilibili 专属去重：删除与新建 bilibili_video_<bvid> 同 originalUrl 的旧 bilibili_<dynId>
  → channel 元数据：status:'success'、lastCheckAt/lastSuccessAt、errorMessage 清空
@@ -408,16 +423,19 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 
 | 存储 | 键 | 用途 | 读写方 |
 |---|---|---|---|
-| IndexedDB | 库 `CreatorFeedHubDB`（5 表：`creators`/`channels`/`posts`/`settings`/`deletedPostIds`） | 业务数据 | `src/infrastructure/db/*` |
+| IndexedDB | 库 `CreatorFeedHubDB`（v6，6 表：`creators`/`channels`/`posts`/`settings`/`postSuppressions`/`recycleSnapshots`） | 业务数据 | `src/infrastructure/db/*` |
 | IndexedDB | 库 `FeedHubFSCache`，store `handles`，key `root_cache_dir` | 图片缓存根目录句柄 | `src/services/imageCache/fsManager.ts` |
 | `chrome.storage.session` | `devLog.entries` / `devLog.verbose` | 开发者日志环形缓冲（150 条）与详细模式开关 | `src/utils/devLog.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_theme` | 明暗主题 | `useDarkMode.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_hidden_creators` / `creator_feed_hidden_platforms` | 隐藏创作者/平台偏好 | `useCreatorVisibility.ts` |
 | `localStorage`（dashboard 页） | `cfh_feed_platform_list_rows` / `cfh_feed_creator_list_rows` | 两个侧栏各自的行数（4–8），由把手拖动或方向键写入 | `views/FeedView.vue` → `components/LoopScroll.vue` 的 `storage-key` |
-| JSON 备份 | `{ version:'1.0', exportedAt, creators, channels, settings, posts }` | 导出/导入 | `useBackupManager.ts` → `src/application/backupService.ts` + `backupFileService.ts` |
+| JSON 备份 | `{ version:'1.1', exportedAt, creators, channels, settings, posts, suppressions }` | 导出/导入 | `useBackupManager.ts` → `src/application/backupService.ts` + `backupFileService.ts` |
 
-注意：当前备份格式**不含** `deletedPostIds`（回收站内容不随备份迁移），也**不含**
-开发者日志（日志为会话级诊断数据，刻意排除）。
+注意：备份**含删除抑制记录**（`suppressions`，格式 1.1 起）——它是用户的明确意图，
+缺了它导入后删过的动态会复活。1.0 文件仍可读（两个版本号都在白名单里），
+但其 `suppressions` 节不存在，**以「恢复快照」导入 1.0 文件会清空当前删除记录**（UI 会提示）。
+回收站快照（`recycleSnapshots`）不入备份：它只是内容的便捷视图，能重新抓到。
+**不含**开发者日志（会话级诊断数据，刻意排除）。
 
 ## 7.1 开发者日志
 

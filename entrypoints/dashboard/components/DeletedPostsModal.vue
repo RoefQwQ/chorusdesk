@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { Trash2, X, Search, RotateCcw } from 'lucide-vue-next';
-import { PLATFORM_REGISTRY, type DeletedPostRecord } from '../../../src/types';
+import { PLATFORM_REGISTRY, type RecycleSnapshot } from '../../../src/types';
 import { toSecureMediaUrl } from '../../../src/utils/media';
 import BaseModal from './BaseModal.vue';
 
 defineProps<{
-  records: DeletedPostRecord[];
-  filteredRecords: DeletedPostRecord[];
+  records: RecycleSnapshot[];
+  filteredRecords: RecycleSnapshot[];
   searchQuery: string;
 }>();
 const emit = defineEmits<{
   close: [];
   'update:searchQuery': [value: string];
-  'restore-one': [record: DeletedPostRecord];
-  'permanent-delete': [record: DeletedPostRecord];
+  'restore-one': [record: RecycleSnapshot];
+  'permanent-delete': [record: RecycleSnapshot];
   'restore-all-and-sync': [];
 }>();
 const secure = toSecureMediaUrl;

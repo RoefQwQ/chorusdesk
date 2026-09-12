@@ -56,18 +56,40 @@ export async function bgFetch(url: string, options: RequestInit = {}): Promise<H
     }
   }
 
+  // An already-aborted signal must not issue anything at all.
+  if (options.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+
   // 1. Already inside the service worker: execute the fetch directly.
   if (IS_SERVICE_WORKER) {
-    return performBgFetch(url, headersObj);
+    return performBgFetch(url, headersObj, options.signal ?? undefined);
   }
 
   // 2. Extension page: delegate to the service worker (CORS-exempt).
+  //
+  // An AbortSignal cannot cross a message boundary, so it is forwarded as a
+  // second message: the request carries an id, and abort sends
+  // `BG_FETCH_ABORT` for it. Without this the page's 45s timeout resolved while
+  // the worker's `fetch` kept running — the request outlived the sync that
+  // wanted it, so a user who retried could have two live requests to a platform
+  // whose whole protection model is a request ceiling (AUDIT P1-2).
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    const requestId = `bgf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const onAbort = () => {
+      try {
+        chrome.runtime.sendMessage({ type: 'BG_FETCH_ABORT', requestId });
+      } catch {
+        /* worker may be gone; the fetch dies with it anyway */
+      }
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
     try {
       const resp = await new Promise<HttpResponse | null>((resolve) => {
         chrome.runtime.sendMessage(
           {
             type: 'BG_FETCH',
+            requestId,
             url,
             options: {
               headers: headersObj,
@@ -84,12 +106,18 @@ export async function bgFetch(url: string, options: RequestInit = {}): Promise<H
         );
       });
 
+      if (options.signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
       if (resp && typeof resp.ok === 'boolean') {
         return resp;
       }
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') throw e;
       console.warn('[bgFetch] Delegate failed:', e);
       return { ok: false, status: 0, data: '', error: '后台请求服务未响应，请重新加载扩展后重试' };
+    } finally {
+      options.signal?.removeEventListener('abort', onAbort);
     }
   }
 

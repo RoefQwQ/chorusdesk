@@ -5,6 +5,7 @@ import { channelService } from '../../../src/application';
 import { originPattern, requestHostAccess } from '../../../src/infrastructure/chrome/optionalHostAccess';
 import { devLog } from '../../../src/utils/devLog';
 import { errorMessage } from '../../../src/utils/errorMessage';
+import { dialog } from './useDialog';
 
 export interface SyncActionsDependencies {
   /** Live lists the refresh flows operate on and summarize. */
@@ -41,7 +42,7 @@ async function ensureRssHostAccess(channels: Channel[]): Promise<boolean> {
     feeds.map((ch) => originPattern(ch.profileUrl) || ch.platform).join(', '),
   );
   if (!granted) {
-    alert(
+    await dialog.alert(
       '【需要站点访问权限】RSS 源不在扩展的固定平台清单内，需要你为该站点授权后才能抓取。\n\n'
       + '已跳过本次 RSS 同步；其余平台不受影响。再次点击同步可重新弹出授权提示。',
     );
@@ -113,7 +114,7 @@ export function useSyncActions(deps: SyncActionsDependencies) {
     const creator = deps.getCreators().find(c => c.id === creatorId);
     const chs = deps.getChannels().filter(ch => ch.creatorId === creatorId);
     if (chs.length === 0) {
-      alert('该创作者暂未绑定任何平台账号，请先点击【追加新账号】添加。');
+      await dialog.alert('该创作者暂未绑定任何平台账号，请先点击【追加新账号】添加。');
       return;
     }
     // First call in the handler: it needs the click's gesture token.
@@ -130,18 +131,18 @@ export function useSyncActions(deps: SyncActionsDependencies) {
         .filter(r => r.error)
         .map(r => r.error!.message);
       if (errors.length > 0 && totalPosts === 0) {
-        alert(`【同步提示 - ${creator?.name || '创作者'}】\n${errors.join('\n')}`);
+        await dialog.alert(`【同步提示 - ${creator?.name || '创作者'}】\n${errors.join('\n')}`);
       } else if (totalPosts === 0 && rawFetched > 0 && deps.getHideReposts()) {
         // The platform did return content and none of it was new-to-us *after*
         // the retweet filter. Saying "已成功获取到 0 条" here reads as a failure
         // for a creator whose feed is mostly retweets.
-        alert(
+        await dialog.alert(
           `【同步完成】${creator?.name || '创作者'} 近期没有新的原创动态。\n\n`
           + `平台返回了 ${rawFetched} 条内容，但当前开启了「默认隐藏转发」，其中没有符合条件的原创。`
           + `如需查看转发内容，可在设置页关闭「默认隐藏转发」后重试。`,
         );
       } else {
-        alert(`【同步完成】已成功获取到 ${totalPosts} 条作品/动态！`);
+        await dialog.alert(`【同步完成】已成功获取到 ${totalPosts} 条作品/动态！`);
       }
     } finally {
       syncingCreatorIds.value.delete(creatorId);
@@ -155,7 +156,7 @@ export function useSyncActions(deps: SyncActionsDependencies) {
     if (!(await ensureRssHostAccess([channel]))) return;
     // Prevent rapid spam-clicks (8s cooldown check unless forceRefresh)
     if (!forceRefresh && channel.lastCheckAt && Date.now() - channel.lastCheckAt < 8_000) {
-      alert('【操作过于频繁】该账号在 8 秒内刚执行过同步。为保护账号免受平台限流，请稍等片刻后再试。');
+      await dialog.alert('【操作过于频繁】该账号在 8 秒内刚执行过同步。为保护账号免受平台限流，请稍等片刻后再试。');
       return;
     }
     syncingChannelIds.value.add(channel.id);
@@ -168,18 +169,18 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       });
 
       if (res.error) {
-        alert(`【同步未成功】${channel.displayName || channel.accountId}：\n${res.error.message}`);
+        await dialog.alert(`【同步未成功】${channel.displayName || channel.accountId}：\n${res.error.message}`);
       } else if (res.posts && res.posts.length > 0) {
-        alert(`【同步成功】已获取并更新 ${channel.displayName || channel.accountId} 的 ${res.posts.length} 条作品/动态！`);
+        await dialog.alert(`【同步成功】已获取并更新 ${channel.displayName || channel.accountId} 的 ${res.posts.length} 条作品/动态！`);
       } else if ((res.totalFetched || 0) > 0 && deps.getHideReposts()) {
         // Same distinction as the creator-level flow: content came back but the
         // retweet filter removed all of it. "暂无公开发布的内容" would be wrong.
-        alert(
+        await dialog.alert(
           `【同步完成】${channel.displayName || channel.accountId} 近期没有新的原创动态。\n\n`
           + `平台返回了 ${res.totalFetched} 条内容，但当前开启了「默认隐藏转发」，其中没有符合条件的原创。`,
         );
       } else {
-        alert(`【同步完成】连接平台成功，但 ${channel.displayName || channel.accountId} 近期暂无公开发布的内容。`);
+        await dialog.alert(`【同步完成】连接平台成功，但 ${channel.displayName || channel.accountId} 近期暂无公开发布的内容。`);
       }
     } finally {
       syncingChannelIds.value.delete(channel.id);
@@ -209,7 +210,7 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       setTimeout(resolve, 600);
       await promise;
     }
-    alert(`【批量同步完成】已成功同步选中的 ${creatorIds.length} 位创作者动态！`);
+    await dialog.alert(`【批量同步完成】已成功同步选中的 ${creatorIds.length} 位创作者动态！`);
   }
 
   return {

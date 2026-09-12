@@ -29,8 +29,9 @@
 > **内容与方向大致与当时的开发方向一致，但不是本仓库的权威**。
 > - 其中的**行为承诺**（「完整备份」「无前置条件」「全部数据」这类）**不得当作决策论据**——
 >   已踩过一次：备份 A/B 决策稿曾引 README 的「支持将全部数据导出…便于跨设备迁移或重装恢复」
->   作论据，而该句描述的正是**当前有缺陷的行为**（备份缺 `deletedPostIds`，导入后删除失效，
->   见 `AUDIT_2026-09-12.md` §P0-4）。
+>   作论据，而该句描述的正是**当时有缺陷的行为**（备份缺删除记录，导入后删除失效，
+>   见 `AUDIT_2026-09-12.md` §P0-4）。**该缺陷已于 2026-09-12 修复**（备份格式 1.1 纳入
+>   `suppressions`），因此那句话现在成立——但规则不变：**不要用 README 推断意图**。
 > - 可核对的事实（平台清单、命令、链接）**直接对代码**；对不上就改 README。
 > - **发现原则性问题或方向拿不准 → 停下来问用户**，不要按 README 推断意图。
 
@@ -89,8 +90,8 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 入口：`src/infrastructure/db/database.ts`（schema）、`settingsRepository.ts`（默认值）、`postRepository.ts`（生命周期）。
 
 必须遵守：
-- 不改库名 `CreatorFeedHubDB`；**不删除/不重排**任何已发布的 version。当前已到 **v5**：v1 四表、v2 posts 复合索引 `[channelId+publishedAt]`、v3 `deletedPostIds`、v4 把 `isRead`/`isBookmarked` 由 boolean 改写为 `0 | 1`、v5 清理存量推文正文尾部的 t.co 链接（后两者均为纯数据迁移，无 schema 变更）。完整声明见 `ARCHITECTURE.md` §4.4。
-- 新 schema 只 `version(6).stores({ ... })` 追加，且 stores 里要包含全部受影响表的**完整**索引声明（Dexie 按版本全量替换索引定义）。
+- 不改库名 `CreatorFeedHubDB`；**不删除/不重排**任何已发布的 version。当前已到 **v6**：v1 四表、v2 posts 复合索引 `[channelId+publishedAt]`、v3 `deletedPostIds`、v4 把 `isRead`/`isBookmarked` 由 boolean 改写为 `0 | 1`、v5 清理存量推文正文尾部的 t.co 链接（后两者均为纯数据迁移，无 schema 变更）、**v6 拆表：`deletedPostIds` → `postSuppressions` + `recycleSnapshots`，旧表置 `null`（整表删除，迁移不可回退）**。完整声明见 `ARCHITECTURE.md` §4.4，设计与不变量见 `DELETION_MODEL.md`。
+- 新 schema 只 `version(7).stores({ ... })` 追加，且 stores 里要包含全部受影响表的**完整**索引声明（Dexie 按版本全量替换索引定义）。
 - 新增字段一律给旧数据默认兜底：对象型默认值在读取端合并（仿 `getSettings` 的 `{ ...DEFAULT_SETTINGS, ...item.value }`）；布尔/可选字段用 `?.` 与 `Boolean()` 收窄。
 - 导入旧 JSON 时允许缺新字段（现有 `handleImportFile` 逐表 `bulkPut`，天然容忍）。
 - `Post.id`、`Channel.id` 生成规则不可变；迁移旧数据只允许“同 id 改写字段”，不允许改名。

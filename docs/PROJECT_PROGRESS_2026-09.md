@@ -21,22 +21,24 @@
 > 本节只写**现在**是什么状态；下面「结论」及后续章节按时间滚动追加，保留当时的判断与原文。
 > 两者若冲突，以本节与源码为准。
 
-**质量门禁（2026-09-11 实测）**
+**质量门禁（2026-09-12 实测）**
 
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck` | `tsc`（TS7 原生）→ `vue-tsc`，含 `strictTemplates`；0 错误 |
-| 静态检查 | `npm run lint` | ESLint flat config；0 问题 |
-| 回归测试 | `npm test` | 全绿（**具体数字不写死**——它每次提交都变；运行即得。2026-09-12 为 555 通过 / 6 跳过 / 53 文件） |
+| 静态检查 | `npm run lint` | ESLint flat config（**含 `e2e/`**）；0 问题 |
+| 回归测试 | `npm test` | 全绿（**具体数字不写死**——它每次提交都变；运行即得。2026-09-12 为 651 通过 / 6 跳过 / 64 文件） |
+| 核心模块覆盖率 | `npm run test:coverage` | per-file branch 阈值：`channelSync` 78 / `postRepository` 75 / `backupRepository` 85（**棘轮**，只能升） |
 | 构建 | `npm run build` | `.output/chrome-mv3/` |
 | 打包 | `npm run zip` | `chorusdesk-1.0.0-chrome.zip` |
+| 真机门禁 | `npm run e2e` | 独立 profile 的完整扩展 E2E，17 项 |
 
 > **门禁数字刻意不写死**：本表此前写「495 通过 / 42 文件」，到 2026-09-12 实际已是
 > 555 / 53——`PROJECT_PROGRESS` 因此连续两轮把过期数字交给冷启动的接手者。
 > 能算的不要写死（见 [AUDIT_2026-09-12.md](AUDIT_2026-09-12.md) §7-2）。
 
-CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vitest + build；
-打 `vX.Y.Z` 标签触发 `release.yml`（复跑门禁 + 校验标签与版本号一致 + 生成 Release 资源）。
+CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **test:coverage** + build
++ E2E 门禁；打 `vX.Y.Z` 标签触发 `release.yml`（复跑门禁 + 校验标签与版本号一致 + 生成 Release 资源）。
 
 **成熟度**：可作为日常使用的工具，且已由真机反馈驱动了 30 余轮修复（批次叙述见
 [批次记录](archive/2026-09-batches.md)）。可靠性主要受**外部平台**
@@ -44,15 +46,22 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 
 **当前开放的问题**
 
-- **结构性不足**：见[二、仍然存在的不足](#二仍然存在的不足) —— `FetchError` 分类精度、
-  备份校验未达完整 schema、新增平台的配置点仍多、Twitter/抖音路径的固有脆弱性。
+- **结构性不足**：见[二、仍然存在的不足](#二仍然存在的不足) —— 备份校验未达完整 schema、
+  新增平台的配置点仍多、Twitter/抖音路径的固有脆弱性。其中
+  **`FetchError` 分类精度已随 AUDIT P1-1/P1-3 大幅改善**（新增 `storage` 域，
+  多源适配器可报 `degraded`），剩余为按 HTTP/解析/schema/timeout 进一步细分。
+- **删除域已重做**（2026-09-12，AUDIT P0 全批）：`deletedPostIds` 拆为
+  `postSuppressions`（只由显式恢复解除）+ `recycleSnapshots`（可清），
+  备份格式 1.1 纳入抑制记录，恢复/合并导入分离。
+  设计、不变量与实现清单见 [`DELETION_MODEL.md`](DELETION_MODEL.md)。
 - **已知技术债**：`CreatorsView.vue` 已由 1481 行收敛到 617 行（四.P4 四刀，三套主模板已移出，
   **行数与进展见四.P4**）；剩余为非阻塞的进一步收敛。三个迁移期兼容桶
   （`src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts`）与零引用脚手架
   `components/DashboardSection.vue` **已于 2026-09-11 删除**。
 - **待真机确认**：见[四.P7](#四后续优先级) —— 仅剩「alarm 跨浏览器重启的长期行为」
   （同 profile 内的备份导出导入往返已于 2026-09-11 实测通过，见四.P7 补记）。
-- **未排期**：四.P6 整体 UI 风格重设计。
+- **未排期**：四.P6 整体 UI 风格重设计；AUDIT 的 P2-16/17（PR-first 流程、queue 迁 Issues）
+  属流程变更，**需用户拍板**，未做。
 
 **已决的非目标（不要再提议）**
 
@@ -142,6 +151,13 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + vi
 - ~~`retryable` 尚未驱动实际重试~~ —— **该字段已于 2026-09-12 删除**（队列 B31）：
   全仓无读取方，行为一直由 `code` 决定；且「按可重试性重试」会与规则 19 的冷却机制冲突，
   当时无实测收益数据支撑。若将来要按阶段分类后做受限指数退避，应重新设计而不是复活该字段。
+
+> **2026-09-12 进展（AUDIT P1-1 / P1-3 / P2-13）**：上面第一条的一半已经解决——
+> 本地写库失败不再冒充 `network`（新增 `storage` code，`isStorageFailure` 判定，
+> `channelSync` 与 `batchSync` 共用；错误码驱动冷却，所以这条不只是文案问题）。
+> 多源适配器（bilibili 等）在主数据源失败但仍有内容时返回 `degraded: true` + `warnings`，
+> 由 `channelSync` 记 warn 日志，「安静地少数据」这一形态因此可被看见。
+> 剩余：按 HTTP/解析/schema/timeout 四阶段进一步细分，以及 401/403 的专门归类。
 
 后续应按 HTTP、解析、schema、timeout 和 transport 阶段分别分类，再统一实现受限指数退避。
 
@@ -507,22 +523,22 @@ UI 面约 26 个组件/视图（dashboard + popup），`assets/main.css` 仅 36 
   > 本行此前记「领先 3 个提交」并列了三个当时的提交哈希——那些早已推送并成为历史。
   > **以 `git status -sb` 的实测为准。**
 - **门禁全绿**：`npm run typecheck`（tsc + vue-tsc strictTemplates）、`npm run lint`、
-  `npm test`、`npm run build`。**具体测试数不写死**（每次提交都变，运行即得；2026-09-12 为
-  555 通过 / 6 跳过 / 53 文件）。
+  `npm test`、`npm run test:coverage`（核心模块阈值）、`npm run build`、`npm run e2e`（真机 17 项）。
+  **具体测试数不写死**（每次提交都变，运行即得；2026-09-12 为 651 通过 / 6 跳过 / 64 文件）。
 - **读序**：`AGENTS.md`（32 条规则 + Non-goals，**必读**）→ `docs/ARCHITECTURE.md`（当前事实
   与契约）→ 本文件「现状速览」→ 本节。`docs/DEVELOPMENT.md` 是改动流程手册。
 - **历史材料**：`docs/DOUYIN_RESEARCH_2026-09.md`（抖音为何不能走 API）、
   `docs/PHASE_REPORT_2026-09.md`、`docs/REVIEW_2026-09.md`。
-- **2026-09-12 审计批的待办在 [AUDIT_2026-09-12.md](AUDIT_2026-09-12.md)**——两份外部批判式
-  审计的核实记录与 P0–P3 待办（deletion domain 重做、失败语义、证据与治理）。**本文件的队列
-  A/B 仍是本文件自己的记录；那一批单独托管，避免两处都自称「唯一入口」。** 该批核心结论：
-  数据库允许存在「用户语义上互相矛盾、但 TypeScript 与 555 个测试都认为合法」的状态
-  （`deletedPostIds` 一表两职 → 「彻底删除」会解除黑名单）。**开工前先写故障注入测试证明现状是坏的。**
-  已决定项：**备份纳入抑制记录（方案 A，格式 `1.0 → 1.1`）**，理由与实施要点见该文件 §6。
-- **P0 的设计前置已完成（2026-09-12）**：[`DELETION_MODEL.md`](DELETION_MODEL.md) §6 的六个问题
-  **全部由用户作答**（旧表 v6 后删除；suppression 存 `platform` 字段；手动清理不建立抑制；
-  取关时提示仍生效的删除数），语义冻结，**可开工但需用户点名**——第一步是 §7 ② 的不变量测试
-  （先红）。规则 32：「可做」不等于「现在做」。
+- **2026-09-12 审计批：[AUDIT_2026-09-12.md](AUDIT_2026-09-12.md)**——**P0/P1 全批 + P2 的 13–15、18–20
+  已全部实现**（去那份文件看逐条状态与产物）；**只剩 P2-16/17 未做，它们都是流程变更
+  （PR-first 工作流、queue 迁 GitHub Issues），需用户拍板**。删除域的设计/不变量/实现清单在
+  [`DELETION_MODEL.md`](DELETION_MODEL.md)（§9 是「实现了什么、在哪里」）。
+  该批最有价值的一条方法论产出：**对抗性审查抓到了测试没抓到的 2 个真实缺陷**（v6 迁移丢归属字段、
+  备份注释与行为不符），见 AUDIT §P2-13。
+- **P0 已实现（2026-09-12）**：[`DELETION_MODEL.md`](DELETION_MODEL.md) 的六个问题全部由用户作答、
+  语义冻结，**五步全部落地**——不变量测试（先红后绿）、Dexie v6 拆表并删旧表、单事务仓储、
+  备份 1.1、恢复/合并分离。实现清单与「一处刻意行为」见该文件 §9。规则 32 仍然适用：
+  「已做」不等于「可以顺手改」。
 
 #### 不要重做的验证（已通过，勿重复探测）
 

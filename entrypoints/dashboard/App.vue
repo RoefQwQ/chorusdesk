@@ -24,6 +24,7 @@ import MediaLightbox from './components/MediaLightbox.vue';
 import AvatarPickerModal from './components/AvatarPickerModal.vue';
 import DeletedPostsModal from './components/DeletedPostsModal.vue';
 import DevLogModal from './components/DevLogModal.vue';
+import DialogHost from './components/DialogHost.vue';
 import PostReaderModal from './components/PostReaderModal.vue';
 import AddCreatorModal from './components/AddCreatorModal.vue';
 import DeepSyncModal from './components/DeepSyncModal.vue';
@@ -45,6 +46,7 @@ import { useDeepSync } from './composables/useDeepSync';
 import { useSyncActions } from './composables/useSyncActions';
 import { useBackupManager } from './composables/useBackupManager';
 import { useMediaMaintenance } from './composables/useMediaMaintenance';
+import { usePlatformPrefetch } from './composables/usePlatformPrefetch';
 import { notifyBadgeRefresh } from '../../src/utils/badge';
 
 // ==================== DATA & CROSS-PAGE STATE ====================
@@ -65,6 +67,10 @@ const {
   updateChannel,
   notifyAutoSyncChanged,
 } = shell;
+
+// Hover-prefetch for the platform sidebar (queue B5): warms a platform's first
+// screen of images on hover, bounded to one pass per platform per session.
+const { prefetchPlatform } = usePlatformPrefetch(posts);
 
 // Hidden-creator visibility preferences (feed sidebar / directory).
 const creatorVisibility = useCreatorVisibility({ getChannels: () => channels.value });
@@ -343,6 +349,8 @@ const feedContext = computed(() => ({
   searchQuery: searchQuery.value,
   selectedPlatform: selectedPlatform.value,
   PLATFORM_REGISTRY,
+  /** Hover-prefetch for the platform sidebar (queue B5). */
+  prefetchPlatform,
   platformOrder: platformOrder.value,
   platformPostCounts: platformPostCounts.value,
   repostsCount: repostsCount.value,
@@ -742,6 +750,10 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
   />
 
   <DevLogModal v-if="showDevLog" @close="showDevLog = false" />
+
+  <!-- The single host for useDialog(): mounted once, renders whatever imperative
+       alert/confirm the composables requested. -->
+  <DialogHost />
 
   <PostReaderModal
     v-if="readerPost"

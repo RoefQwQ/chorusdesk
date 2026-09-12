@@ -70,6 +70,18 @@ export const douyinAdapter: PlatformAdapter = {
       return { posts: [], error: fetchError('unsupported', '当前环境不支持抖音页面采集') };
     }
 
+    // Cancellation (AUDIT P1-2): this path is a message round-trip to a page
+    // that drives `chrome.scripting`, and NEITHER side is cancellable — the
+    // snapshot handler has no abort channel, and an in-flight `executeScript`
+    // cannot be recalled. The honest statement is that a Douyin acquisition
+    // runs to its own bounded conclusion; `channelSync` still stops WAITING at
+    // 45s, so the user is not held. Checked once here so a signal that is
+    // already aborted (the caller gave up before dispatch) skips the work
+    // entirely, which is the only cancellation available on this path.
+    if (options?.signal?.aborted) {
+      return { posts: [], error: fetchError('timeout', '同步已取消（调用方已中止）') };
+    }
+
     let response: SnapshotResponse;
     try {
       // A history dig (or an explicit force-refresh) asks the page to scroll the

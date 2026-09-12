@@ -1,4 +1,19 @@
 import type { Platform } from '../types';
+import { hostMatches } from '../infrastructure/chrome/messages/hosts';
+
+/**
+ * Hostname-exact (or subdomain) match, re-exported under a local name.
+ *
+ * `isHostOrSubdomainOf(host, 'bilibili.com')` also accepts `bilibili.com.attacker.example`
+ * and `evil.example/?ref=bilibili.com` — the shape of the 2026-09 BLOCKER
+ * (AGENTS.md rule 1). This decision feeds channel creation and, through it,
+ * which page the extension injects a collector into, so it must be exact.
+ *
+ * The implementation is the shared `hostMatches` rather than a second copy:
+ * a private list here is exactly how the proxy and the allowlist drifted apart
+ * before (rule 2).
+ */
+const isHostOrSubdomainOf = hostMatches;
 
 export interface ParsedProfile {
   platform: Platform;
@@ -33,6 +48,16 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     const pathname = url.pathname;
 
     // 0. RSS / Atom / RSSHub feeds
+    //
+    // The RSSHub term is a usability heuristic, not a security decision: RSS is
+    // the one platform whose host is arbitrary by design (AGENTS.md rule 3 —
+    // the allowlist governs credentials, never reachability), so classifying a
+    // URL as RSS grants no capability a user cannot already have. It is a
+    // *label* test rather than `host.includes('rsshub')` so that
+    // `notreallyrsshub.example` no longer rides along, and self-hosted
+    // instances (`rsshub.example.com`, `rsshub-selfhost.net`) still match.
+    const rssHubHost = hostMatches(host, 'rsshub.app')
+      || host.split('.').some((label) => label.startsWith('rsshub'));
     if (
       pathname.endsWith('.xml') ||
       pathname.endsWith('.rss') ||
@@ -41,7 +66,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
       pathname.endsWith('/rss') ||
       pathname.includes('/feed/') ||
       pathname.includes('/rss/') ||
-      host.includes('rsshub') ||
+      rssHubHost ||
       url.searchParams.has('feed') ||
       url.searchParams.has('rss')
     ) {
@@ -54,7 +79,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     // 1. Bilibili
-    if (host.includes('bilibili.com')) {
+    if (isHostOrSubdomainOf(host, 'bilibili.com')) {
       // Space UID: space.bilibili.com/123456
       const spaceMatch = pathname.match(/\/?(\d+)/);
       if (host.startsWith('space.') && spaceMatch) {
@@ -81,7 +106,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     // 2. Twitter / X
-    if (host.includes('twitter.com') || host.includes('x.com')) {
+    if (isHostOrSubdomainOf(host, 'twitter.com') || isHostOrSubdomainOf(host, 'x.com')) {
       const parts = pathname.split('/').filter(Boolean);
       const reserved = ['home', 'explore', 'notifications', 'messages', 'search', 'settings', 'i', 'compose', 'intent'];
       if (parts.length >= 1 && !reserved.includes(parts[0].toLowerCase())) {
@@ -96,7 +121,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     // 3. YouTube
-    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+    if (isHostOrSubdomainOf(host, 'youtube.com') || isHostOrSubdomainOf(host, 'youtu.be')) {
       // Handle: youtube.com/@username
       if (pathname.startsWith('/@')) {
         const handle = pathname.substring(2).split('/')[0];
@@ -132,7 +157,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     // 4. Pixiv
-    if (host.includes('pixiv.net')) {
+    if (isHostOrSubdomainOf(host, 'pixiv.net')) {
       // User: pixiv.net/users/12345
       const userMatch = pathname.match(/\/users\/(\d+)/);
       if (userMatch) {
@@ -158,7 +183,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     // 5. Fantia
-    if (host.includes('fantia.jp')) {
+    if (isHostOrSubdomainOf(host, 'fantia.jp')) {
       const fanclubMatch = pathname.match(/\/fanclubs\/(\d+)/);
       if (fanclubMatch) {
         const clubId = fanclubMatch[1];
@@ -183,7 +208,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
 
 
     // 9. 小红书 (Xiaohongshu)
-    if (host.includes('xiaohongshu.com') || host.includes('xhslink.com')) {
+    if (isHostOrSubdomainOf(host, 'xiaohongshu.com') || isHostOrSubdomainOf(host, 'xhslink.com')) {
       // Profile URL: xiaohongshu.com/user/profile/5b6...
       const profileMatch = pathname.match(/\/user\/profile\/([a-zA-Z0-9_-]+)/);
       if (profileMatch) {
@@ -211,7 +236,7 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
     }
 
     // 10. 微博 (Weibo)
-    if (host.includes('weibo.com') || host.includes('weibo.cn')) {
+    if (isHostOrSubdomainOf(host, 'weibo.com') || isHostOrSubdomainOf(host, 'weibo.cn')) {
       // Mobile: m.weibo.cn/u/1234567890 or m.weibo.cn/profile/1234567890
       const mobileMatch = pathname.match(/\/(?:u|profile)\/(\d+)/);
       if (mobileMatch) {
@@ -312,13 +337,35 @@ export function parseProfileUrl(rawUrl: string): ParsedProfile | null {
 }
 
 /**
- * Hostname-exact (or subdomain) match. `host.includes('douyin.com')` would also
- * accept `douyin.com.attacker.example` and `evil.example/?ref=douyin.com` — see
- * AGENTS.md rule 1. The platform decision feeds channel creation and, through it,
- * which page the extension will inject a collector into, so it must be exact.
+ * Every `suggestedName` prefix this parser generates, as one list.
+ *
+ * Exported so `channelSync`'s legacy-name detection can be DERIVED from it
+ * rather than hand-copied. That copy is the defect this list exists to end:
+ * the two lists drifted twice (Withny, then eight prefixes at once), and
+ * nothing failed — a missing prefix just pinned a machine name forever
+ * (audit P1-5, AGENTS rule 9/32). `tests/urlParser.test.ts` asserts this list
+ * matches what the parser actually produces, so a new branch cannot be added
+ * without updating it.
+ *
+ * `@handle` (Twitter) is listed because it IS generated; it is the one entry
+ * whose replacement is a product question rather than a bug, so the sync layer
+ * keeps it as a deliberate exception.
  */
-function isHostOrSubdomainOf(hostname: string, domain: string): boolean {
-  const host = hostname.toLowerCase();
-  const base = domain.toLowerCase();
-  return host === base || host.endsWith(`.${base}`);
-}
+export const GENERATED_NAME_PREFIXES = [
+  'RSS_',
+  'B站用户_',
+  'B站稿件_',
+  '@',
+  'Channel_',
+  'YouTube视频_',
+  'Pixiv画师_',
+  'Pixiv作品_',
+  'Fantia俱乐部_',
+  'Fantia投稿_',
+  '小红书用户_',
+  '小红书笔记_',
+  '微博用户_',
+  '微博_',
+  '抖音用户_',
+  '抖音作品_',
+] as const;

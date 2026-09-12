@@ -19,10 +19,12 @@ export const xiaohongshuAdapter: PlatformAdapter = {
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     try {
+      const signal = options?.signal;
       const userId = channel.accountId.trim();
       const profileUrl = `https://www.xiaohongshu.com/user/profile/${userId}`;
 
       const res = await bgFetch(profileUrl, {
+        signal,
         headers: {
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9',
@@ -98,7 +100,7 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       // Image notes: the profile SSR cards carry only a single cover. Fetch
       // each note's detail page (SSR embeds the full imageList) so picture
       // posts show all their images, not just the first.
-      await enrichImageNoteMedia(channel, targetPosts);
+      await enrichImageNoteMedia(channel, targetPosts, signal);
 
       const nextOffset = offset + targetPosts.length;
       const hasMore = !isForce && nextOffset < allPosts.length;
@@ -143,7 +145,7 @@ const DETAIL_ENRICH_INTERVAL_MS = 1200;
  * source). Failures are silent: the cover stays, enrichment retries next
  * round.
  */
-async function enrichImageNoteMedia(channel: Channel, posts: Post[]): Promise<void> {
+async function enrichImageNoteMedia(channel: Channel, posts: Post[], signal?: AbortSignal): Promise<void> {
   const candidates = posts.filter(
     (p) =>
       p.mediaList.length <= 1 &&
@@ -162,6 +164,7 @@ async function enrichImageNoteMedia(channel: Channel, posts: Post[]): Promise<vo
     const noteId = post.id.slice('xiaohongshu_'.length);
     try {
       const res = await bgFetch(`https://www.xiaohongshu.com/explore/${noteId}`, {
+        signal,
         headers: {
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9',
