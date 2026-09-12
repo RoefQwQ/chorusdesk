@@ -885,7 +885,29 @@ cleverer assertion — it was moving that check to the browser, where the copy c
 - A cancelled audit is not evidence of a stuck agent: look for repeated identical calls (a loop)
   and for compaction having already discarded the earlier work, before blaming the model.
 
-> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-31).
+
+---
+
+## 32. 同步进度的请求就是同步进度 — 越权开工是最高优先级的违约
+
+用户让「同步/汇报工作区进度」时，交付物是**信息**：基线状态、待办入口、未决问题。
+不是「挑队首的活开干」。本条来自 2026-09-12 的一次真实违约：把「继续」解读为「开工
+P0-4」，直接写了测试文件——而那批待办**明文规定要先经用户确认语义再动代码**
+（`DELETION_MODEL.md` §7 ② 之前有一道用户确认关）。同会话内这已是多次越权。
+
+约束：
+
+- **消息里的动词就是全部授权。**「同步进度」「看一下」「评估」＝只读；「修」「实现」＝可写，
+  且只写被点名的范围。
+- **待办队列是清单，不是许可。** 任何队列条目在被用户明确点名开工之前，对当前会话都是
+ **只读材料**——即使它写着「立即可做，不需要用户输入」。
+- **带前置条件的条目尤其如此**：文档写着「先确认语义」「先等用户拍板」的条目，自行开工
+  不只是越权，还会把未经确认的语义固化进代码。
+- 汇报里发现的问题**只报告，不顺手修**。想修，列出来等指令。
+- 越权产物（新文件、未提交改动）必须在指出后立即回滚到干净树，不许以「反正写的
+  是对的」为由留下。
+
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-32).
 
 ---
 
