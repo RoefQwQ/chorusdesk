@@ -16,7 +16,7 @@ import { profileInitialState } from './fixtures/xiaohongshu/profile-state';
  * timestamp, sorting and `buildPost` all run for real.
  */
 
-const served: Array<{ match: string; body: string; ok?: boolean }> = [];
+const served: Array<{ match: string; body: string; ok?: boolean; truncated?: boolean }> = [];
 const requested: string[] = [];
 
 vi.mock('../src/infrastructure/chrome/http', () => ({
@@ -26,7 +26,7 @@ vi.mock('../src/infrastructure/chrome/http', () => ({
       if (url.includes(entry.match)) {
         return entry.ok === false
           ? { ok: false, status: 500, data: '' }
-          : { ok: true, status: 200, data: entry.body };
+          : { ok: true, status: 200, data: entry.body, truncated: entry.truncated ?? false };
       }
     }
     // The detail-enrichment pass asks for /explore/<noteId>. Serving a failure is
@@ -191,5 +191,22 @@ describe('xiaohongshu — parsing a captured profile page', () => {
 
     expect(res.error?.code).toBe('network');
     expect(res.posts).toEqual([]);
+  });
+
+  it('blames truncation, not the page structure, when the body was cut', async () => {
+    // Measured 2026-09-13: this profile returned exactly 250 000 characters — the
+    // old transport ceiling — with the SSR marker present and the JSON severed,
+    // so the adapter said 「页面结构可能已调整」 and sent the user hunting a
+    // change that never happened. The log line said 「响应中出现标记但 JSON 解析
+    // 失败」, which was true and still pointed at the wrong party.
+    const json = JSON.stringify({ user: { userPageData: { basicInfo: { nickname: 'x' } } } });
+    const cut = `<!doctype html><html><body><script>window.__INITIAL_STATE__=${json.slice(0, 60)}`;
+    served.push({ match: '/user/profile/', body: cut, truncated: true });
+
+    const res = await fetchLatest();
+
+    expect(res.error?.code).toBe('parse');
+    expect(res.error?.message).toContain('截断');
+    expect(res.error?.message).not.toContain('页面结构可能已调整');
   });
 });

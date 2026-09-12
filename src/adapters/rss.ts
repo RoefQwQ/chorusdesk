@@ -3,6 +3,7 @@ import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
+import { MAX_RESPONSE_CHARS } from '../infrastructure/chrome/messages/bgFetch';
 import { hasArticleMarkup, sanitizeArticleHtml } from '../utils/sanitizeHtml';
 import { errorMessage } from '../utils/errorMessage';
 import { devLog } from '../utils/devLog';
@@ -104,7 +105,7 @@ function findAdvertisedFeed(html: string, baseUrl: string): string | null {
  */
 type FeedDocument =
   | { kind: 'ok'; document: Document }
-  | { kind: 'not-a-feed'; body: string }
+  | { kind: 'not-a-feed'; body: string; truncated: boolean }
   | { kind: 'http-error'; status: number };
 
 async function fetchFeedDocument(
@@ -116,7 +117,9 @@ async function fetchFeedDocument(
   if (!res.ok) return { kind: 'http-error', status: res.status };
 
   const doc = new DOMParser().parseFromString(res.data, 'text/xml');
-  if (doc.querySelector('parsererror')) return { kind: 'not-a-feed', body: res.data };
+  if (doc.querySelector('parsererror')) {
+    return { kind: 'not-a-feed', body: res.data, truncated: Boolean(res.truncated) };
+  }
   return { kind: 'ok', document: doc };
 }
 
@@ -178,6 +181,25 @@ export const rssAdapter: PlatformAdapter = {
       // that cannot possibly help. The body's SHAPE is already in the log, from
       // `bgFetch`.
       if (doc.kind === 'not-a-feed') {
+        // A cut body is malformed by construction, so it must not be reported as
+        // a problem with the source. Measured 2026-09-13 on the user's feed: it
+        // is 268 021 characters and the transport ceiling was 250 000, so the
+        // document was severed mid-`<img>` and the closing tags never arrived.
+        if (doc.truncated) {
+          devLog.warn(
+            'rss',
+            '响应被传输上限截断，XML 因此不完整',
+            `已收到 ${doc.body.length} 字符（上限 ${MAX_RESPONSE_CHARS}）。这不是源的问题。`,
+          );
+          return {
+            posts: [],
+            error: fetchError(
+              'parse',
+              `订阅源内容过大，超过单次请求上限（${MAX_RESPONSE_CHARS} 字符）而被截断，`
+              + '因此无法解析。这通常意味着该源一次返回了过多条目或超长正文。',
+            ),
+          };
+        }
         return {
           posts: [],
           error: fetchError(

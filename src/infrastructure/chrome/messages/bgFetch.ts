@@ -39,39 +39,65 @@ const inFlightFetches = new Map<string, AbortController>();
 type SendResponse = (response?: unknown) => void;
 
 /**
- * Hard ceiling on a response body, in characters (audit P2-5/P2-18).
+ * Hard ceiling on a response body, in characters.
  *
  * Applied HERE rather than in each consumer because this is the only layer that
  * can stop the bytes: the body is read into a string and then crosses the
- * message boundary into an extension page. The per-consumer caps exist
- * (20000/60000 chars in the RSS adapter and sanitizer) but they run AFTER the
- * whole body has been read and transported, so a pathological feed — and the RSS
- * host is user-supplied by design (AGENTS rule 3) — already cost the worker and
- * the message channel everything it had, and a `data:` URI in particular can be
- * megabytes with no network involved.
+ * message boundary into an extension page. A `data:` URI in particular can be
+ * megabytes with no network involved, and the RSS host is user-supplied by
+ * design (AGENTS rule 3), so an unbounded read is not acceptable.
  *
- * Generous relative to the real numbers: the largest article measured on a live
- * feed was 31144 characters of markup, and a 60-chars-cap downstream means
- * anything past ~4× that is not content we would keep anyway.
+ * **Raised from 250 000 to 1 000 000 on 2026-09-13, on measurement.** The old
+ * figure was not just tight, it was internally inconsistent: the RSS adapter is
+ * designed to keep `RSS_MAX_HTML_CHARS` (60 000) of markup per article, so a
+ * 10-item page is *supposed* to carry up to 600 000 — more than the transport
+ * allowed. Measured against the user's real feed:
+ *
+ *   - total body: 268 021 characters for 10 items (~26 800 each)
+ *   - truncated at 250 000, mid-`<img>`: `…m001_45d99f51.png" alt=""&gt;&lt;/p`
+ *   - so the closing `</content:encoded></item></channel></rss>` never arrived
+ *
+ * A truncated XML document is malformed by definition, which is why the adapter
+ * reported 「不是有效 XML」 — our own cut being blamed on the source. 1 000 000
+ * holds that real feed with 3.7× headroom, and the largest single article ever
+ * measured here (31 144 characters) 32 times over.
+ *
+ * A cap can still be hit — a 100-item force refresh at the measured density
+ * would need ~2.7 M — which is why `readCapped` now REPORTS truncation instead of
+ * silently returning a prefix. Any remaining cut is a marked, reportable
+ * degradation rather than a fake parse error.
  */
-const MAX_RESPONSE_CHARS = 250_000;
+export const MAX_RESPONSE_CHARS = 1_000_000;
 
-/** Read at most `MAX_RESPONSE_CHARS` — a guard against a hostile/huge body. */
-async function readCapped(res: Response): Promise<string> {
+/**
+ * Read at most `MAX_RESPONSE_CHARS`, and say whether the body was cut.
+ *
+ * The flag is the important half. Before it, a truncated body was
+ * indistinguishable from a complete one, so every caller reported the symptom it
+ * saw (`parsererror`, a JSON parse failure) and named the wrong cause. Consumers
+ * must now be able to say "the response was incomplete" rather than "the source
+ * is malformed".
+ */
+async function readCapped(res: Response): Promise<{ text: string; truncated: boolean }> {
   const reader = res.body?.getReader();
   if (!reader) {
     // No stream (older runtime / already-buffered): fall back, then truncate.
-    return (await res.text()).slice(0, MAX_RESPONSE_CHARS);
+    const whole = await res.text();
+    return whole.length > MAX_RESPONSE_CHARS
+      ? { text: whole.slice(0, MAX_RESPONSE_CHARS), truncated: true }
+      : { text: whole, truncated: false };
   }
   const decoder = new TextDecoder();
   let out = '';
+  let truncated = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       out += decoder.decode(value, { stream: true });
-      if (out.length >= MAX_RESPONSE_CHARS) {
+      if (out.length > MAX_RESPONSE_CHARS) {
         out = out.slice(0, MAX_RESPONSE_CHARS);
+        truncated = true;
         // Stop pulling the body; the connection is released on cancel.
         await reader.cancel().catch(() => {});
         break;
@@ -81,7 +107,7 @@ async function readCapped(res: Response): Promise<string> {
   } finally {
     reader.releaseLock?.();
   }
-  return out;
+  return { text: out, truncated };
 }
 
 /**
@@ -127,6 +153,15 @@ export interface BgFetchResult {
   statusText?: string;
   data: string;
   error?: string;
+  /**
+   * The body exceeded `MAX_RESPONSE_CHARS` and was cut.
+   *
+   * Callers MUST check this before blaming a parse failure on the source: a
+   * truncated XML or JSON document is malformed by construction, and reporting
+   * that as 「不是有效 XML」 named the wrong cause for a real user twice
+   * (the RSS feed and the Xiaohongshu profile, both cut at the old 250 000).
+   */
+  truncated?: boolean;
 }
 
 
@@ -190,20 +225,23 @@ export async function performBgFetch(
       credentials: isPlatformHost(hostname) ? 'include' : 'omit',
       signal,
     });
-    const data = await readCapped(res);
+    const { text: data, truncated } = await readCapped(res);
     // Host + status + body SHAPE. The URL can carry query tokens and the body is
     // never logged; the shape is what turns "HTTP 200" into a diagnosis (see
     // `describeBody`).
     const credentials = isPlatformHost(hostname) ? 'include' : 'omit';
-    const detail = `凭据：${credentials}，${describeBody(res.headers.get('content-type') || '', data)}，${Date.now() - started}ms`;
+    const detail = `凭据：${credentials}，${describeBody(res.headers.get('content-type') || '', data)}${truncated ? '（已截断，内容不完整）' : ''}，${Date.now() - started}ms`;
     const outcome = `${hostname} → HTTP ${res.status}`;
-    if (res.ok) devLog.debug('bgFetch', outcome, detail);
+    // A truncated body is a WARNING even on HTTP 200: it is a real degradation,
+    // and the caller is about to see a parse failure it must not misattribute.
+    if (res.ok && !truncated) devLog.debug('bgFetch', outcome, detail);
     else devLog.warn('bgFetch', outcome, detail);
     return {
       ok: res.ok,
       status: res.status,
       statusText: res.statusText,
       data,
+      truncated,
     };
   } catch (err) {
     // A cancelled request is not a failure: ordering it as one would put a red

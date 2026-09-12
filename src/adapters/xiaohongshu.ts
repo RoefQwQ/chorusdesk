@@ -2,6 +2,7 @@ import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { fetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
+import { MAX_RESPONSE_CHARS } from '../infrastructure/chrome/messages/bgFetch';
 import { toSecureMediaUrl } from '../utils/media';
 import { errorMessage } from '../utils/errorMessage';
 import { asRecord } from '../utils/json';
@@ -63,6 +64,26 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         // when the JSON is malformed (that case logs its own warning), so this
         // reports what it can see and names the two real causes.
         const hasMarker = hasInitialStateMarker(html);
+        // A truncated body explains a malformed payload without any problem on
+        // the page's side, and must be said first — measured on this very
+        // profile: 250 000 characters received (the old ceiling, exactly) while
+        // the marker was present and the JSON was cut. The generic 「页面结构可能
+        // 已调整」 would have sent the user hunting a change that never happened.
+        if (res.truncated) {
+          devLog.warn(
+            'xiaohongshu',
+            '响应被传输上限截断，初始状态因此不完整',
+            `已收到 ${html.length} 字符（上限 ${MAX_RESPONSE_CHARS}）。这不是页面结构的问题。`,
+          );
+          return {
+            posts: [],
+            error: fetchError(
+              'parse',
+              `小红书主页内容过大，超过单次请求上限（${MAX_RESPONSE_CHARS} 字符）而被截断，`
+              + '因此无法解析其中的笔记数据。',
+            ),
+          };
+        }
         devLog.warn(
           'xiaohongshu',
           '主页未包含初始状态数据',

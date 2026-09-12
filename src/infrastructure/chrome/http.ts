@@ -7,6 +7,15 @@ export interface HttpResponse {
   statusText?: string;
   data: string;
   error?: string;
+  /**
+   * The body was cut at the transport ceiling, so `data` is incomplete.
+   *
+   * Propagated from `performBgFetch` because a truncated document is malformed
+   * by construction: an adapter that reports the parse failure without checking
+   * this blames the source for our own cut (which happened twice for real on
+   * 2026-09-13 — see `MAX_RESPONSE_CHARS`).
+   */
+  truncated?: boolean;
 }
 
 /**

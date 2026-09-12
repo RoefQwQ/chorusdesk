@@ -184,6 +184,54 @@ describe('rssAdapter failure classification', () => {
     expect(requested.some((u) => u.startsWith('javascript:'))).toBe(false);
   });
 
+  it('blames truncation, not the source, when the body was cut', async () => {
+    // The real case: this feed is 268 021 characters, so the old 250 000 ceiling
+    // severed it mid-`<img>` and the adapter reported 「不是有效 XML」 — our own
+    // cut presented as a problem with the source. `bgFetch` now flags it.
+    vi.resetModules();
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async () => ({
+        ok: true,
+        status: 200,
+        data: '<?xml version="1.0"?><rss><channel><item><title>cut',
+        truncated: true,
+      }),
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel as never, 10);
+
+    expect(res.error?.code).toBe('parse');
+    expect(res.error?.message).toContain('截断');
+    // And it must NOT tell the user their source is broken.
+    expect(res.error?.message).not.toContain('不是有效 XML');
+  });
+
+  it('still reports a genuinely malformed feed as malformed', async () => {
+    // The complement: without truncation the old message is the correct one.
+    //
+    // The body must be genuinely ill-formed XML — `<html><body>x</body></html>`
+    // is well-formed markup and parses fine (it simply yields no items), so it
+    // produced a *successful* empty sync here rather than the parse error this
+    // test first asserted. An unclosed tag is what actually reaches
+    // `parsererror`, and is what a truncated download looks like too.
+    vi.resetModules();
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async () => ({
+        ok: true,
+        status: 200,
+        data: '<rss><channel><item><title>unclosed',
+        truncated: false,
+      }),
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel as never, 10);
+
+    expect(res.error?.code).toBe('parse');
+    expect(res.error?.message).toContain('不是有效 XML');
+    // The distinction from the truncation case: nothing blamed our own transport.
+    expect(res.error?.message).not.toContain('截断');
+  });
+
   it('reports HTML-instead-of-XML as parse, not network', async () => {
     vi.resetModules();
     vi.doMock('../src/infrastructure/chrome/http', () => ({
