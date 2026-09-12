@@ -74,21 +74,36 @@ export async function deletePostAndTombstone(post: Post): Promise<void> {
 }
 
 /**
+ * The one restore policy, shared by the single and bulk paths.
+ *
+ * I11: a snapshot whose parent channel is gone cannot be restored into a working
+ * feed — writing it back would produce a row pointing at a channel that does not
+ * exist, which the old code did while telling the user 「动态已定向找回」. Such an
+ * orphan can never become restorable again, so it is dropped.
+ *
+ * This is a shared predicate because the two paths used to DISAGREE: the single
+ * path checked the channel and the bulk path did not, so the same operation
+ * rejected a row one at a time and accepted it in bulk. That asymmetry is the
+ * one that matters — a v6 migration can carry orphan tombstones from the old
+ * `deletedPostIds` shape, and the bulk path would have written them back.
+ */
+async function isOrphanSnapshot(record: RecycleSnapshot): Promise<boolean> {
+  if (!record.channelId) return false;
+  return !(await db.channels.get(record.channelId));
+}
+
+/**
  * Restore a post from the recycle bin: write it back and CLEAR its suppression.
  *
  * Both halves in one transaction. Returns the restored post, or null when no
- * snapshot existed (the caller then re-fetches instead).
- *
- * I11: a snapshot whose parent channel is gone cannot be restored into a
- * working feed — writing it back would produce a row pointing at a channel that
- * does not exist, which the old code did while telling the user 「动态已定向找回」.
- * Such an orphan can never become restorable again, so it is dropped here.
+ * snapshot existed (the caller then re-fetches instead) or when the snapshot was
+ * an orphan (I11, see `isOrphanSnapshot`).
  */
 export async function restoreDeletedPost(id: string): Promise<Post | null> {
   return db.transaction('rw', [db.posts, db.channels, db.postSuppressions, db.recycleSnapshots], async () => {
     const record = await db.recycleSnapshots.get(id);
     if (!record) return null;
-    if (record.channelId && !(await db.channels.get(record.channelId))) {
+    if (await isOrphanSnapshot(record)) {
       await db.recycleSnapshots.delete(id);
       return null;
     }
@@ -101,25 +116,85 @@ export async function restoreDeletedPost(id: string): Promise<Post | null> {
   });
 }
 
+/** What 「恢复回收站全部动态」 actually did. */
+export interface RecycleRestoreSummary {
+  /** Snapshots written back into the feed. */
+  restored: number;
+  /** Orphans dropped instead of restored, because their channel is gone (I11). */
+  dropped: number;
+}
+
 /**
- * Restore every snapshot back into the feed and clear every suppression.
- * With nothing left to restore this still clears the suppressions, which is
- * what makes 「全部恢复」 mean "stop hiding these".
+ * 「恢复回收站全部动态」 — restore what is IN the recycle bin, and nothing else.
+ *
+ * Touches only snapshots. A post that was 彻底删除 has a suppression and no
+ * snapshot, so its suppression SURVIVES this call and the promise 「今后同步也不会
+ * 再出现」 holds.
+ *
+ * That restriction is the whole point. This used to end in an unconditional
+ * `postSuppressions.clear()`, which made a button sitting inside the recycle bin
+ * silently revoke a permanent deletion made outside it — 彻底删除 was permanent
+ * only until someone pressed a different button. Releasing those suppressions is
+ * now the explicitly named `releaseAllSuppressions`, so the user has to mean it.
  */
-export async function restoreAllDeletedPostIds(): Promise<number> {
-  return db.transaction('rw', [db.posts, db.postSuppressions, db.recycleSnapshots], async () => {
-    const records = await db.recycleSnapshots.toArray();
-    const restored: Post[] = [];
-    for (const r of records) {
-      if (r.postData) restored.push(r.postData);
-    }
-    if (restored.length > 0) {
-      await db.posts.bulkPut(restored);
-    }
+export async function restoreAllDeletedPostIds(): Promise<RecycleRestoreSummary> {
+  return db.transaction(
+    'rw',
+    [db.posts, db.channels, db.postSuppressions, db.recycleSnapshots],
+    async () => {
+      const records = await db.recycleSnapshots.toArray();
+      const restored: Post[] = [];
+      const liftSuppressionFor: string[] = [];
+      let dropped = 0;
+      for (const record of records) {
+        if (await isOrphanSnapshot(record)) {
+          dropped++;
+          continue;
+        }
+        if (record.postData) restored.push(record.postData);
+        // The snapshot is going away, so its suppression has nothing left to
+        // hide: this is a restore for exactly the ids in the bin.
+        liftSuppressionFor.push(record.id);
+      }
+      if (restored.length > 0) await db.posts.bulkPut(restored);
+      if (liftSuppressionFor.length > 0) await db.postSuppressions.bulkDelete(liftSuppressionFor);
+      await db.recycleSnapshots.clear();
+      return { restored: restored.length, dropped };
+    },
+  );
+}
+
+/**
+ * 「解除所有删除状态」 — lift every suppression, including 彻底删除's.
+ *
+ * This is the ONLY action that can undo a 彻底删除, and after it previously
+ * deleted content may reappear on the next sync. Deliberately separate from
+ * restoring the bin, and the UI must state the consequence: it is the one thing
+ * the user cannot see afterwards, and the reason the two were split.
+ *
+ * Returns how many suppressions were lifted.
+ */
+export async function releaseAllSuppressions(): Promise<number> {
+  return db.transaction('rw', db.postSuppressions, async () => {
+    const lifted = await db.postSuppressions.count();
     await db.postSuppressions.clear();
-    await db.recycleSnapshots.clear();
-    return records.length;
+    return lifted;
   });
+}
+
+/**
+ * Deletions that no longer have a snapshot — the residue of 彻底删除.
+ *
+ * Every delete writes a suppression AND a snapshot; 彻底删除 removes only the
+ * snapshot. So the difference is exactly the set of rows that 「恢复回收站全部动态」
+ * will leave alone, which is what the 「解除所有删除状态」 confirmation must name.
+ */
+export async function countPermanentlyDeleted(): Promise<number> {
+  const [suppressions, snapshots] = await Promise.all([
+    db.postSuppressions.count(),
+    db.recycleSnapshots.count(),
+  ]);
+  return Math.max(0, suppressions - snapshots);
 }
 
 /**

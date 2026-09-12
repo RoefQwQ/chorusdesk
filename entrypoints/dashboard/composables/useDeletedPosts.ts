@@ -91,16 +91,48 @@ export function useDeletedPosts(actions: RecycleBinActions) {
     }
   }
 
+  /**
+   * 「恢复回收站全部动态」 — restore what is in the bin. Does NOT lift 彻底删除's
+   * suppressions, so the promise 「今后同步也不会再出现」 survives this button;
+   * releasing those is `handleReleaseAllSuppressions`, a separate deliberate act.
+   */
   async function handleRestoreAllAndSync() {
     if (deletedPostCount.value === 0) return;
-    if (!(await dialog.confirm(`确定要将回收站中全部 ${deletedPostCount.value} 条已删除动态定向找回并还原到动态列表中吗？`))) return;
-    await postService.restoreAllFromRecycleBin();
+    if (!(await dialog.confirm(`确定要将回收站中全部 ${deletedPostCount.value} 条已删除动态定向找回并还原到动态列表中吗？\n\n只恢复回收站里的这些动态，不改变已彻底删除的记录。`))) return;
+    const summary = await postService.restoreAllFromRecycleBin();
     await actions.reloadData();
     await refreshDeletedCount();
     deletedPostsList.value = [];
     showDeletedPostsModal.value = false;
     await actions.refreshAll(true);
-    await dialog.alert(`【全部找回完成】回收站动态已全部恢复并还原至动态流！`);
+    const droppedNote = summary.dropped > 0
+      ? `\n\n有 ${summary.dropped} 条因所属账号已被删除而无法还原，已一并丢弃（它们没有可写入的目标账号）。`
+      : '';
+    await dialog.alert(`【全部找回完成】回收站动态已全部恢复并还原至动态流！${droppedNote}`);
+  }
+
+  /**
+   * 「解除所有删除状态」 — the ONLY way to undo a 彻底删除.
+   *
+   * Separate from the bin restore on purpose. When these were one action, pressing
+   * a button inside the recycle bin silently revoked permanent deletions made
+   * outside it, which made those deletions permanent only until someone pressed a
+   * different button. The confirmation must name that consequence: content deleted
+   * permanently can come back on the next sync, and the user cannot see that
+   * afterwards.
+   */
+  async function handleReleaseAllSuppressions() {
+    const permanentCount = await postService.countPermanentlyDeleted();
+    const warning = permanentCount > 0
+      ? `其中 ${permanentCount} 条已经「彻底删除」过（回收站里已没有记录），解除后它们在下次同步时可能重新出现。`
+      : '当前没有「彻底删除」过的记录。';
+    if (!(await dialog.confirm(
+      `确定要解除所有删除状态吗？\n\n${warning}\n\n仅当你确实希望这些动态重新出现时才继续。`,
+    ))) return;
+    const lifted = await postService.releaseAllSuppressions();
+    await actions.reloadData();
+    await refreshDeletedCount();
+    await dialog.alert(`【删除状态已全部解除】共解除 ${lifted} 条记录，今后同步不再拦截它们。`);
   }
 
   async function handlePermanentlyDelete(record: RecycleSnapshot) {
@@ -132,6 +164,7 @@ export function useDeletedPosts(actions: RecycleBinActions) {
     openDeletedPostsModal,
     handleRestoreSingleDeleted,
     handleRestoreAllAndSync,
+    handleReleaseAllSuppressions,
     handlePermanentlyDelete,
     handleEmptyRecycleBin,
   };

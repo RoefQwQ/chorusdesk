@@ -1,16 +1,19 @@
 import {
   clearDeletedPostRecords,
   clearSuppressions,
+  countPermanentlyDeleted,
   countSuppressionsForChannels,
   countSuppressionsForCreator,
   deletePostAndTombstone,
   getDeletedPostCount,
   getDeletedPostRecords,
   permanentlyDeletePost,
+  releaseAllSuppressions,
   restoreAllDeletedPostIds,
   restoreDeletedPost,
   setPostBookmarked,
   setPostRead,
+  type RecycleRestoreSummary,
 } from '../infrastructure/db/postRepository';
 import type { Post, RecycleSnapshot } from '../types';
 
@@ -71,9 +74,28 @@ export const postService = {
     return restoreDeletedPost(id);
   },
 
-  /** Restore every recycle-bin post. Returns how many snapshots were processed. */
-  async restoreAllFromRecycleBin(): Promise<number> {
+  /**
+   * 「恢复回收站全部动态」: restore every snapshot, and only those. Returns what
+   * happened, including how many orphan snapshots were dropped (I11).
+   *
+   * This does NOT lift 彻底删除's suppressions — see `releaseAllSuppressions`.
+   */
+  async restoreAllFromRecycleBin(): Promise<RecycleRestoreSummary> {
     return restoreAllDeletedPostIds();
+  },
+
+  /**
+   * 「解除所有删除状态」: lift every suppression, INCLUDING 彻底删除's, so
+   * previously deleted content may reappear on the next sync. The only way to
+   * undo a permanent deletion; the UI must state that consequence.
+   */
+  async releaseAllSuppressions(): Promise<number> {
+    return releaseAllSuppressions();
+  },
+
+  /** How many deletions a bin restore will leave alone (彻底删除's residue). */
+  async countPermanentlyDeleted(): Promise<number> {
+    return countPermanentlyDeleted();
   },
 
   /**

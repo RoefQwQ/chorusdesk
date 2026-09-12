@@ -156,6 +156,7 @@ const {
   openDeletedPostsModal,
   handleRestoreSingleDeleted,
   handleRestoreAllAndSync,
+  handleReleaseAllSuppressions,
   handlePermanentlyDelete,
   handleEmptyRecycleBin,
 } = recycleBin;
@@ -439,6 +440,7 @@ const settingsContext = computed(() => ({
   onHealBrokenMedia: handleHealBrokenMedia,
   onCleanupPosts: handleCleanupPosts,
   onRestoreAll: handleRestoreAllAndSync,
+  onReleaseAllSuppressions: handleReleaseAllSuppressions,
   onEmptyRecycleBin: handleEmptyRecycleBin,
   onRestoreOne: handleRestoreSingleDeleted,
   onPermanentDelete: handlePermanentlyDelete,
@@ -747,6 +749,7 @@ function onCreatorsBatchDelete(creatorIds: string[]) {
     @restore-one="handleRestoreSingleDeleted"
     @permanent-delete="handlePermanentlyDelete"
     @restore-all-and-sync="handleRestoreAllAndSync"
+    @release-all-suppressions="handleReleaseAllSuppressions"
   />
 
   <DevLogModal v-if="showDevLog" @close="showDevLog = false" />

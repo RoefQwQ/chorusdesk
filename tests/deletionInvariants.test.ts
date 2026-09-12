@@ -384,3 +384,106 @@ describe('restore mode and the unfollow prompt (P0-5 / Q5)', () => {
     expect(await postService.recycleBinCount()).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Operation SEQUENCES, not single-operation invariants
+// ---------------------------------------------------------------------------
+//
+// The suite above pins I1…I12 one operation at a time, and every one of them was
+// green when 「全部恢复」 still ended in an unconditional `postSuppressions.clear()`.
+// That is the gap this block closes: each case is a SEQUENCE whose final state is
+// checked, because the defect was never inside one operation — it was a later
+// operation silently revising an earlier one's outcome.
+//
+// Regression this was written for: 彻底删除 A → 全部恢复 deleted A's suppression
+// along with B's, so A reappeared on the next sync despite the UI promising
+// 「今后同步也不会再出现」.
+
+describe('deletion operation sequences', () => {
+  it('restoring the bin does NOT revive an earlier 彻底删除', async () => {
+    await seed();
+    await db.posts.put(post({ id: 'bilibili_dyn_2' }));
+
+    // A: deleted, then permanently deleted (suppression stands, no snapshot).
+    await postService.deleteToRecycleBin(post());
+    await postService.permanentlyDelete('bilibili_dyn_1');
+    // B: deleted, still in the bin.
+    await postService.deleteToRecycleBin(post({ id: 'bilibili_dyn_2' }));
+
+    const summary = await postService.restoreAllFromRecycleBin();
+    expect(summary.restored).toBe(1);
+    expect(await db.posts.get('bilibili_dyn_2')).toBeDefined(); // B came back
+    expect(await db.posts.get('bilibili_dyn_1')).toBeUndefined(); // A did not
+
+    // The observable that matters: a sync still refuses A.
+    await updateChannel(CHANNEL, 20, false);
+    expect(await db.posts.get('bilibili_dyn_1')).toBeUndefined();
+    // And A's suppression is still on the books.
+    expect(await db.postSuppressions.get('bilibili_dyn_1')).toBeDefined();
+  });
+
+  it('「解除所有删除状态」 is what brings a 彻底删除 back, and it says how many', async () => {
+    await seed();
+    await postService.deleteToRecycleBin(post());
+    await postService.permanentlyDelete('bilibili_dyn_1');
+
+    // The count the confirmation dialog names: suppressions with no snapshot.
+    expect(await postService.countPermanentlyDeleted()).toBe(1);
+
+    const lifted = await postService.releaseAllSuppressions();
+    expect(lifted).toBe(1);
+    expect(await db.postSuppressions.count()).toBe(0);
+
+    // Now the sync is allowed to re-fetch it — which is exactly the consequence
+    // the dialog has to state, and the reason this is a separate action.
+    await updateChannel(CHANNEL, 20, false);
+    expect(await db.posts.get('bilibili_dyn_1')).toBeDefined();
+  });
+
+  it('a bin restore counts the orphans it drops instead of writing them back', async () => {
+    await seed();
+    await db.posts.put(post({ id: 'bilibili_dyn_2' }));
+    await postService.deleteToRecycleBin(post()); // → becomes an orphan
+    await postService.deleteToRecycleBin(post({ id: 'bilibili_dyn_2' })); // restorable
+    // The channel disappears without going through the cascade (the shape a v6
+    // migration can carry over from the old `deletedPostIds` rows).
+    await db.channels.delete(CHANNEL.id);
+
+    const summary = await postService.restoreAllFromRecycleBin();
+    // I11: the orphan is DROPPED, not written back as a post pointing at a
+    // channel that does not exist. The single-restore path always refused it —
+    // this is the bulk path, which used to accept it.
+    expect(await db.posts.get('bilibili_dyn_1')).toBeUndefined();
+    expect(summary.dropped).toBe(2); // both snapshots are orphans: no channel at all
+    expect(summary.restored).toBe(0);
+    expect(await postService.recycleBinCount()).toBe(0);
+  });
+
+  it('a bin restore keeps the non-orphan rows and drops only the orphan', async () => {
+    await seed();
+    await db.posts.put(post({ id: 'bilibili_dyn_2' }));
+    await postService.deleteToRecycleBin(post());
+    await postService.deleteToRecycleBin(post({ id: 'bilibili_dyn_2' }));
+    // Point ONE snapshot at a missing channel, leaving the other's channel intact.
+    const orphan = await db.recycleSnapshots.get('bilibili_dyn_1');
+    await db.recycleSnapshots.put({ ...orphan!, channelId: 'bilibili:gone' });
+
+    const summary = await postService.restoreAllFromRecycleBin();
+    expect(summary.dropped).toBe(1);
+    expect(summary.restored).toBe(1);
+    expect(await db.posts.get('bilibili_dyn_1')).toBeUndefined();
+    expect(await db.posts.get('bilibili_dyn_2')).toBeDefined();
+  });
+
+  it('delete → permanent → restore-one is a no-op, not a resurrection', async () => {
+    await seed();
+    await postService.deleteToRecycleBin(post());
+    await postService.permanentlyDelete('bilibili_dyn_1');
+
+    // No snapshot left, so there is nothing to restore from …
+    expect(await postService.restoreFromRecycleBin('bilibili_dyn_1')).toBeNull();
+    // … and the deletion still stands.
+    await updateChannel(CHANNEL, 20, false);
+    expect(await db.posts.get('bilibili_dyn_1')).toBeUndefined();
+  });
+});

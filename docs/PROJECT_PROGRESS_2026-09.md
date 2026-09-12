@@ -45,10 +45,18 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 
 **当前开放的问题**（逐条证据见[二](#二仍然存在的不足)）
 
-- **数据入口**：备份导入校验**已完成四层**（必填字段 / 字段类型与范围 / settings / 跨表关系），
-  见队列 A1 的两处刻意偏离——`platform` 不查枚举、时间戳不查单位，理由在那一节。
-- **失败语义**：`FetchError` 的 HTTP/解析/schema/timeout 四阶段细分仍未做；401/403 未专门归类。
-  写库失败已不冒充 `network`（新增 `storage` 域），多源适配器可报 `degraded`（二.2）。
+- **数据入口**：备份导入校验**已完成四层**（必填字段 / 字段类型与范围 / settings / 跨表关系）；
+  两处刻意偏离（`platform` 不查枚举、时间戳不查单位）记在[队列总表](#p8交接队列与未来方向唯一待办入口)
+  的「已证伪 / 不采纳」。
+- **状态正确性**：同步入口之间**无协调**——`updateChannel` 没有任何并发锁，
+  `platformLastFinished` 是 batch 局部变量。同一频道可被 alarm / 手动 / 深挖 / popup 并发同步，
+  **后完成的覆盖前者的 `nextCursor`**（详见[队列总表](#p8交接队列与未来方向唯一待办入口) #2）。
+- **数据完整性**：RSS 的 `guid` 只在 feed 内唯一却当全局主键（#3）、媒体缓存文件名截取
+  postId 前 16 位（#13）、`PROXY_IMAGE` 无 byte/MIME 上限（#8）。
+- **能力错配**：Twitter 不支持 SW 而 autoSync 不筛（#6）、取消信号是 caller/timeout 二选一（#7）、
+  聚合层丢弃 batch 结果（10/10 失败仍记「完成」，#9）。
+- **规模**：每次 reload 全库 `toArray` 进 Vue 内存且**先**全库跑 `healBrokenPostMedia`（#5 / #10）。
+- **失败语义**：`FetchError` 的 HTTP/解析/schema/timeout 细分仍未做，401/403 未专门归类（#12）。
 - **证据缺口**：真实载荷 fixture 只覆盖 4 个平台（bilibili / douyin / rss / xiaohongshu）；
   weibo / pixiv / fantia 三个适配器连解析测试都没有（二.3）。
 - **无测试的活模块**：`declarativeNetRequest.ts`（186 行，全部防盗链规则）零测试引用（二.3）。
@@ -82,34 +90,11 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 > **只列仍未关闭的项。** 已关闭条目的原文（含「原记录：…」留存）见
 > [archive/2026-09-closures.md](archive/2026-09-closures.md)。
 
-### 1. 备份校验达到完整 schema — 已完成（2026-09-12）
+### 1. 备份校验 — 已完成（2026-09-12）
 
-`parseBackup`（`src/infrastructure/db/backupRepository.ts`）现在四层校验，逐项对应原缺口：
-
-| 原缺口 | 现状 |
-|---|---|
-| timestamp 必须为有限数 | 已做（有限、正数、在 `Date` 可表示范围内） |
-| platform 枚举 | **刻意未做**，见下 |
-| 跨表引用完整性 | 已做（channel→creator、post→channel） |
-| 重复 ID | 已做（四张表各查一遍；`bulkPut` 会把重复行静默合并） |
-| settings 字段范围 | 已做（`itemsPerFetch` 1–200、`requestDelayMs` 0–60000、三个枚举字段、五个布尔字段） |
-| `isRead`/`isBookmarked` 必须为 `0\|1` | 已做（含可选的 `isBookmarked`：带布尔值正是规则 5 那个静默失效） |
-
-**两处刻意偏离**（不照做，理由是后来才出现的约束）：
-
-- **`platform` 只查类型，不查枚举。** `Platform` 定义成 `KnownPlatform | (string & {})`，
-  注释写明是「加上我们不再发布的遗留值」；平台已整体移除过两次（Rplay、Withny）。
-  枚举化会让**移除之前**导出的备份全部无法导入——代价大于它防的脏数据。未知平台不是损坏：
-  `getAdapter` 返回 undefined、频道如实报「不支持的平台」（有既有测试）。
-- **时间戳不查 ms 单位。** `Post.publishedAt` 文档写 ms，但 bilibili 等适配器实际发秒，
-  `utils/timestamp.ts` 正是这个契约缺口的单一来源，校验**复用它**而不另立阈值——
-  按 ms 卡范围会拒绝本构建自己导出的 bilibili 行。
-
-**另一处修正**：`settings` 类型错误此前会被报成一大串「缺少字段」（因为下游逐字段取值），
-现在按形状直接报「settings 应为对象」——错因指向该指的地方。
-
-**覆盖范围**：只校验**存在**的字段，所以旧格式文件与部分备份的导入行为不变
-（`backup.reimport-restores` 门禁步骤即用真实导出文件走这条路径）。
+`parseBackup` 已做四层校验（必填字段 → 字段类型/范围 → settings → 跨表关系），
+细节、两处刻意偏离与验收证据见[队列总表](#p8交接队列与未来方向唯一待办入口)的「已完成（本轮）」。
+本节不再保留原文，避免两处各记一份。
 
 ### 2. `FetchError` 分类仍可提高精度
 
@@ -221,6 +206,72 @@ Referer 同样读它，见 AGENTS 规则 2；占位名前缀也已改为从 `url
 - **capability 边界**：与 Twitter 路径同属「借真实页面绕过反爬」的方案，
   风控升级或页面架构变化都可能使其失效。
 
+### 8. 同步入口之间没有协调（状态正确性，2026-09-12 核实）
+
+**最严重的一条**，因为它写错数据且**用户看不见**。
+
+`updateChannel` 不在任何并发锁下运行（`grep inFlight|lock|mutex src/sync/` 为空），
+`status: 'updating'` 只是写入的字段、不是互斥。而能进入它的入口有五个：
+Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓取、alarm 自动同步。
+
+于是同一频道可被并发同步，各自持有不同时刻的 Channel 快照，**后完成的覆盖前者**：
+
+- `nextCursor` 被旧任务覆盖 → **深挖历史回退或跳段，无任何日志区分**；
+- `lastSuccessAt` / `status` 错乱 → 同步徽章说谎；
+- `platformLastFinished` 是 batch 局部变量（`batchSync.ts:83/167`）→
+  **跨入口并发时规则 19 的平台节流下限整体失效**（「检测到限流还继续打」）。
+
+这不是「偶发」，是结构上必然、只差一次时序巧合。修法见队列 #2。
+
+### 9. 身份边界没桥接（数据完整性）
+
+- **RSS**：`rss_${stableHash(guid)}`（`rss.ts:199`），而 `guid` 只保证 **feed 内**唯一。
+  但 `Post.id` 与 `PostSuppression.postId` 都是**全库主键**。两个 feed 各发
+  `<guid>1</guid>` → 同一篇内容；更糟的是在 A 上「彻底删除」会**顺带压制 B**。
+  这不是「也许碰撞」，是两层 scope 没对齐。
+- **媒体缓存**：目录是 `creatorName/platform/YYYYMMDD_postId前16位`
+  （`pathResolver.ts`），而内存 object URL 用 `postId_mediaIndex`。
+  三个 identity 互不相同：**创作者改名即失联**（缓存还在、找不到），
+  且**已经有稳定完整主键却截成 16 位**做文件名。
+
+### 10. 平台能力没有模型（能力错配）
+
+各模块单独看都对，组合起来互相否定：
+
+- `twitter.ts:137` 明确 `IS_SERVICE_WORKER → unsupported`，而 `autoSync.ts:50`
+  `db.channels.toArray()` **不筛平台**——开了自动同步，Twitter 必然报不支持；
+- popup 首次抓取为了「关窗不中断」改走 `SYNC_CHANNEL` → SW（对），
+  但新关注的 Twitter 频道因此**必然**撞上同一条 unsupported；
+- `channelSync.ts:248` 的 `signal: options?.signal ?? abortController.signal` 是**二选一**：
+  caller 传了 signal，45s 超时就不再拥有取消权，底层请求继续跑；
+- `autoSync` 丢弃 batch 结果：**10 个频道全失败也记「后台自动同步完成」**。
+
+修法见队列 #6 / #7 / #9。
+
+### 11. 数据访问是全量内存模型（规模）
+
+`useDashboardData` 每次 reload：`healBrokenPostMedia()` → `creators.toArray()` →
+`channels.toArray()` → `posts.orderBy(...).toArray()`，全部进 Vue 响应式；
+筛选在内存里全表扫，`useWaterfallFeed` 的 `slice(0,36)` 只是 **DOM 分页，不是数据分页**。
+
+与「深挖历史」这个功能**天然矛盾**：存得越成功，首页 reload 越贵。
+且 `healBrokenPostMedia`（迁移/维护职责）被放在 **hot path**，每次读取都全库跑一遍。
+
+修法见队列 #5（便宜的先行）/ #10（真重构）。
+
+### 12. 工程质量项（不直接致错，抬高出错概率）
+
+- **E2E 一个 click 卡死一整串**：`backup.export` 失败 → backup 4 步 + alarm 4 步全 skip。
+  实测偶发约 4 次跑挂 1 次，**两次 CI 红灯都是它**。
+- **`PROXY_IMAGE` 无大小/MIME 上限**（`arrayBuffer()` 后直接 base64），
+  而它现在允许任意 http(s) 主机（为 RSS 图片）——这是合理的产品行为，但没有 byte ceiling。
+- **`toSecureMediaUrl` 仍用 `includes()`** 判小红书域名（`media.ts:27-29`），
+  与规则 1 的主机名纪律不一致（此处不决定凭据，故严重度低，但属双轨）。
+- **DNR 186 行零测试**，且 `removeRuleIds` / `addRules` 两处手维护规则 id。
+- **无 MessageMap**：改一条消息要同步「五件套」，靠文档提醒。
+- **新增平台 8–10 个散点**；`PLATFORM_REGISTRY` 不是 `Record<KnownPlatform, …>`。
+- **release.yml 跑 `npm test` 而 CI 跑 `test:coverage`**，注释却写「Same gates as CI」。
+
 ---
 
 ## 三、当前成熟度判断
@@ -248,20 +299,20 @@ Referer 同样读它，见 AGENTS 规则 2；占位名前缀也已改为从 `url
 
 ### 方向总览（按「值不值得做」排序，不是按工作量）
 
-本项目的成熟度瓶颈**不在代码结构**，而在两处：**数据入口的严谨度**与**证据的可信度**。
-下面的排序据此而来；每条都能在 [四.P8 队列](#p8交接队列与未来方向唯一待办入口)找到可执行条目。
+本项目的成熟度瓶颈**不在代码结构**（分层、门禁、覆盖率棘轮都够用了），而在下面五层，
+按「错了会怎样」排序。**完整清单（25 项，含证据与批次建议）在
+[四.P8 队列总表](#p8交接队列与未来方向唯一待办入口)**，本节只说方向。
 
-| 方向 | 为什么现在做 | 代价 | 对应条目 |
-|---|---|---|---|
-| **1. 备份/导入的完整校验** ~~（最高）~~ **已完成 2026-09-12** | 导入是**唯一**绕过仓储层写入的入口。抑制记录的语义是「跨取关、跨重装」，而重装后靠备份往返恢复——校验不足会让刚建立的删除语义从后门被绕过（`DELETION_MODEL.md` 不变量 I8 正是这条） | ~~中~~ **已做** | ~~A1~~ |
-| **2. 真实载荷证据** | 现有 Twitter fixture 是手工构造的，其历史版本**把 bug 编码了进去**（二.3）；「测试与实现出自同一模型时，双方共享的错误世界模型不会被任何一方发现」 | 低（一次真机会话即可取到） | B1 |
-| **3. 无自动化验证的活模块** | `declarativeNetRequest`（186 行防盗链规则）静默失效的表现是「图片变占位」，而它零自动化验证（二.3） | 低（规则集是纯数据） | A3 |
-| **4. 失败语义细分** | 分类错误会**驱动平台冷却**，所以错的不只是文案（二.2） | 中 | A2 |
-| **5. 平台测试覆盖补平** | weibo / pixiv / fantia 零解析测试；做法已有先例（bilibili / xiaohongshu 的「先建网再动刀」） | 中高 | B2 |
-| **6. 债务与文档收尾** | 规则 8 台账 8 处直连；`AGENTS.md` 三条超长规则 | 低 | A4 / A5 |
+| 层 | 现在的缺口 | 为什么排这个位置 |
+|---|---|---|
+| **1. 状态正确性** | 同步入口之间没有协调：`updateChannel` 无任何并发锁，`platformLastFinished` 是 batch 局部变量。同频道可被 alarm / 手动 / 深挖 / popup 同时同步，**后完成的覆盖前者的 `nextCursor`**——写错数据且**用户看不见** | 会静默写错状态，且没有任何观测手段能发现 |
+| **2. 数据完整性** | 备份校验已完成；剩余是 RSS 的 `guid` 只在 feed 内唯一却当全局主键（删除 A 可能顺带压制 B），媒体缓存的文件名截取 postId 前 16 位 | 会静默损坏或丢失用户数据 |
+| **3. 能力错配** | 模块各自"设计正确"却组合起来互相否定：Twitter 明确不支持 SW，autoSync 不筛；popup 首次抓取也走 SW。取消信号 caller ∪ deadline 是二选一。聚合层把 batch 结果丢掉（10/10 失败也记"完成"） | 功能时好时坏，表现为"平台抽风" |
+| **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条），且**先**全库跑一遍 `healBrokenPostMedia` | 每次都付税，随历史增长恶化 |
+| **5. 工程质量** | E2E 一个 click 让 backup+alarm 全 skip；无 MessageMap；DNR 零测试且两处手维护；新增平台 8–10 个散点 | 不直接致错，但抬高下一处缺陷的概率 |
 
-**明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流（已否决）、
-往微交互追加工程资源（AUDIT P3 冻结）。
+**明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流、待办迁 Issues
+（个人仓库不引入协作开销）、往微交互追加工程资源（AUDIT P3 冻结）。
 
 ### P6：整体 UI 风格重设计 — 不排期
 
@@ -367,80 +418,126 @@ UI 面约 26 个组件/视图，`assets/main.css` 仅 36 行设计令牌。用�
 「展开全文」的溢出门控与阅读视图；抖音临时页自动关闭且不扰动用户已开标签页；
 Twitter 标签页路径真的跑通了。
 
-#### 队列 A — 立即可做，不需要用户输入（建议按序）
+#### 队列总表（唯一待办入口）
 
-A1. ~~**备份校验补全**~~ —— **已完成（2026-09-12）**。`parseBackup` 现在做四层校验：
-    必填字段 → 字段类型/范围（`RULES` 表驱动，仅校验**存在**的字段，旧文件仍可导入）→
-    settings 范围与枚举 → 跨表关系（重复 ID、悬空引用）。测试 29 例（含真实导出文件走同一
-    路径的 `backup.reimport-restores` 门禁步骤）。
-    **两处刻意偏离原条目**（原条目由审计提出，未考虑后续约束）：
-    - **`platform` 只查类型，不查枚举**。`Platform` 是 `KnownPlatform | (string & {})`
-      （「加上我们不再发布的遗留值」），且平台已整体移除过（Rplay、Withny）——
-      枚举化会让**平台移除之前**导出的备份全部无法导入，比它防的垃圾更糟。未知平台不是
-      损坏：`getAdapter` 返回 undefined，频道如实报「不支持的平台」。有测试钉住这一条。
-    - **时间戳只查「有限正数且在 `Date` 范围内」，不查 ms 单位**。`Post.publishedAt` 文档写 ms，
-      但 bilibili 等适配器实际发秒，`utils/timestamp.ts` 就是为这个契约缺口存在的（单一来源，
-      校验复用它而不另立阈值）。按 ms 卡范围会拒绝本构建**自己导出**的 bilibili 行。
-    - 附带修掉一个既有可读性问题：`settings` 类型错误此前被报成「缺少字段」的堆栈，
-      现在按形状报「settings 应为对象」。
+来源：**第一轮审计**（`AUDIT_2026-09-12.md`，P0–P3）、**可维护性评审**（`REVIEW_2026-09.md`）、
+**第二轮批判性审查**（2026-09-12 晚，逐条回代码核实）、以及历次会话发现。
+**每一行都验证过**；核不实的断言已剔除，见文末「已证伪 / 不采纳」。
 
-A2. **`FetchError` 五阶段细分**（二.2）。按 HTTP / 解析 / schema / timeout / transport
-    分开分类，401/403 专门归类。**不要**复活 `retryable` 字段（理由见二.2 注）。
-    验收：能指出某个此前被归为 `network` 的真实场景，改后归到正确 code。
+**排序原则**（第二轮审查修正后的口径）：
 
-A3. **`declarativeNetRequest.ts` 加测试**（二.3）。186 行的防盗链规则目前零自动化验证，
-    而它一旦静默失效，表现是「此前能显示的图片变成占位」。规则集合是纯数据，可直测。
-    验收：断言规则数量、`initiatorDomains` 限定为扩展自身、`sub_frame` 不在其中
-    （与 fix queue #5 的三条约束一一对应）。
+1. **状态正确性** → 会写错数据、且用户**看不见**的（并发覆盖 cursor、身份越界）
+2. **数据完整性** → 会静默损坏或丢失用户的（校验、孤儿引用）
+3. **能力错配** → 模块各自"设计正确"但组合起来互相否定的（Twitter 后台同步）
+4. **规模与性能** → 每次都付的税（全库加载、hot-path 修复）
+5. **工程质量** → 降低下一处缺陷的概率（协议类型化、平台单一来源、E2E 拆分）
 
-A4. **规则 8 台账收敛**（二.4）。8 处直连里，优先处理有明确低风险改法的
-    （`useMediaMaintenance` 的两个函数可直接经 `postService` 暴露）。
-    新增 service 方法时**同一提交内**更新 `AGENTS.md` 规则 8 的表。
+| # | 事项 | 类别 | 证据 |
+|---|---|---|---|
+| **1** | ~~**`restore-all` 语义越界**~~ **已完成 2026-09-12** | 状态正确性 | 见下 |
+| **2** | **SyncCoordinator**：同频道 single-flight + 跨入口平台节流 | 状态正确性 | 无任何并发锁；`platformLastFinished` 是 batch 局部变量 |
+| **3** | **RSS identity scope**：`guid` 只在 feed 内唯一，却当全局主键 | 数据完整性 | `rss.ts:199` |
+| **4** | **单条/批量恢复共享同一策略** | 数据完整性 | 已完成，见 1 |
+| **5** | **`healBrokenPostMedia` 移出 reload hot path** | 规模 | `useDashboardData.ts:58` 每次 reload 全库扫 |
+| **6** | **Platform capability 模型**：`backgroundSync` / `pageContextRequired` / `cancellable` / `history` | 能力错配 | 无 capability；Twitter 到 SW 才说「不支持」 |
+| **7** | **取消信号可组合**：caller signal ∪ deadline | 能力错配 | `channelSync.ts:248` 的 `??` 二选一 |
+| **8** | **`PROXY_IMAGE` 加 byte/MIME 上限** | 数据完整性 | 只有 `arrayBuffer()`，无上限 |
+| **9** | **后端聚合诚实**：autoSync 把结果丢了 | 能力错配 | 10/10 失败也记「完成」 |
+| **10** | **Feed 数据分页**（IndexedDB query 取代全量 `toArray`） | 规模 | 全库进 Vue 内存，只显示 36 条 |
+| **11** | **E2E 拆独立 scenario** | 工程质量 | 一个 click 让 backup+alarm 全 skip |
+| **12** | **`FetchError` 五阶段细分** | 数据完整性 | 本轮 A2，未做 |
+| **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短 |
+| **14** | **DNR 规则表驱动 + 测试** | 工程质量 | 186 行零测试；remove/add 两处手维护 |
+| **15** | **`toSecureMediaUrl` 的 `includes()` → `hostMatches`** | 数据完整性 | `media.ts:27-29` |
+| **16** | **MessageMap 类型协议** | 工程质量 | 完全没有；改一条消息要同步 5 处 |
+| **17** | **Platform 声明性事实单一来源** | 工程质量 | 新增平台仍 8–10 个散点 |
+| **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
+| **19** | **weibo / pixiv / fantia 解析测试** | 证据 | 零直接测试 |
+| **20** | **`autoSync` / `platformAuth` 单元测试** | 证据 | 零测试 |
+| **21** | **规则 8 台账收敛** | 工程质量 | 8 处直连 |
+| **22** | **`AGENTS.md` 规则 9/28/30 压到 ≤8 行** | 工程质量 | 51/51/55 行 |
+| **23** | **`dashboardToolbar` 偶发未处理拒绝** | 工程质量 | ~1/8 次 |
+| **24** | **release.yml 与 CI 门禁一致性** | 工程质量 | Release 跑 `npm test`，CI 跑 `test:coverage` |
+| **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 
-A5. **`AGENTS.md` 减负收尾**（AUDIT P2-17b 的剩余部分）。已完成的：16 条规则带附录指针、
-    Non-goals 已收成 6 行指针、`Fix queue` 台账已移入 `AGENTS_CASES.md`、
-    `PRODUCT_DECISIONS.md` 已承接产品决策。**剩余**：规则 9（51 行）、28（51 行）、30（55 行）
-    仍超出「每条 2–8 行」的目标——把事故叙述搬进 `AGENTS_CASES.md`，正文只留约束。
-    验收：三条规则各自 ≤ 8 行且语义不丢；`AGENTS_CASES.md` 锚点可达。
+**批次建议**（每批独立可交付、可验证）：
 
-A6. **`tests/dashboardToolbar.test.ts` 的偶发未处理拒绝**（2026-09-12 做 A1 时发现，**未修**）。
-    现象：约 **1/8 次**全量测试末尾出现 `Errors 6 errors`，内容是
-    `TypeError: localStorage.getItem is not a function`（`useDarkMode.ts:19` 的 `initDarkMode`，
-    经 `App.vue:302`），抛在 jsdom 环境**卸载之后**——即测试自己的异步尾巴越过了 teardown。
-    **已确认与 A1 无关**：把 A1 的改动 stash 掉后，在未修改代码上连跑 8 次仍命中 1 次。
-    **两条测量**：全量门禁退出码为 0（测试全过，只是报了未处理拒绝），所以它不会打红 CI；
-    但它会往输出里塞 6 段堆栈，正是规则 20「日志信噪比」的同类。
-    修法方向（未验证）：在 `useDarkMode` 里对 `localStorage` 的存在性做保护，
-    或让该测试显式 await 其挂载副作用，而不是在 teardown 后让它跑。
+- **批次 1（状态正确性）**：#2 SyncCoordinator + #3 RSS identity + #7 取消信号。
+  三者都是"同一次操作在不同时序/不同入口下结果不同"，一起做才不会出现三套补丁。
+- **批次 2（规模）**：#5 hot-path 修复（便宜，先做）+ #9 聚合诚实。
+- **批次 3（能力模型）**：#6 capability + #8 proxy 上限。
+- **批次 4（工程质量）**：#11 E2E 拆分（CI 可信度是它自己的产品）+ #24 release 一致性。
+- **批次 5（证据）**：#18/#19/#20。
+- **长期**：#10 分页重构、#16 MessageMap、#17 平台单一来源、#13 缓存 identity。
 
-#### 队列 B — 有前置条件
+---
 
-B1. **Twitter 真实 payload fixture**（二.3，最高价值的证据项）。
-    前置：需要一次真机会话抓到 x.com 的 GraphQL 响应（可用 omp relay 借用户已登录的浏览器，
-    只读、不导航、不点击；bilibili / xiaohongshu 的 fixture 即用此法取得，见
-    `docs/archive/2026-09-closures.md` 的 B33）。
-    验收：至少一条 fixture **逐字**取自真实载荷，与手工构造的并存；
-    `twitter.emptyTimeline`（31 例）与 `twitterTimeline.injected`（12 例）保持通过。
+#### 已完成（本轮）
 
-B2. **weibo / pixiv / fantia 的解析测试**（二.3）。
-    前置：按 bilibili / xiaohongshu 的做法先建按解析路径裁剪的 fixture，再把解析段提纯为纯函数
-    （那两次的先例：提纯前后测试全绿即为等价性证据）。
-    验收：三个平台各有解析测试；提纯若做，必须有等价性证据。
+**#1 `restore-all` 语义越界 + #4 单条/批量共享策略** —— **已完成（2026-09-12）**。
 
-B3. **`autoSync.ts` / `platformAuth.ts` 的测试**（二.3）。
-    前置：两者都直接依赖 `chrome.*`，需要先确定 mock 边界（E2E 已覆盖 alarm 的端到端行为，
-    所以这里的目标是**单元级**的判据而非再验一遍端到端）。
+**问题**（第二轮审查指出，回代码核实属实）：
+
+```ts
+await db.postSuppressions.clear();   // 无条件
+```
+
+站在回收站里按「全部恢复」，会把**回收站之外**的 `彻底删除` 记录一并解封——而界面
+对「彻底删除」的承诺是「今后同步也不会再出现」。审查的原话最准确：
+**「彻底删除」实际是「暂时永久，直到你以后点另一个按钮」。**
+
+**同一处还有单条/批量不对称**：单条恢复校验父 Channel（`postRepository.ts:91`），
+批量不查，直接 `bulkPut`。v6 迁移会把旧 `deletedPostIds` 的孤儿墓碑搬进 `recycleSnapshots`，
+于是**同一条记录，单条恢复拒绝、批量恢复接受**。
+
+**改法**（用户 2026-09-12 拍板选方案 1「拆两个」）：
+
+- 抽出 `isOrphanSnapshot()`，**单条与批量共用**——不对称本身就是缺陷。
+- `restoreAllDeletedPostIds()` 只动快照：恢复 `postData`、只解除**回收站里这些 id** 的
+  抑制、返回 `{ restored, dropped }`（孤儿计数**上报**而不是静默写回）。
+- 新增 `releaseAllSuppressions()` + `countPermanentlyDeleted()`：解除**所有**抑制是
+  一个**独立命名**的动作，确认框写明「其中 N 条已经彻底删除过，解除后可能重新出现」。
+- UI：回收站内按钮改为「恢复回收站全部动态」，旁边一个更弱的「解除所有删除状态」。
+
+**验证**：4 例跨操作**序列**测试（不是单操作不变量）。两处变异各自被抓住：
+
+- 把 `bulkDelete(ids)` 改回 `clear()` → `restoring the bin does NOT revive an earlier 彻底删除` 失败；
+- 去掉批量路径的孤儿检查 → 两个孤儿用例失败。
+
+**为什么原测试没抓到**（审查的判断正确）：原来 12 个不变量测试是**一条不变量一个 API**，
+逐条全绿，而缺陷从不在单个操作里——是**后续操作悄悄改写了先前操作的结果**。
+批次 1 起，删除域新增测试一律按"操作序列 → 最终状态"写。
+
+---
+
+#### 已证伪 / 不采纳（不要让下一轮再提）
+
+- **「当前 master 不是全绿，所以不能再写所有门禁通过」**——措辞不准。准确说法：
+  **HEAD 的红灯是真实状态**（以 `gh run list` 为准），但红因指向 E2E 输入注入 flake，
+  不是业务代码回归。两次红都发生在**纯文档提交**上（`c7126c7`、`5530eba` 后的那两次）。
+  门禁不可靠这件事本身已进队列（#11）。
+- **「restore-all 是没人注意的实现遗漏」**——不准确。它是 `DELETION_MODEL.md` 第 48 行
+  **用户已确认的语义**（「全部恢复 → suppression 全部删除」）。真正的性质是
+  **既定语义与「彻底删除」的界面承诺冲突**，所以解法是拆动作、不是改语义。
+- **平台 `platform` 字段做枚举校验**——会让平台移除前导出的备份全部无法导入，见 A1。
+- **PR-first 工作流 / 待办迁 GitHub Issues**——`PRODUCT_DECISIONS.md`，个人仓库不引入协作开销。
+
+---
 
 #### 仍不可验（环境限制，别浪费时间重试）
 
 - **alarm 跨浏览器重启的长期行为**：CDP `loadUnpacked` 加载的扩展不跨重启留存，
   重启后重新加载等同全新安装。要验只能在真实安装的扩展上做。
 - **Twitter / 抖音路径的固有脆弱性**（二.6 / 二.7）：属外部依赖，本地重构无法消除。
+- **`healBrokenPostMedia` 的真实收益**：本地无大库，无法测量它在大历史下的实际代价（#5）。
 
 #### 已知陷阱（踩过，省你时间）
 
 - 扩展 E2E 必须带 `--enable-unsafe-extension-debugging`，否则 `Extensions.loadUnpacked`
   报 `Method not available`（规则 28）。
+- **E2E 偶发 `click=0`**：输入未送达，约 4 次跑挂 1 次；两次 CI 红灯都是它。
+  失败信息**自带归因**（"this is the environment, not the view under test"）——那正是
+  没人继续查的原因，别被它锚定（#11）。
 - 导入成功路径的 `alert()` **阻塞渲染进程**，连带 `Runtime.evaluate` / `Page.enable` 永久挂起；
   须在执行动作前启用 Page 域并应答 `Page.javascriptDialogOpening`。
 - 视觉验证只开独立 profile 的专用实例，绝不驱动用户正在浏览的窗口（规则 25）。

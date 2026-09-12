@@ -15,6 +15,7 @@ const emit = defineEmits<{
   'restore-one': [record: RecycleSnapshot];
   'permanent-delete': [record: RecycleSnapshot];
   'restore-all-and-sync': [];
+  'release-all-suppressions': [];
 }>();
 const secure = toSecureMediaUrl;
 </script>
@@ -124,7 +125,7 @@ const secure = toSecureMediaUrl;
 
       <!-- Modal Footer -->
       <div class="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-        <div>
+        <div class="flex items-center gap-2">
           <button
             v-if="records.length > 0"
             type="button"
@@ -132,7 +133,17 @@ const secure = toSecureMediaUrl;
             class="px-3 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
           >
             <RotateCcw class="w-3.5 h-3.5" />
-            <span>全部定向找回并还原</span>
+            <span>恢复回收站全部动态</span>
+          </button>
+          <!-- Deliberately a separate, quieter action: this is the ONLY thing that
+               can undo a 彻底删除, so it must not read as part of the restore above. -->
+          <button
+            type="button"
+            title="解除所有删除状态（含已彻底删除的，之后同步可能重新出现）"
+            @click="emit('release-all-suppressions')"
+            class="px-2.5 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-xl transition-colors cursor-pointer"
+          >
+            <span>解除所有删除状态</span>
           </button>
         </div>
         <button
