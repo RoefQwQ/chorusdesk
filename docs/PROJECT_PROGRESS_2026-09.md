@@ -45,7 +45,8 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 
 **当前开放的问题**（逐条证据见[二](#二仍然存在的不足)）
 
-- **数据入口**：备份导入的校验只到「必填字段存在」，未达完整 schema（二.1）。
+- **数据入口**：备份导入校验**已完成四层**（必填字段 / 字段类型与范围 / settings / 跨表关系），
+  见队列 A1 的两处刻意偏离——`platform` 不查枚举、时间戳不查单位，理由在那一节。
 - **失败语义**：`FetchError` 的 HTTP/解析/schema/timeout 四阶段细分仍未做；401/403 未专门归类。
   写库失败已不冒充 `network`（新增 `storage` 域），多源适配器可报 `degraded`（二.2）。
 - **证据缺口**：真实载荷 fixture 只覆盖 4 个平台（bilibili / douyin / rss / xiaohongshu）；
@@ -81,24 +82,34 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 > **只列仍未关闭的项。** 已关闭条目的原文（含「原记录：…」留存）见
 > [archive/2026-09-closures.md](archive/2026-09-closures.md)。
 
-### 1. 备份校验不是完整 schema
+### 1. 备份校验达到完整 schema — 已完成（2026-09-12）
 
-`parseBackup`（`src/infrastructure/db/backupRepository.ts`）已做：版本白名单
-（`['1.0','1.1']`，不是相等判断）、`creators/channels/posts/suppressions` 必须是数组、
-`settings` 必须是对象、每条记录的**必填字段存在性**、以及抑制记录的
-`postId`/`platform`/`suppressedAt` 校验。
+`parseBackup`（`src/infrastructure/db/backupRepository.ts`）现在四层校验，逐项对应原缺口：
 
-**仍未做的检查**：
+| 原缺口 | 现状 |
+|---|---|
+| timestamp 必须为有限数 | 已做（有限、正数、在 `Date` 可表示范围内） |
+| platform 枚举 | **刻意未做**，见下 |
+| 跨表引用完整性 | 已做（channel→creator、post→channel） |
+| 重复 ID | 已做（四张表各查一遍；`bulkPut` 会把重复行静默合并） |
+| settings 字段范围 | 已做（`itemsPerFetch` 1–200、`requestDelayMs` 0–60000、三个枚举字段、五个布尔字段） |
+| `isRead`/`isBookmarked` 必须为 `0\|1` | 已做（含可选的 `isBookmarked`：带布尔值正是规则 5 那个静默失效） |
 
-- timestamp 必须为有限数（`Number.isFinite`）。
-- `platform` 必须是已知枚举成员。
-- 跨表引用完整性（channel→creator、post→channel）。
-- 重复 ID。
-- settings 的字段范围。
-- `isRead` / `isBookmarked` 必须为 `0|1`（AGENTS 规则 5：别的值会被索引静默丢弃）。
+**两处刻意偏离**（不照做，理由是后来才出现的约束）：
 
-**为什么重要**：导入是**唯一**能绕过全部仓储层写入路径的入口，因此这几条正是「一个坏文件
-能进来的方式」。优先级为二类中最高。
+- **`platform` 只查类型，不查枚举。** `Platform` 定义成 `KnownPlatform | (string & {})`，
+  注释写明是「加上我们不再发布的遗留值」；平台已整体移除过两次（Rplay、Withny）。
+  枚举化会让**移除之前**导出的备份全部无法导入——代价大于它防的脏数据。未知平台不是损坏：
+  `getAdapter` 返回 undefined、频道如实报「不支持的平台」（有既有测试）。
+- **时间戳不查 ms 单位。** `Post.publishedAt` 文档写 ms，但 bilibili 等适配器实际发秒，
+  `utils/timestamp.ts` 正是这个契约缺口的单一来源，校验**复用它**而不另立阈值——
+  按 ms 卡范围会拒绝本构建自己导出的 bilibili 行。
+
+**另一处修正**：`settings` 类型错误此前会被报成一大串「缺少字段」（因为下游逐字段取值），
+现在按形状直接报「settings 应为对象」——错因指向该指的地方。
+
+**覆盖范围**：只校验**存在**的字段，所以旧格式文件与部分备份的导入行为不变
+（`backup.reimport-restores` 门禁步骤即用真实导出文件走这条路径）。
 
 ### 2. `FetchError` 分类仍可提高精度
 
@@ -242,7 +253,7 @@ Referer 同样读它，见 AGENTS 规则 2；占位名前缀也已改为从 `url
 
 | 方向 | 为什么现在做 | 代价 | 对应条目 |
 |---|---|---|---|
-| **1. 备份/导入的完整校验** | 导入是**唯一**绕过仓储层写入的入口（二.1）。抑制记录的语义是「跨取关、跨重装」，而重装后靠备份往返恢复——校验不足会让刚建立的删除语义从后门被绕过（`DELETION_MODEL.md` 不变量 I8 正是这条） | 中（纯校验，无 schema 变更） | A1 |
+| **1. 备份/导入的完整校验** ~~（最高）~~ **已完成 2026-09-12** | 导入是**唯一**绕过仓储层写入的入口。抑制记录的语义是「跨取关、跨重装」，而重装后靠备份往返恢复——校验不足会让刚建立的删除语义从后门被绕过（`DELETION_MODEL.md` 不变量 I8 正是这条） | ~~中~~ **已做** | ~~A1~~ |
 | **2. 真实载荷证据** | 现有 Twitter fixture 是手工构造的，其历史版本**把 bug 编码了进去**（二.3）；「测试与实现出自同一模型时，双方共享的错误世界模型不会被任何一方发现」 | 低（一次真机会话即可取到） | B1 |
 | **3. 无自动化验证的活模块** | `declarativeNetRequest`（186 行防盗链规则）静默失效的表现是「图片变占位」，而它零自动化验证（二.3） | 低（规则集是纯数据） | A3 |
 | **4. 失败语义细分** | 分类错误会**驱动平台冷却**，所以错的不只是文案（二.2） | 中 | A2 |
@@ -358,10 +369,20 @@ Twitter 标签页路径真的跑通了。
 
 #### 队列 A — 立即可做，不需要用户输入（建议按序）
 
-A1. **备份校验补全**（二.1）。这是**数据入口**，优先级最高。逐项加：timestamp 有限性、
-    platform 枚举、跨表引用、重复 ID、settings 范围、`0|1` 约束。
-    验收：每条检查各有一个「坏文件被拒」的用例，且至少一条用**真实导出的文件**做对照
-    （证明合法文件不被误拒）。
+A1. ~~**备份校验补全**~~ —— **已完成（2026-09-12）**。`parseBackup` 现在做四层校验：
+    必填字段 → 字段类型/范围（`RULES` 表驱动，仅校验**存在**的字段，旧文件仍可导入）→
+    settings 范围与枚举 → 跨表关系（重复 ID、悬空引用）。测试 29 例（含真实导出文件走同一
+    路径的 `backup.reimport-restores` 门禁步骤）。
+    **两处刻意偏离原条目**（原条目由审计提出，未考虑后续约束）：
+    - **`platform` 只查类型，不查枚举**。`Platform` 是 `KnownPlatform | (string & {})`
+      （「加上我们不再发布的遗留值」），且平台已整体移除过（Rplay、Withny）——
+      枚举化会让**平台移除之前**导出的备份全部无法导入，比它防的垃圾更糟。未知平台不是
+      损坏：`getAdapter` 返回 undefined，频道如实报「不支持的平台」。有测试钉住这一条。
+    - **时间戳只查「有限正数且在 `Date` 范围内」，不查 ms 单位**。`Post.publishedAt` 文档写 ms，
+      但 bilibili 等适配器实际发秒，`utils/timestamp.ts` 就是为这个契约缺口存在的（单一来源，
+      校验复用它而不另立阈值）。按 ms 卡范围会拒绝本构建**自己导出**的 bilibili 行。
+    - 附带修掉一个既有可读性问题：`settings` 类型错误此前被报成「缺少字段」的堆栈，
+      现在按形状报「settings 应为对象」。
 
 A2. **`FetchError` 五阶段细分**（二.2）。按 HTTP / 解析 / schema / timeout / transport
     分开分类，401/403 专门归类。**不要**复活 `retryable` 字段（理由见二.2 注）。
@@ -378,9 +399,19 @@ A4. **规则 8 台账收敛**（二.4）。8 处直连里，优先处理有明�
 
 A5. **`AGENTS.md` 减负收尾**（AUDIT P2-17b 的剩余部分）。已完成的：16 条规则带附录指针、
     Non-goals 已收成 6 行指针、`Fix queue` 台账已移入 `AGENTS_CASES.md`、
-    `PRODUCT_DECISIONS.md` 已承接产品决定。**剩余**：规则 9（51 行）、28（51 行）、30（55 行）
+    `PRODUCT_DECISIONS.md` 已承接产品决策。**剩余**：规则 9（51 行）、28（51 行）、30（55 行）
     仍超出「每条 2–8 行」的目标——把事故叙述搬进 `AGENTS_CASES.md`，正文只留约束。
     验收：三条规则各自 ≤ 8 行且语义不丢；`AGENTS_CASES.md` 锚点可达。
+
+A6. **`tests/dashboardToolbar.test.ts` 的偶发未处理拒绝**（2026-09-12 做 A1 时发现，**未修**）。
+    现象：约 **1/8 次**全量测试末尾出现 `Errors 6 errors`，内容是
+    `TypeError: localStorage.getItem is not a function`（`useDarkMode.ts:19` 的 `initDarkMode`，
+    经 `App.vue:302`），抛在 jsdom 环境**卸载之后**——即测试自己的异步尾巴越过了 teardown。
+    **已确认与 A1 无关**：把 A1 的改动 stash 掉后，在未修改代码上连跑 8 次仍命中 1 次。
+    **两条测量**：全量门禁退出码为 0（测试全过，只是报了未处理拒绝），所以它不会打红 CI；
+    但它会往输出里塞 6 段堆栈，正是规则 20「日志信噪比」的同类。
+    修法方向（未验证）：在 `useDarkMode` 里对 `localStorage` 的存在性做保护，
+    或让该测试显式 await 其挂载副作用，而不是在 teardown 后让它跑。
 
 #### 队列 B — 有前置条件
 
