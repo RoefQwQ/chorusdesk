@@ -78,7 +78,18 @@ export function useSyncActions(deps: SyncActionsDependencies) {
 
     try {
       const minDelay = Math.max(deps.getRequestDelayMs() || 600, 800);
-      await batchUpdateChannelsInterleaved(
+      // The run had no header and no summary: the log showed a dozen channel
+      // lines and nothing that said which run they belonged to or how it ended.
+      // Both are borrowed from the batch's own return value, which this call
+      // used to discard — so "10 channels, 10 failed" was indistinguishable from
+      // a clean run in the log, even though the batch had already computed it.
+      devLog.info(
+        'sync',
+        `开始刷新全部：${channels.length} 个频道`,
+        `每平台间隔 ≥${minDelay}ms，每次 ${deps.getItemsPerFetch()} 条${restoreDeleted ? '，含恢复已删' : ''}`,
+      );
+      const runStarted = Date.now();
+      const summary = await batchUpdateChannelsInterleaved(
         channels,
         deps.getItemsPerFetch(),
         {
@@ -90,6 +101,13 @@ export function useSyncActions(deps: SyncActionsDependencies) {
           },
         }
       );
+      // Report the batch's own accounting rather than a bare 「完成」.
+      // `successful` counts channels that returned content or no error; the
+      // difference is what tells the user whether to look at the rows.
+      const failed = summary.totalChannels - summary.successful;
+      const line = `刷新全部结束：${summary.totalChannels} 个频道，成功 ${summary.successful}，失败 ${failed}，新增 ${summary.newPostsCount} 条，耗时 ${Date.now() - runStarted}ms`;
+      if (failed > 0) devLog.warn('sync', line, '失败频道的行内会显示具体原因');
+      else devLog.info('sync', line);
       await deps.reloadData();
     } catch (err) {
       // This catch used to do nothing but `console.error`, which the Developer Log

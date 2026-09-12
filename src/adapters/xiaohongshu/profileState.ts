@@ -25,12 +25,27 @@ import { devLog } from '../../utils/devLog';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
+/** The payload markers an SSR page carries. Kept here, not in the adapter. */
+const STATE_MARKERS = ['window.__INITIAL_STATE__', 'window.__INITIAL_SSR_STATE__'] as const;
+
+/**
+ * Whether the page carries any SSR state marker at all.
+ *
+ * Exists so the adapter can tell two failures apart without knowing the marker
+ * names — asserting on `'__INITIAL_STATE__'` in the adapter would be a second
+ * copy of this knowledge, which is what keeps single-sourcing honest (and is
+ * asserted by `adapters.singleSource.test.ts`).
+ */
+export function hasInitialStateMarker(html: string): boolean {
+  return STATE_MARKERS.some((marker) => html.includes(marker));
+}
+
 /** The `window.__INITIAL_STATE__` / `__INITIAL_SSR_STATE__` payload of a page. */
 export function extractInitialState(html: string): JsonRecord | null {
   if (!html) return null;
 
   try {
-    for (const prefix of ['window.__INITIAL_STATE__', 'window.__INITIAL_SSR_STATE__']) {
+    for (const prefix of STATE_MARKERS) {
       const idx = html.indexOf(prefix);
       if (idx !== -1) {
         const assignIdx = html.indexOf('=', idx);

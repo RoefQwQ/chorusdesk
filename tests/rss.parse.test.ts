@@ -101,6 +101,118 @@ describe('rssAdapter body extraction', () => {
   });
 });
 
+/**
+ * The failure the user hit three times in one session: the feed URL answered
+ * HTTP 200 with an HTML page instead of XML (a Cloudflare-cached copy of the
+ * site root, `Cache-Control: public, max-age=300`), so `parsererror` fired.
+ *
+ * The adapter reported `network`, which is not cosmetic — `code` drives the
+ * platform cool-down (rule 19), so the user was told to wait 2–3 minutes for a
+ * condition retrying cannot fix. Measured against the live source on 2026-09-13:
+ * `daily.juya.uk/` → `text/html`, `daily.juya.uk/rss.xml` → `application/rss+xml`.
+ */
+describe('rssAdapter failure classification', () => {
+  it('follows the link a site root advertises instead of failing', async () => {
+    // The real failure, 2026-09-13: the subscribed URL was the site root, which
+    // always answers `text/html` — but the HTML advertises its feed with
+    // `<link rel="alternate" type="application/rss+xml" href="…">`, which is how
+    // every feed reader finds it. Measured against the live source:
+    // `daily.juya.uk/` → text/html, `daily.juya.uk/rss.xml` → application/rss+xml.
+    vi.resetModules();
+    const requested: string[] = [];
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async (url: string) => {
+        requested.push(url);
+        if (url.includes('rss.xml')) return { ok: true, status: 200, data: FEED };
+        return {
+          ok: true,
+          status: 200,
+          data: '<!doctype html><html><head>'
+            + '<link rel="alternate" type="application/rss+xml" title="橘鸦AI早报" href="/rss.xml">'
+            + '</head><body>site</body></html>',
+        };
+      },
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel as never, 10);
+
+    expect(res.error).toBeUndefined();
+    expect(res.posts.length).toBeGreaterThan(0);
+    expect(requested.some((u) => u.includes('rss.xml'))).toBe(true);
+  });
+
+  it('stops after one hop when the advertised feed is also not a feed', async () => {
+    // A page we do not control must not decide how many requests we make
+    // (rule 19). One discovery hop, then report.
+    vi.resetModules();
+    let calls = 0;
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async () => {
+        calls++;
+        return {
+          ok: true,
+          status: 200,
+          data: '<html><head><link rel="alternate" type="application/rss+xml" href="/also-html"></head></html>',
+        };
+      },
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel as never, 10);
+
+    expect(res.error?.code).toBe('parse');
+    expect(calls).toBe(2); // the original + exactly one discovery hop
+  });
+
+  it('refuses a non-http(s) advertised href', async () => {
+    // The href comes from markup we do not control.
+    vi.resetModules();
+    const requested: string[] = [];
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async (url: string) => {
+        requested.push(url);
+        return {
+          ok: true,
+          status: 200,
+          data: '<html><head><link rel="alternate" type="application/rss+xml" href="javascript:alert(1)"></head></html>',
+        };
+      },
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel as never, 10);
+
+    expect(res.error?.code).toBe('parse');
+    expect(requested.some((u) => u.startsWith('javascript:'))).toBe(false);
+  });
+
+  it('reports HTML-instead-of-XML as parse, not network', async () => {
+    vi.resetModules();
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async () => ({
+        ok: true,
+        status: 200,
+        data: '<!doctype html>\n<html><body>site root, not a feed</body></html>',
+      }),
+    }));
+    const { rssAdapter } = await import('../src/adapters/rss');
+    const res = await rssAdapter.fetchLatest(channel as never, 10);
+
+    expect(res.posts).toEqual([]);
+    expect(res.error?.code).toBe('parse');
+  });
+
+  it('reports a 404 as not_found and other statuses as network', async () => {
+    for (const [status, expected] of [[404, 'not_found'], [500, 'network'], [403, 'network']] as const) {
+      vi.resetModules();
+      vi.doMock('../src/infrastructure/chrome/http', () => ({
+        bgFetch: async () => ({ ok: false, status, data: '' }),
+      }));
+      const { rssAdapter } = await import('../src/adapters/rss');
+      const res = await rssAdapter.fetchLatest(channel as never, 10);
+      expect(res.error?.code, `status ${status}`).toBe(expected);
+    }
+  });
+});
+
 describe('rssAdapter article structure', () => {
   it('keeps the article markup so the reader can lay it out', async () => {
     // Flattening the body to text is what put every image in a gallery under the

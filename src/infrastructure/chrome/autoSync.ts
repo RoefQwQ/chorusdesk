@@ -50,15 +50,34 @@ async function syncAllChannels() {
     const channels: Channel[] = await db.channels.toArray();
     if (channels.length === 0) return;
 
-    await batchUpdateChannelsInterleaved(channels, settings.itemsPerFetch, {
+    const summary = await batchUpdateChannelsInterleaved(channels, settings.itemsPerFetch, {
       onlyOriginal: settings.hideReposts,
       minPlatformIntervalMs: Math.max(settings.requestDelayMs ?? 0, 800),
     });
     // The alarm firing is already logged by the router (`devLog.info('alarm', ...)`),
     // but its OUTCOME was recorded nowhere: a user reporting 「后台自动更新好像没生效」
     // saw the trigger and then nothing, and the failure went to a console the panel
-    // cannot read. These two lines are the whole answer to that question.
-    devLog.info('autoSync', '后台自动同步完成', `渠道 ${channels.length} 个`);
+    // cannot read. These lines are the whole answer to that question.
+    //
+    // The batch's OWN accounting is reported, not the channel count. This line
+    // read 「后台自动同步完成，渠道 N 个」 while discarding the result — so ten
+    // channels failing ten times logged as a clean completion. That is the
+    // 「操作完成 ≠ 业务成功」 shape the storage-failure fix was about, one layer up:
+    // the run finished, the sync did not.
+    const failed = summary.totalChannels - summary.successful;
+    if (failed > 0) {
+      devLog.warn(
+        'autoSync',
+        `后台自动同步完成（${failed}/${summary.totalChannels} 个频道未成功）`,
+        `新增 ${summary.newPostsCount} 条；失败频道的行内会显示具体原因。`,
+      );
+    } else {
+      devLog.info(
+        'autoSync',
+        '后台自动同步完成',
+        `渠道 ${summary.totalChannels} 个全部成功，新增 ${summary.newPostsCount} 条`,
+      );
+    }
   } catch (error) {
     devLog.error('autoSync', '后台自动同步失败', errorMessage(error));
   }

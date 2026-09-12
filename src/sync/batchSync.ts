@@ -62,9 +62,9 @@ export async function batchUpdateChannelsInterleaved(
     onProgress?: (current: number, total: number, channel: Channel, result: FetchResult) => void;
     shouldStop?: () => boolean;
   }
-): Promise<{ totalChannels: number; successful: number; newPostsCount: number }> {
+): Promise<{ totalChannels: number; successful: number; degraded: number; newPostsCount: number }> {
   const total = channelList.length;
-  if (total === 0) return { totalChannels: 0, successful: 0, newPostsCount: 0 };
+  if (total === 0) return { totalChannels: 0, successful: 0, degraded: 0, newPostsCount: 0 };
 
   const interleaved = interleaveChannelsByPlatform(channelList);
   const overrideInterval = options?.minPlatformIntervalMs;
@@ -83,6 +83,7 @@ export async function batchUpdateChannelsInterleaved(
   const platformLastFinished: Record<string, number> = {};
 
   let successful = 0;
+  let degraded = 0;
   let newPostsCount = 0;
 
   for (let i = 0; i < interleaved.length; i++) {
@@ -133,6 +134,12 @@ export async function batchUpdateChannelsInterleaved(
         successful++;
         newPostsCount += res.posts?.length || 0;
       }
+      // `degraded` is a result that wrote SOME posts but lost a source
+      // (audit P1-3), so it is not a clean success and not a failure either.
+      // Folded into `successful` above — deliberately — because the posts did
+      // land; it is counted separately only so the summary can say so rather
+      // than reporting a partly-blind run as a healthy one.
+      if (res.degraded) degraded++;
       options?.onProgress?.(i + 1, total, ch, res);
     } catch (e: unknown) {
       console.warn(`[BatchUpdate] Error on ${ch.id}:`, e);
@@ -149,7 +156,7 @@ export async function batchUpdateChannelsInterleaved(
     }
   }
 
-  return { totalChannels: total, successful, newPostsCount };
+  return { totalChannels: total, successful, degraded, newPostsCount };
 }
 
 /**

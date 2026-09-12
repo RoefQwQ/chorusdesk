@@ -131,21 +131,37 @@ describe('youtube — resolving @handle to a channelId', () => {
     expect(requested.some((u) => u.includes(`channel_id=${OTHER}`))).toBe(true);
   });
 
-  it('reports an error when all three miss, rather than a silent empty sync', async () => {
-    // MEASURED behaviour: the unresolvable id yields HTTP 404 from the feed endpoint,
-    // so this must surface as an error. A silent "0 posts, success" here is exactly
-    // what rule 13 forbids — and this is the branch that had never been measured.
+  it('reports a parse error when all three miss, without firing the doomed RSS request', async () => {
+    // MEASURED: an unresolvable id yields HTTP 404 from the feed endpoint, so a
+    // silent "0 posts, success" is exactly what rule 13 forbids.
+    //
+    // Changed 2026-09-13: the page LOADED (`ok: true`) and none of the three
+    // regexes matched, which is a parsing outcome, not a network one. The old
+    // code carried the `@handle` into the RSS request anyway, got the 404 and
+    // reported `network` — a parse problem wearing a network label, which also
+    // fed the platform cool-down (rule 19). It now stops before the request.
     served.push({ match: '/@ghost', ok: true, status: 200, body: '<html><body>no ids here</body></html>' });
-    // No feed entry is served, so the mock answers 404 for the RSS request.
 
     const res = await youtubeAdapter.fetchLatest(channel('@ghost'));
 
     expect(res.posts).toEqual([]);
     expect(res.error).toBeTruthy();
-    expect(res.error!.code).toBe('network');
-    // And the request really did carry the unresolved handle — the mechanism the
-    // documentation described.
-    expect(requested.some((u) => u.includes('channel_id=@ghost'))).toBe(true);
+    expect(res.error!.code).toBe('parse');
+    // The improvement: the handle never reaches the feed endpoint, because that
+    // request cannot succeed (measured: `channel_id=@YouTube` → 404).
+    expect(requested.some((u) => u.includes('channel_id=@ghost'))).toBe(false);
+    expect(requested.some((u) => u.includes('feeds/videos.xml'))).toBe(false);
+  });
+
+  it('reports a network error when the channel page itself cannot be fetched', async () => {
+    // The other half of the split above: no page means no basis for calling it a
+    // parse failure, and the user's action differs (check the connection).
+    served.push({ match: '/@offline', ok: false, status: 503, body: '' });
+
+    const res = await youtubeAdapter.fetchLatest(channel('@offline'));
+
+    expect(res.error?.code).toBe('network');
+    expect(requested.some((u) => u.includes('feeds/videos.xml'))).toBe(false);
   });
 
   it('does not fetch a page at all when the id is already a channel id', async () => {

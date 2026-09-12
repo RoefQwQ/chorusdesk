@@ -18,12 +18,19 @@ export const youtubeAdapter: PlatformAdapter = {
 
       // Handle @handles by fetching page to extract channel ID if not yet resolved
       if (channelId.startsWith('@') || !channelId.startsWith('UC')) {
+        const handle = channelId;
+        let resolved = false;
+        // Whether the profile page itself came back. A page that never loaded is
+        // a network problem; a page that loaded but did not yield an id is a
+        // parsing problem, and they must not be reported as each other.
+        let pageLoaded = false;
         try {
           const resp = await bgFetch(`https://www.youtube.com/${channelId}`, {
             headers: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' },
             signal,
           });
           if (resp.ok && resp.data) {
+            pageLoaded = true;
             const html = resp.data;
             // 1. Extract canonical channelId or rss channelId
             const rssMatch = html.match(/href=["']https:\/\/www\.youtube\.com\/feeds\/videos\.xml\?channel_id=(UC[a-zA-Z0-9_-]{22})["']/i);
@@ -33,6 +40,7 @@ export const youtubeAdapter: PlatformAdapter = {
             const resolvedId = rssMatch?.[1] || canonicalMatch?.[1] || jsonMatch?.[1];
             if (resolvedId) {
               channelId = resolvedId;
+              resolved = true;
             }
 
             // 2. Extract real channel title (avoid pure handle)
@@ -58,9 +66,33 @@ export const youtubeAdapter: PlatformAdapter = {
           // visible in the Developer Log, not only in a console the panel cannot read.
           devLog.warn(
             'youtube',
-            `未能解析 ${channelId} 的频道 ID（页面改版或未登录）`,
+            `未能抓取 ${handle} 的频道页（页面改版或未登录）`,
             errorMessage(e),
           );
+        }
+
+        if (!resolved) {
+          // The three regexes missing on a page that LOADED fine is the silent
+          // failure this branch used to have: `channelId` stayed a `@handle`, the
+          // RSS request then asked for `channel_id=@name`, YouTube answered 404,
+          // and the log blamed the network. Measured 2026-09-13 against the live
+          // endpoint: `channel_id=@YouTube` → 404, `channel_id=UC…` → 200. So the
+          // handle form CANNOT succeed, and carrying on only converts a parsing
+          // problem into a misleading 404 that also feeds the platform cool-down
+          // (rule 19).
+          const reason = pageLoaded
+            ? `频道页已取到，但未匹配到频道 ID（登录态页面结构不同或页面改版）。已停止，不再用 @handle 请求必然 404 的 RSS。`
+            : `频道页未能取到（网络或被拦截）。已停止，不再用 @handle 请求必然 404 的 RSS。`;
+          devLog.warn('youtube', `${handle} 解析频道 ID 失败`, reason);
+          return {
+            posts: [],
+            error: fetchError(
+              pageLoaded ? 'parse' : 'network',
+              pageLoaded
+                ? `无法从 YouTube 频道页解析出频道 ID（${handle}）。若该主页在浏览器中可正常访问，可能是页面结构已调整。`
+                : `无法访问 YouTube 频道页（${handle}）。`,
+            ),
+          };
         }
       }
 

@@ -84,6 +84,43 @@ async function readCapped(res: Response): Promise<string> {
   return out;
 }
 
+/**
+ * A one-line description of what the response BODY looks like — not its content.
+ *
+ * Added after three real failures in one session were each undiagnosable from the
+ * log even though the answer was in the response the whole time:
+ *
+ *   - the RSS feed's URL served `text/html` (a Cloudflare-cached copy of the site
+ *     root) instead of XML, so the adapter threw `parsererror` and the log said
+ *     only `HTTP 200` … `同步失败（network）`;
+ *   - a YouTube `@handle` fell through all three resolution regexes, so the RSS
+ *     request carried a handle where an id belongs and got 404 — again invisible;
+ *   - a Xiaohongshu profile returned 200 with an SSR payload the extractor does
+ *     not recognise.
+ *
+ * In each case `Content-Type` plus the leading bytes would have named the cause
+ * immediately. This records **shape only** — media type, length, and a tiny
+ * classifier — never the body, which can carry a session token or user content
+ * (rule 11: the panel gets screenshotted into bug reports).
+ */
+function describeBody(contentType: string, text: string): string {
+  const mime = (contentType.split(';')[0] || '').trim().toLowerCase() || '未知类型';
+  const head = text.slice(0, 400).replace(/\s+/g, ' ').trimStart();
+  const kind =
+    head.startsWith('<!doctype html') || head.startsWith('<html')
+      ? 'HTML 文档'
+      : head.startsWith('<?xml')
+        ? 'XML 声明开头'
+        : head.startsWith('<')
+          ? 'XML/标记（无声明）'
+          : head.startsWith('{') || head.startsWith('[')
+            ? 'JSON'
+            : head
+              ? '纯文本/其他'
+              : '空响应';
+  return `${mime}，${kind}，${text.length} 字符`;
+}
+
 export interface BgFetchResult {
   ok: boolean;
   status: number;
@@ -146,23 +183,27 @@ export async function performBgFetch(
   }
 
   try {
+    const started = Date.now();
     const res = await fetch(parsed.toString(), {
       method: 'GET',
       headers,
       credentials: isPlatformHost(hostname) ? 'include' : 'omit',
       signal,
     });
-    // Host + status only: the URL can carry query tokens and the body is never
-    // logged. This is the line that explains "why is this platform empty".
+    const data = await readCapped(res);
+    // Host + status + body SHAPE. The URL can carry query tokens and the body is
+    // never logged; the shape is what turns "HTTP 200" into a diagnosis (see
+    // `describeBody`).
     const credentials = isPlatformHost(hostname) ? 'include' : 'omit';
+    const detail = `凭据：${credentials}，${describeBody(res.headers.get('content-type') || '', data)}，${Date.now() - started}ms`;
     const outcome = `${hostname} → HTTP ${res.status}`;
-    if (res.ok) devLog.debug('bgFetch', outcome, `凭据：${credentials}`);
-    else devLog.warn('bgFetch', outcome, `凭据：${credentials}`);
+    if (res.ok) devLog.debug('bgFetch', outcome, detail);
+    else devLog.warn('bgFetch', outcome, detail);
     return {
       ok: res.ok,
       status: res.status,
       statusText: res.statusText,
-      data: await readCapped(res),
+      data,
     };
   } catch (err) {
     // A cancelled request is not a failure: ordering it as one would put a red

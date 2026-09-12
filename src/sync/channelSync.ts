@@ -173,11 +173,24 @@ export async function updateChannel(
 ): Promise<FetchResult> {
   const adapter = getAdapter(channel.platform);
   if (!adapter) {
+    // A silent return here was invisible: the channel simply never appeared in
+    // the log, which reads as "the sync stopped" rather than "this platform has
+    // no adapter" (a real state after a platform removal).
+    devLog.warn(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 跳过：没有对应适配器`,
+      '该平台可能已在本版本移除；频道会在界面上标记为不支持的平台。',
+    );
     return { posts: [], error: fetchError('unsupported', `不支持的平台: ${channel.platform}`) };
   }
 
   // Cooldown protection: if updated successfully within 30 seconds and not forced, skip hitting network
   if (!force && !options?.cursor && channel.lastSuccessAt && Date.now() - channel.lastSuccessAt < 30_000) {
+    devLog.debug(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 跳过：30 秒内已成功同步`,
+      `距上次成功 ${Math.round((Date.now() - channel.lastSuccessAt) / 1000)} 秒，未强制刷新`,
+    );
     return {
       posts: [],
       error: undefined,
@@ -247,6 +260,33 @@ export async function updateChannel(
       // (e.g. the user cancelling a run) composes with the timeout.
       signal: options?.signal ?? abortController.signal,
     };
+
+    // Why this line exists: a real session's log contained the fetch lines for a
+    // channel and then, twenty-seven seconds later, its 「同步完成」 line — with
+    // nothing in between. The gap was the acquisition (page load, injection,
+    // contract validation, mapping), which emitted nothing, so the user asked
+    // whether Douyin had stopped responding. It had not; the log simply did not
+    // cover the interval it was being asked about. `debug` because it is
+    // high-volume on a successful path (rule 11), and it names the mode so the
+    // same channel's normal sync, dig and forced refresh are distinguishable.
+    const mode = options?.isHistory || options?.cursor !== undefined
+      ? '历史回溯'
+      : options?.forceRefresh
+        ? '强制刷新'
+        : options?.restoreDeleted
+          ? '恢复已删'
+          : '常规';
+    devLog.debug(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 开始同步（${mode}）`,
+      [
+        `上限 ${limit} 条`,
+        sinceTimestamp ? `水位线 ${new Date(toEpochMsOr(sinceTimestamp, sinceTimestamp)).toLocaleString('zh-CN')}` : '无水位线',
+        options?.cursor !== undefined ? `游标 ${String(options.cursor)}` : '',
+      ].filter(Boolean).join('，'),
+    );
+
+    const startedAt = Date.now();
     const result = await Promise.race([adapter.fetchLatest(channel, limit, mergedOptions), timeoutPromise]);
 
     if (result.error && result.posts.length === 0) {
@@ -262,6 +302,15 @@ export async function updateChannel(
           lastCheckAt: Date.now(),
           lastSuccessAt: Date.now(),
         });
+        // Third silent return. It wrote a success status and a terminal cursor
+        // but produced no line, so a channel that reported "nothing here" looked
+        // identical to one that was never reached — and this is the one write in
+        // the file the user cannot undo, so it has to be on the record.
+        devLog.info(
+          'channelSync',
+          `${channel.platform}/${channel.displayName || channel.accountId} 已到历史底部`,
+          `平台声明没有更多内容（${result.error?.code ?? 'hasMore=false'}），游标记为终点。`,
+        );
         return { ...result, error: undefined };
       }
 
@@ -272,11 +321,14 @@ export async function updateChannel(
         lastCheckAt: Date.now(),
       });
       // The per-channel failure the UI only shows as a red pip: name the code
-      // and the platform, never the response body.
+      // and the platform, never the response body. Elapsed time is included
+      // because "failed after 40s" and "failed after 0.2s" are different bugs
+      // (a timeout vs an immediate rejection) and the previous line could not
+      // tell them apart.
       devLog.warn(
         'channelSync',
         `${channel.platform}/${channel.displayName || channel.accountId} 同步失败（${result.error.code}）`,
-        friendly,
+        `${friendly}｜耗时 ${Date.now() - startedAt}ms`,
       );
       return { ...result, error: { ...result.error, message: friendly } };
     }
@@ -544,6 +596,9 @@ export async function updateChannel(
         `hasMore=${String(result.hasMore)}`,
         `水位线=${watermark}`,
         `仅原创=${mergedOptions.onlyOriginal ? '是' : '否'}`,
+        // Bounds the acquisition: the start line and this one are the two ends
+        // of the interval that used to be blank.
+        `耗时 ${Date.now() - startedAt}ms`,
       ].join('，'),
     );
 

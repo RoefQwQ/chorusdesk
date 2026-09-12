@@ -65,8 +65,8 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 - **待真机确认**：见[四.P7](#p7真实浏览器行为验证滚动清单) —— RSS 阅读视图、抖音重试期限、
   图片代理 403 冷却。
 - **未排期**：四.P6 整体 UI 风格重设计。
-- **已否决（不要重新提出）**：PR-first 工作流、待办迁 GitHub Issues——个人仓库不引入
-  协作开销（[PRODUCT_DECISIONS.md](PRODUCT_DECISIONS.md)）。
+- **已否决（不要重新提出）**：PR-first 工作流、待办迁 GitHub Issues——单人维护的项目
+  不引入协作开销（[PRODUCT_DECISIONS.md](PRODUCT_DECISIONS.md)）。
 
 **已决的非目标（不要再提议）**
 
@@ -312,7 +312,7 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | **5. 工程质量** | E2E 一个 click 让 backup+alarm 全 skip；无 MessageMap；DNR 零测试且两处手维护；新增平台 8–10 个散点 | 不直接致错，但抬高下一处缺陷的概率 |
 
 **明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流、待办迁 Issues
-（个人仓库不引入协作开销）、往微交互追加工程资源（AUDIT P3 冻结）。
+（单人维护，不引入协作开销）、往微交互追加工程资源（AUDIT P3 冻结）。
 
 ### P6：整体 UI 风格重设计 — 不排期
 
@@ -520,7 +520,7 @@ await db.postSuppressions.clear();   // 无条件
   **用户已确认的语义**（「全部恢复 → suppression 全部删除」）。真正的性质是
   **既定语义与「彻底删除」的界面承诺冲突**，所以解法是拆动作、不是改语义。
 - **平台 `platform` 字段做枚举校验**——会让平台移除前导出的备份全部无法导入，见 A1。
-- **PR-first 工作流 / 待办迁 GitHub Issues**——`PRODUCT_DECISIONS.md`，个人仓库不引入协作开销。
+- **PR-first 工作流 / 待办迁 GitHub Issues**——`PRODUCT_DECISIONS.md`，单人维护的项目不引入协作开销（与仓库是否公开无关）。
 
 ---
 

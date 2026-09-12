@@ -5,10 +5,12 @@ import { bgFetch } from '../infrastructure/chrome/http';
 import { toSecureMediaUrl } from '../utils/media';
 import { errorMessage } from '../utils/errorMessage';
 import { asRecord } from '../utils/json';
+import { devLog } from '../utils/devLog';
 import {
   collectRawNotes,
   extractInitialState,
   firstInfoListUrl,
+  hasInitialStateMarker,
   mapProfileNote,
   resolveAuthorMeta,
 } from './xiaohongshu/profileState';
@@ -40,12 +42,42 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       }
 
       const html = res.data;
+      // Two very different conditions used to share one message. A body that
+      // never arrived is a fetch problem; a body that arrived but carries no SSR
+      // payload means the page this session was served is not the profile we
+      // think it is (login wall, verification page, or a shape change). Saying
+      // 「请确认已登录」 for both sent the user to check a login that was fine.
+      if (!html || html.length === 0) {
+        devLog.warn('xiaohongshu', '主页响应为空', 'HTTP 200 但响应体为空');
+        return {
+          posts: [],
+          error: fetchError('network', '小红书主页返回了空响应，请稍后重试。'),
+        };
+      }
+
       const state = extractInitialState(html);
 
       if (!state) {
+        // Where the failure actually is: the payload marker is absent from the
+        // HTML. `extractInitialState` returns null both when nothing matches and
+        // when the JSON is malformed (that case logs its own warning), so this
+        // reports what it can see and names the two real causes.
+        const hasMarker = hasInitialStateMarker(html);
+        devLog.warn(
+          'xiaohongshu',
+          '主页未包含初始状态数据',
+          hasMarker
+            ? '响应中出现标记但 JSON 解析失败（详见上一条）'
+            : `响应中找不到初始状态标记（${html.length} 字符）`,
+        );
         return {
           posts: [],
-          error: fetchError('parse', '未能解析小红书博主页面数据。请确认当前浏览器已在 xiaohongshu.com 登录。'),
+          error: fetchError(
+            'parse',
+            hasMarker
+              ? '小红书主页的初始状态数据无法解析（页面结构可能已调整）。'
+              : '小红书主页未返回笔记数据（页面未携带初始状态）。若该主页在浏览器中可正常显示，可能是登录态或页面结构问题。',
+          ),
         };
       }
 
