@@ -128,6 +128,11 @@ function appendedLinkUrlsIn(tweet: JsonRecord): unknown[] {
 
 export const twitterAdapter: PlatformAdapter = {
   platform: 'twitter',
+  // The tab path is a `FETCH_TWITTER_TIMELINE` message, and the worker never
+  // receives its own `sendMessage` (rule 6). Declared so callers that can see the
+  // platform up front — the popup, auto-sync, the per-platform toggles — do not
+  // have to start a request to learn it.
+  backgroundSync: false,
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     const username = channel.accountId.replace(/^@/, '').trim();

@@ -224,6 +224,53 @@ export interface PlatformAdapter {
    * (xiaohongshu's signed CDN links); a feed can simply be re-fetched.
    */
   archivesMedia?: boolean;
+  /**
+   * Whether `fetchLatest` can complete inside the extension's service worker.
+   *
+   * Absent = yes. Two platforms say no, for two different reasons, and both are
+   * structural rather than tuning:
+   *
+   *  - `douyin` — the page is scraped through a background message round-trip,
+   *    and the service worker never receives its own `sendMessage` (rule 6).
+   *  - `twitter` — same shape: the tab path is a `FETCH_TWITTER_TIMELINE` message.
+   *
+   * This is declared rather than discovered because **the adapter cannot always
+   * discover it in time**. `fetchLatest` does refuse when it is already inside the
+   * worker, which is correct and stays — but the CALLER knows the platform before
+   * the request is made, and for the popup that matters:
+   * `SYNC_CHANNEL` runs in the worker on purpose (so the fetch survives the popup
+   * closing), so following a Douyin or Twitter creator from the popup always
+   * returned 「后台自动同步暂不支持推特」/「抖音需要在打开的抖音页面中采集」. Declaring the
+   * fact lets the entry point say that up front instead of after a wasted attempt.
+   *
+   * Read through `canRunInServiceWorker()`; never restate the list at a call site
+   * (rule 2's shape — one platform, one declaration).
+   */
+  backgroundSync?: boolean;
+  /**
+   * Whether this adapter walks a real pagination cursor issued by the platform.
+   *
+   * Absent = yes. `false` means the platform cannot state "there is nothing
+   * older", so any end marker we record is OUR inference:
+   *
+   *  - `douyin` — a single page-driven snapshot of a scrolled grid.
+   *  - `youtube` — the RSS feed lists the newest ~15 videos and carries no
+   *    continuation token.
+   *  - `rss` — a feed document; there is no "next page".
+   *
+   * This is what `cursorState`'s `terminalCursorIsStated` decides, and the fact
+   * lived in TWO places before (`SINGLE_SHOT_ACQUISITION` in `cursorState.ts`
+   * AND the adapter). It belongs here because the adapter is what knows: an
+   * adapter that returns `hasMore:false` and no `nextCursor` is describing its
+   * own acquisition model, and `youtube`/`rss` do exactly that while being
+   * absent from that other list — so a `__END__` recorded for them was trusted
+   * as platform-stated when it was a guess (rule 10's asymmetry: wrongly
+   * claiming complete is unrecoverable).
+   *
+   * Consumption is unchanged in spirit: a `false` here means the marker is a
+   * guess, so a dig clears it and re-runs rather than refusing.
+   */
+  paginates?: boolean;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
 
   /** Optional platform-specific historical fetch implementation. */
@@ -251,5 +298,28 @@ export interface PlatformAdapter {
     onlyOriginal?: boolean,
     bottomCursor?: string,
   ): FetchResult;
+}
+
+/**
+ * Capability queries over a declaration that may be absent.
+ *
+ * "Absent = yes" is the default for all three, so a missing adapter (an unknown
+ * platform, or no registry in scope) answers `true` — never `false`. That
+ * direction is deliberate: these gate *opportunities* (a background sync, a
+ * historical dig), and a wrong `false` silently removes a working feature, while
+ * a wrong `true` is what the code did before this model existed and is caught by
+ * the adapter's own `unsupported` result.
+ */
+export function canRunInServiceWorker(adapter?: PlatformAdapter): boolean {
+  return adapter?.backgroundSync !== false;
+}
+
+/** Whether this adapter walks a real platform cursor — see `paginates`. */
+export function hasPlatformStatedEnd(adapter?: PlatformAdapter): boolean {
+  return adapter?.paginates !== false;
+}
+
+export function archivesMedia(adapter?: PlatformAdapter): boolean {
+  return adapter?.archivesMedia !== false;
 }
 

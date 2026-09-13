@@ -22,6 +22,7 @@ import {
 } from './pathResolver';
 import { proxyImage, toSecureMediaUrl } from '../../utils/media';
 import { getAdapter } from '../../platform/registry';
+import { archivesMedia } from '../../adapters/types';
 
 // In-memory cache of object URLs created from local files to avoid redundant disk reads
 const objectUrlMemoryCache = new Map<string, string>();
@@ -119,7 +120,7 @@ async function resolvePostDir(
  * existed must keep seeing them on disk.
  */
 function isArchivablePlatform(platform: string): boolean {
-  return getAdapter(platform)?.archivesMedia !== false;
+  return archivesMedia(getAdapter(platform));
 }
 
 /**

@@ -1,5 +1,7 @@
 import type { Channel, Platform } from '../types';
 import type { FetchResult } from '../adapters/types';
+import { hasPlatformStatedEnd } from '../adapters/types';
+import { getAdapter } from '../platform/registry';
 
 /**
  * The end-of-history policy, in one place.
@@ -33,28 +35,28 @@ export const END_OF_HISTORY_CURSOR = '__END__';
 /** Shown when a dig refuses to continue because the platform stated the end. */
 export const END_OF_HISTORY_MESSAGE = '已到达该账号历史作品最底部，暂无更多更早内容。';
 
-/**
- * Platforms that acquire a creator's works as a single page snapshot instead of
- * walking a pagination cursor.
- *
- * Douyin is the only one: its adapter scrapes a rendered grid, so there is no
- * cursor for the platform to hand back and therefore no way for it to state
- * "this is the end". Everything else (bilibili, twitter, weibo, …) receives a
- * real cursor or `hasMore: false` from the API, which is a platform-stated fact.
- *
- * Adding a platform here is a correctness decision, not a tuning knob: it means
- * "never trust a recorded end for this platform".
- */
-const SINGLE_SHOT_ACQUISITION: readonly Platform[] = ['douyin'];
-
 /** True for the sentinel value. */
 export function isEndOfHistoryCursor(cursor: unknown): boolean {
   return cursor === END_OF_HISTORY_CURSOR;
 }
 
-/** True when this platform's end-of-history marker is platform-stated (trustworthy). */
+/**
+ * True when this platform's end-of-history marker is platform-stated (trustworthy).
+ *
+ * The fact is DECLARED BY THE ADAPTER (`PlatformAdapter.paginates`), not held here.
+ * It was held here before, in a `SINGLE_SHOT_ACQUISITION` array listing douyin
+ * alone — which meant the array and the adapters were two sources of truth for
+ * one fact (rule 35), and they had already diverged: `youtube` and `rss` return
+ * neither `nextCursor` nor `hasMore`, i.e. they cannot state an end either, yet
+ * they were absent from the array and so their recorded `__END__` was trusted.
+ *
+ * An unknown platform has no adapter and therefore no declaration; it answers
+ * `true`, keeping the old behaviour for records written by an older build (a
+ * platform later removed from the registry). That is the safe direction here:
+ * `false` would make every such channel's dig clear its marker and re-run.
+ */
 export function terminalCursorIsStated(platform: Platform): boolean {
-  return !SINGLE_SHOT_ACQUISITION.includes(platform);
+  return hasPlatformStatedEnd(getAdapter(platform));
 }
 
 /**

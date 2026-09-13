@@ -255,6 +255,30 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
 抛 `HttpStatusError` 可保留 HTTP 类，外层 `toFetchError` 用它定 `code`、用 adapter 自己的消息作文案；
 非 `HttpStatusError` 的抛出意味着响应没解析成功，归 `parse`（缺字段是 schema 变化，不是网络故障）。
 
+**平台能力声明**（2026-09-13，队列 #6）：能力**由适配器自己声明**，`registry.ts` 只负责
+`getAdapter` 查表，不做第二份真源（规则 2/35）。三个字段都已经有真实消费点才加，不是先建框架：
+
+| 字段 | 缺省 | 语义 | 声明为 `false` 的平台 |
+|---|---|---|---|
+| `backgroundSync` | 是 | `fetchLatest` 能否在扩展 Service Worker 内完成 | `douyin`、`twitter`（页面/消息往返，worker 收不到自己的 `sendMessage`，规则 6） |
+| `paginates` | 是 | 适配器是否走平台签发的真实游标 | `douyin`、`youtube`、`fantia`、`rss` |
+| `archivesMedia` | 是 | 媒体是否值得写入用户磁盘 | `rss` |
+
+查询走 `canRunInServiceWorker()` / `hasPlatformStatedEnd()` / `archivesMedia()`（`adapters/types.ts`，
+与接口同居，因为 `sync/cursorState.ts` 要用而它不该 import registry）。**三者都把「缺省/无适配器」
+判为 `true`**：它们门的是**机会**（一次后台同步、一次历史挖掘），错判 `false` 会静默去掉一个
+正常功能，错判 `true` 是这套模型之前的行为、且由适配器自己的 `unsupported` 兜底。
+
+`hasPlatformStatedEnd` 是 **`cursorState.terminalCursorIsStated` 的新来源**。此前该事实在
+`cursorState.ts` 的 `SINGLE_SHOT_ACQUISITION = ['douyin']` 与适配器里**各存了一份**（规则 35），
+且已经分叉：`youtube` / `rss` 的 `fetchLatest` **既不返回 `nextCursor` 也不返回 `hasMore`**（实测），
+即它们同样无法声明「没有更早的了」，却不在那份名单里——于是为它们记录的 `__END__` 被当成
+平台声明而**信任**（规则 10 的不对称：误判「已到底」不可恢复）。
+**消费语义不变**：声明为 `false` 仍意味着「该标记是我们的推断」，历史挖掘会清掉它并重跑。
+消费点：`channelSync.runChannelUpdate` 在 **dispatch 之前**按 `backgroundSync` 拒绝（popup 的
+`SYNC_CHANNEL` 在 worker 内运行，关注抖音/Twitter 创作者时此前必然失败）；`autoSync` 在批量前
+**筛掉**这类平台并**记日志说明跳过了谁**（此前每 30 分钟每个抖音/Twitter 频道都报一次红）。
+
 `src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；模块只导出一个函数 `getAdapter(platform)`，找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）。没有运行时注册入口——新增平台就是在 `ADAPTER_MAP` 里加一行。
 
 各平台能力现状（`fetchLatest` 为必实现）：

@@ -57,6 +57,11 @@ function parsePost(value: unknown): FantiaPost | undefined {
 export const fantiaAdapter: PlatformAdapter = {
   platform: 'fantia',
 
+  // `recent_posts` is a fixed preview and the endpoint has no cursor, so
+  // `hasMore` is always false. That value is honest about the page, but the
+  // platform never stated "no more exist" — see `paginates` in `types.ts`.
+  paginates: false,
+
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     try {
       const clubId = channel.accountId;

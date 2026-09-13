@@ -252,19 +252,29 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
   三个 identity 互不相同：**创作者改名即失联**（缓存还在、找不到），
   且**已经有稳定完整主键却截成 16 位**做文件名。
 
-### 10. 平台能力没有模型（能力错配）
+### 10. 平台能力没有模型（能力错配）— 已完成（2026-09-13）
 
-各模块单独看都对，组合起来互相否定：
+各模块单独看都对，组合起来互相否定（原文留存）：
 
-- `twitter.ts:137` 明确 `IS_SERVICE_WORKER → unsupported`，而 `autoSync.ts:50`
-  `db.channels.toArray()` **不筛平台**——开了自动同步，Twitter 必然报不支持；
-- popup 首次抓取为了「关窗不中断」改走 `SYNC_CHANNEL` → SW（对），
-  但新关注的 Twitter 频道因此**必然**撞上同一条 unsupported；
-- `channelSync.ts:248` 的 `signal: options?.signal ?? abortController.signal` 是**二选一**：
-  caller 传了 signal，45s 超时就不再拥有取消权，底层请求继续跑；
-- `autoSync` 丢弃 batch 结果：**10 个频道全失败也记「后台自动同步完成」**。
+- ~~`twitter.ts:137` 明确 `IS_SERVICE_WORKER → unsupported`，而 `autoSync.ts:50`
+  `db.channels.toArray()` **不筛平台**——开了自动同步，Twitter 必然报不支持；~~
+- ~~popup 首次抓取为了「关窗不中断」改走 `SYNC_CHANNEL` → SW（对），
+  但新关注的 Twitter 频道因此**必然**撞上同一条 unsupported；~~
+- ~~`channelSync.ts:248` 的 `signal: options?.signal ?? abortController.signal` 是**二选一**~~
+- ~~`autoSync` 丢弃 batch 结果：**10 个频道全失败也记「后台自动同步完成」**~~
 
-修法见队列 #6 / #7 / #9。
+**四项全部完成**。修法（能力声明放 `PlatformAdapter`，`registry` 只查表、不做第二份真源）：
+
+| 轴 | 缺省 | 声明为 `false` | 消费点 |
+|---|---|---|---|
+| `backgroundSync` | 是 | `douyin`、`twitter` | `channelSync` dispatch 前拒绝；`autoSync` 批量前筛掉并记日志 |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `cursorState.terminalCursorIsStated` 的新来源 |
+| `archivesMedia` | 是 | `rss` | `imageCache` / 设置页（改走同一个 helper） |
+
+`paginates` 顺手修掉一处**已分叉的第二真源**：`cursorState.ts` 的
+`SINGLE_SHOT_ACQUISITION = ['douyin']` 与适配器各存一份，而 `youtube` / `rss`
+**既不返回 `nextCursor` 也不返回 `hasMore`**（实测），同样无法声明「没有更早的了」——
+它们不在那份名单里，于是为其记录的 `__END__` 被**当成平台声明而信任**（规则 10 的不对称）。
 
 ### 11. 数据访问是全量内存模型（规模）
 
@@ -329,7 +339,7 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 |---|---|---|
 | **1. 状态正确性** | 同步入口之间没有协调：`updateChannel` 无任何并发锁，`platformLastFinished` 是 batch 局部变量。同频道可被 alarm / 手动 / 深挖 / popup 同时同步，**后完成的覆盖前者的 `nextCursor`**——写错数据且**用户看不见** | 会静默写错状态，且没有任何观测手段能发现 |
 | **2. 数据完整性** | 备份校验、RSS 身份作用域、`FetchError` 分类、`toSecureMediaUrl` 主机判定 **均已完成**（2026-09-13）；剩余仅媒体缓存的文件名截取 postId 前 16 位（**无老用户，已降级为不急**） | 这一层基本收口 |
-| **3. 能力错配** | 取消信号与聚合诚实 **已完成**；**剩余 #6 Platform capability 模型**——Twitter 明确不支持 SW 而 autoSync 不筛，popup 首次抓取走 SW 也必然撞上 | **当前最大的一项**：功能时好时坏，表现为"平台抽风" |
+| **3. 能力错配** | **整层已完成 2026-09-13**：取消信号、聚合诚实、Platform capability 模型（`backgroundSync` / `paginates` / `archivesMedia`）。后台/页面上下文的分工现在由适配器声明，消费点按声明筛选 | 已收口 |
 | **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条），且**先**全库跑一遍 `healBrokenPostMedia` | 每次都付税，随历史增长恶化 |
 | **5. 工程质量** | E2E 竞态根因与 release/CI 门禁一致性 **已完成**；剩余 E2E 拆分、MessageMap、DNR 测试、新增平台散点 | 不直接致错，但抬高下一处缺陷的概率 |
 
@@ -461,7 +471,7 @@ Twitter 标签页路径真的跑通了。
 | **3** | ~~**RSS identity scope**：`guid` 只在 feed 内唯一，却当全局主键~~ **已完成 2026-09-13** | 数据完整性 | `e86325a` |
 | **4** | ~~**单条/批量恢复共享同一策略**~~ **已完成** | 数据完整性 | 见 1 |
 | **5** | ~~**`healBrokenPostMedia` 移出 reload hot path**~~ **已完成 2026-09-13** | 规模 | `d9bcd4e`；`runMediaHealingOnce` |
-| **6** | **Platform capability 模型**：`backgroundSync` / `pageContextRequired` / `cancellable` / `history` | 能力错配 | 无 capability；Twitter 到 SW 才说「不支持」 |
+| **6** | ~~**Platform capability 模型**~~ **已完成 2026-09-13** | 能力错配 | `backgroundSync` / `paginates` / `archivesMedia`，三轴各有真实消费点 |
 | **7** | ~~**取消信号可组合**：caller signal ∪ deadline~~ **已完成 2026-09-13** | 能力错配 | `composeAbortSignals` |
 | **8** | ~~**`PROXY_IMAGE` 加 byte/MIME 上限**~~ **已完成 2026-09-13** | 数据完整性 | `MAX_IMAGE_BYTES = 8MB` |
 | **9** | ~~**后端聚合诚实**：autoSync 把结果丢了~~ **已完成 2026-09-13** | 能力错配 | autoSync 报 `failed/total` |
@@ -491,7 +501,7 @@ Twitter 标签页路径真的跑通了。
 - **批次 4（工程质量）**：#11 E2E 根因已修、#24 已完成；**#11 的拆分仍未做**（一个 click 失败
   仍会 skip 掉后面 8 步——根因修好后这个放大效应才成为主要遗留问题）。
 - **批次 5（证据）**：#18/#19/#20。
-- **批次 6（能力错配）**：仅剩 **#6**（Platform capability 模型）。
+- **批次 6（能力错配）**：**已完成**（#6，2026-09-13）。
 - **长期**：#10 分页重构、#16 MessageMap、#17 平台单一来源、#13 缓存 identity。
 
 ---
@@ -523,6 +533,38 @@ await dialog.alert('已恢复为备份快照…')      // ← 空窗之后才入
 
 **修法**：不再假设同步。`answered > 0` 之后，要求「连续 `DIALOG_SETTLE_MS` 内没有新 dialog」
 才认定突发结束，总预算 `DIALOG_SETTLE_BUDGET_MS` 封顶（规则 24：量级要显式）。
+
+**#6 Platform capability 模型 —— 已完成（2026-09-13）**
+
+能力**由适配器自己声明**（用户 2026-09-13 拍板：registry 只汇总/查询，不做第二份真源——与
+`minRequestIntervalMs` / `archivesMedia` 同形，也是规则 2 的形状）。
+
+**三轴，每轴都有真实消费点**（不加没有读取方的字段——这正是当初删掉 `FetchError.retryable` 的理由）：
+
+| 轴 | 缺省 | `false` | 消费点 |
+|---|---|---|---|
+| `backgroundSync` | 是 | `douyin`、`twitter` | dispatch 前拒绝 / autoSync 批量前筛掉 |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `terminalCursorIsStated` |
+| `archivesMedia` | 是 | `rss` | imageCache / 设置页 |
+
+**修掉的两个真实缺陷**：
+
+1. **popup 关注抖音/Twitter 必然失败**。`SYNC_CHANNEL` **刻意**在 worker 内运行（这样关窗
+   不中断抓取），而这两个平台的采集是页面/消息往返——于是频道被存下、首批动态永远抓不到。
+   现在在 dispatch **之前**按声明拒绝，并把「请在仪表盘手动同步」写进消息。
+2. **`SINGLE_SHOT_ACQUISITION` 是第二真源且已分叉**。`cursorState.ts` 的 `['douyin']` 与适配器
+   各存一份；实测 `youtube` / `rss` **既不返回 `nextCursor` 也不返回 `hasMore`**，同样无法
+   声明「没有更早的了」，却不在名单里——**为它们记录的 `__END__` 被当成平台声明而信任**
+   （规则 10：误判「已到底」不可恢复）。现由 `paginates` 单点派生。
+
+**autoSync 的跳过是记账的，不是静默的**：筛掉后记一条 info，点名跳过了哪些平台。沉默会是
+这个文件刚修过的同一个缺陷形态（分不清「不适用」与「忘了试」）。
+
+**验证**：14 例新测试（映射/缺省语义 3 + 声明与实际行为一致 5 + channelSync 拒绝 4 + autoSync 筛选 2），
+含一条**双向**断言——适配器声明 `backgroundSync:false` 就必须真的检查 `IS_SERVICE_WORKER`，
+所以声明与实现无法各自漂移。**变异 6/6 全杀**：douyin 不声明、cursorState 退回私有名单、
+channelSync 不拒绝、autoSync 不筛、筛了不记日志。两处曾**存活**（消费者无测试），因此补了
+`tests/channelSync.backgroundCapability.test.ts` 与 `tests/autoSync.capability.test.ts`。
 
 **#24 release.yml 与 CI 门禁一致性 —— 已完成（2026-09-13）**
 

@@ -30,6 +30,7 @@ node_modules/
 
 # Agent/tool state (worktrees, local agent config)
 .claude/
+COMMIT_MSG_TMP
 
 # OS/editor files
 .DS_Store

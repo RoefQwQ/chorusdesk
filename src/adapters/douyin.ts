@@ -46,6 +46,14 @@ export const douyinAdapter: PlatformAdapter = {
    * a verification redirect and a mid-scrape `Frame with ID 0 was removed`.
    */
   minRequestIntervalMs: 15_000,
+  // Declared, not discovered: `fetchLatest` also refuses when it is already in
+  // the worker (below), but the popup and auto-sync know the platform BEFORE the
+  // attempt, and a message round-trip cannot run there at all (rule 6).
+  backgroundSync: false,
+  // A single scrolled-grid snapshot — the platform never issues a cursor, so an
+  // end marker is our inference. This is the fact `cursorState` used to hold a
+  // second copy of.
+  paginates: false,
 
   async fetchLatest(channel: Channel, limit: number = 20, options?: FetchOptions): Promise<FetchResult> {
     const secUid = channel.accountId.trim();

@@ -124,6 +124,10 @@ async function fetchFeedDocument(
 }
 
 export const rssAdapter: PlatformAdapter = {
+  // A feed document has no "next page": `fetchLatest` returns neither
+  // `nextCursor` nor `hasMore`, so an end marker here is an inference, not a
+  // platform statement (see `youtube` for the same shape).
+  paginates: false,
   platform: 'rss',
   // A feed's images are hosted wherever the publisher likes, and a publisher CDN that
   // blocks hotlinking answers 403 to the proxy — the archive then retries every item

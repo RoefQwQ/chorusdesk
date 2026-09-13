@@ -7,6 +7,11 @@ import { errorMessage } from '../utils/errorMessage';
 import { devLog } from '../utils/devLog';
 
 export const youtubeAdapter: PlatformAdapter = {
+  // The feed lists the newest ~15 videos and carries no continuation token, so
+  // `fetchLatest` returns neither `nextCursor` nor `hasMore`: it cannot state
+  // "nothing older exists". Recording `__END__` for it was therefore a guess that
+  // `terminalCursorIsStated` nevertheless trusted (rule 10's asymmetry).
+  paginates: false,
   platform: 'youtube',
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {

@@ -1,4 +1,7 @@
 import type { Channel } from '../../types';
+import { PLATFORM_REGISTRY } from '../../types';
+import { canRunInServiceWorker } from '../../adapters/types';
+import { getAdapter } from '../../platform/registry';
 import { db } from '../db/database';
 import { getSettings } from '../db/settingsRepository';
 import { devLog } from '../../utils/devLog';
@@ -47,10 +50,42 @@ async function syncAllChannels() {
     const settings = await getSettings();
     if (!settings.enableAutoSync) return;
 
-    const channels: Channel[] = await db.channels.toArray();
-    if (channels.length === 0) return;
+    const all: Channel[] = await db.channels.toArray();
+    if (all.length === 0) return;
 
-    const summary = await batchUpdateChannelsInterleaved(channels, settings.itemsPerFetch, {
+    // Auto-sync runs in the service worker, so a platform that cannot run there
+    // is filtered out BEFORE the batch rather than attempted and reported as a
+    // failure.
+    //
+    // This was the visible half of the capability mismatch: the adapter already
+    // said `unsupported` (so nothing was silently mis-synced), but every 30
+    // minutes every Douyin and Twitter channel produced a red row and a warn
+    // line, for a condition that cannot change between runs. The user's reading
+    // is 「平台抽风」, and the real answer — "these two only work from the dashboard"
+    // — was never stated anywhere they could see it.
+    //
+    // The skipped list is LOGGED, not dropped: silence here would be the same
+    // class of defect as the discarded batch result this function already fixed
+    // (nothing to distinguish "not applicable" from "we forgot to try").
+    const runnable: Channel[] = [];
+    const skippedPlatforms = new Set<string>();
+    for (const c of all) {
+      if (canRunInServiceWorker(getAdapter(c.platform))) runnable.push(c);
+      else skippedPlatforms.add(PLATFORM_REGISTRY[c.platform]?.name ?? c.platform);
+    }
+    if (skippedPlatforms.size > 0) {
+      devLog.info(
+        'autoSync',
+        `后台自动同步跳过 ${skippedPlatforms.size} 个平台（${[...skippedPlatforms].join('、')}）`,
+        '这些平台需要在扩展页面中采集，后台无法运行；打开仪表盘手动同步即可。',
+      );
+    }
+    if (runnable.length === 0) {
+      devLog.info('autoSync', '后台自动同步没有可运行的频道', '所有已绑定频道都需要在扩展页面中同步。');
+      return;
+    }
+
+    const summary = await batchUpdateChannelsInterleaved(runnable, settings.itemsPerFetch, {
       onlyOriginal: settings.hideReposts,
       minPlatformIntervalMs: Math.max(settings.requestDelayMs ?? 0, 800),
     });

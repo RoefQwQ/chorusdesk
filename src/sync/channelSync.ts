@@ -1,8 +1,10 @@
 import Dexie from 'dexie';
 import type { Creator, Channel, Post } from '../types';
+import { PLATFORM_REGISTRY } from '../types';
 import type { FetchError, FetchOptions, FetchResult } from '../adapters/types';
-import { fetchError } from '../adapters/types';
+import { canRunInServiceWorker, fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
+import { IS_SERVICE_WORKER } from '../utils/runtime';
 import { isChannelRunning, notePlatformFinished, withChannelRun } from './syncCoordinator';
 import { GENERATED_NAME_PREFIXES } from '../utils/urlParser';
 import { db } from '../infrastructure/db/database';
@@ -242,6 +244,35 @@ async function runChannelUpdate(
       '该平台可能已在本版本移除；频道会在界面上标记为不支持的平台。',
     );
     return { posts: [], error: fetchError('unsupported', `不支持的平台: ${channel.platform}`) };
+  }
+
+  // A platform that cannot run here is refused BEFORE the request, from its own
+  // declaration — not discovered by the adapter mid-attempt.
+  //
+  // Both douyin and twitter do refuse inside `fetchLatest` when they detect the
+  // worker, and that stays as the backstop. What this adds is the KNOWLEDGE at
+  // the one place every worker-side path crosses (the alarm, the popup's
+  // `SYNC_CHANNEL`, the dashboard's batch loop when it runs in the SW): the
+  // platform is known before dispatch, so the attempt is not made at all.
+  //
+  // The popup is why it matters: `SYNC_CHANNEL` deliberately runs in the worker
+  // so the fetch survives the popup closing, which means following a douyin or
+  // twitter creator from the popup could only ever fail — the channel was stored
+  // and its first posts never were. The message says where it DOES work, because
+  // "not supported" alone leaves the user with no next step.
+  if (IS_SERVICE_WORKER && !canRunInServiceWorker(adapter)) {
+    devLog.warn(
+      'channelSync',
+      `${channel.platform}/${channel.displayName || channel.accountId} 跳过：该平台不能在后台运行`,
+      '需要在扩展页面中同步；由调用方在页面上下文重试。',
+    );
+    return {
+      posts: [],
+      error: fetchError(
+        'unsupported',
+        `${PLATFORM_REGISTRY[channel.platform]?.name ?? channel.platform} 需要在扩展页面中同步，后台无法采集。请打开仪表盘后手动同步该账号。`,
+      ),
+    };
   }
 
   // Cooldown protection: if updated successfully within 30 seconds and not forced, skip hitting network
