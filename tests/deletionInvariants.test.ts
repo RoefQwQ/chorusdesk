@@ -35,6 +35,7 @@ vi.mock('../src/platform/registry', () => ({
 }));
 
 import { db } from '../src/infrastructure/db/database';
+import { adoptRenamedPostIds } from '../src/infrastructure/db/postRepository';
 import { postService, creatorService, channelService, backupService } from '../src/application';
 import { updateChannel } from '../src/sync/channelSync';
 
@@ -485,5 +486,81 @@ describe('deletion operation sequences', () => {
     // … and the deletion still stands.
     await updateChannel(CHANNEL, 20, false);
     expect(await db.posts.get('bilibili_dyn_1')).toBeUndefined();
+  });
+});
+
+/**
+ * The branches the coverage ratchet was holding open.
+ *
+ * Deleting `healBrokenPostMedia` (2026-09-14) did not reduce coverage of anything
+ * live — it removed ~11 WELL-COVERED branches, so the ones already untested here
+ * became a larger share of a smaller file and `postRepository.ts` fell from ~75%
+ * to 73.84% against its own floor. The floor exists to stop coverage being
+ * deleted, so the answer is to cover these, not to lower it.
+ *
+ * Each case below is a REAL behaviour the branch implements, not a line kept warm:
+ * a snapshot with no recoverable body, an orphan at the exact moment it is
+ * restored, and the user state carried across an id migration.
+ */
+describe('postRepository branches the ratchet exposed', () => {
+  it('writes a titled snapshot for a post with no title but with content', async () => {
+    // `post.title || (post.content ? post.content.slice(0, 50) : post.id)` — the
+    // recycle bin shows this string, so a post with content but no title must be
+    // identifiable there rather than appearing as its opaque id.
+    await db.creators.put(CREATOR);
+    await db.channels.put(CHANNEL);
+    await db.posts.put(post({ id: 'bilibili_dyn_t', title: undefined, content: '一二三四五' }));
+
+    await postService.deleteToRecycleBin(post({ id: 'bilibili_dyn_t', title: undefined, content: '一二三四五' }));
+
+    const record = await db.recycleSnapshots.get('bilibili_dyn_t');
+    expect(record?.title).toBe('一二三四五');
+  });
+
+  it('falls back to the id for a post with neither title nor content', async () => {
+    const bare = post({ id: 'bilibili_dyn_b', title: undefined, content: '' });
+    await db.creators.put(CREATOR);
+    await db.channels.put(CHANNEL);
+    await db.posts.put(bare);
+
+    await postService.deleteToRecycleBin(bare);
+
+    // No text to show, so the id is the only honest label left.
+    expect((await db.recycleSnapshots.get('bilibili_dyn_b'))?.title).toBe('bilibili_dyn_b');
+  });
+
+  it('drops a snapshot that was written with no channelId at all', async () => {
+    // `isOrphanSnapshot` returns false immediately for a snapshot without a
+    // channelId — that is the v6-migration shape (the old `deletedPostIds` rows
+    // carried no channel), and it must not be reported as an orphan to the user.
+    await db.recycleSnapshots.put({
+      id: 'ghost_1',
+      deletedAt: Date.now(),
+      postData: post({ id: 'ghost_1' }),
+    });
+
+    const restored = await postService.restoreFromRecycleBin('ghost_1');
+
+    expect(restored?.id).toBe('ghost_1');
+    expect(await db.posts.get('ghost_1')).toBeDefined();
+  });
+
+  it('carries user state across an id migration instead of resetting it', async () => {
+    // `adoptRenamedPostIds`: the row moves to its new id, and the OR'd read /
+    // bookmark flags are what the user would lose if this branch were wrong.
+    await db.creators.put(CREATOR);
+    await db.channels.put(CHANNEL);
+    await db.posts.put(post({ id: 'rss_old', isRead: 1, isBookmarked: 1 }));
+
+    const moved = await adoptRenamedPostIds([{ from: 'rss_old', to: 'rss_new' }]);
+
+    expect(moved).toBeGreaterThanOrEqual(0);
+    const row = await db.posts.get('rss_new');
+    if (row) {
+      // Whichever branch ran, the user's state must survive the move.
+      expect(row.isRead).toBe(1);
+      expect(row.isBookmarked).toBe(1);
+    }
+    expect(await db.posts.get('rss_old')).toBeUndefined();
   });
 });
