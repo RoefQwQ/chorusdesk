@@ -53,6 +53,7 @@ export const profileInitialState = {
           "id": "6a0000020000000025037c02",
           "noteCard": {
             "noteId": "6a0000020000000025037c02",
+            "xsecToken": "ABsyntheticSharedXsecTokenForFixture=",
             "displayTitle": "示例笔记标题0",
             "type": "normal",
             "time": 1778384898000,
@@ -74,6 +75,7 @@ export const profileInitialState = {
           "id": "6a0000010000000025037c01",
           "noteCard": {
             "noteId": "6a0000010000000025037c01",
+            "xsecToken": "ABsyntheticSharedXsecTokenForFixture=",
             "displayTitle": "示例笔记标题1",
             "type": "normal",
             "time": 1778384897000,
@@ -95,6 +97,7 @@ export const profileInitialState = {
           "id": "6a0000000000000025037c00",
           "noteCard": {
             "noteId": "6a0000000000000025037c00",
+            "xsecToken": "ABsyntheticSharedXsecTokenForFixture=",
             "displayTitle": "示例笔记标题2",
             "type": "normal",
             "time": 1778384896000,

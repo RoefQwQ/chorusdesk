@@ -258,7 +258,22 @@ async function enrichImageNoteMedia(channel: Channel, posts: Post[], signal?: Ab
 
     const noteId = post.id.slice('xiaohongshu_'.length);
     try {
-      const res = await bgFetch(`https://www.xiaohongshu.com/explore/${noteId}`, {
+      // Reuse the token the profile page gave this note, rather than fetching the
+      // bare `/explore/<id>`: without it xiaohongshu answers `error_code=300031`
+      // and the detail page carries no `imageList`, so the enrichment silently
+      // kept the single cover. `post.originalUrl` already carries it (see
+      // `mapProfileNote`), so this is a parse, not a second source of truth.
+      let detailUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
+      try {
+        const withToken = new URL(post.originalUrl);
+        const token = withToken.searchParams.get('xsec_token');
+        if (token) {
+          detailUrl = `${withToken.origin}${withToken.pathname}?xsec_token=${encodeURIComponent(token)}&xsec_source=pc_user`;
+        }
+      } catch {
+        // A malformed stored URL: fall back to the tokenless form.
+      }
+      const res = await bgFetch(detailUrl, {
         signal,
         headers: {
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

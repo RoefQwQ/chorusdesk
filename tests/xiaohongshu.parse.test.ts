@@ -111,7 +111,14 @@ describe('xiaohongshu — parsing a captured profile page', () => {
     expect(first.title).toBe('示例笔记标题0');
     expect(first.content).toContain('示例笔记标题0');
     expect(first.content).toContain('❤️ 100 次赞同');
-    expect(first.originalUrl).toBe('https://www.xiaohongshu.com/explore/' + first.id.slice('xiaohongshu_'.length));
+    // The stored link must carry the page's `xsec_token`: a bare `explore/<id>`
+    // answers `error_code=300031` 「当前笔记暂时无法浏览」 and lands on `/404`
+    // (the reported bug). Measured 2026-09-13: the token is present on every note
+    // and is the same value across all of them.
+    const noteId = first.id.slice('xiaohongshu_'.length);
+    expect(first.originalUrl).toBe(
+      `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=ABsyntheticSharedXsecTokenForFixture%3D&xsec_source=pc_user`,
+    );
   });
 
   it('takes publishedAt from the card time, which equals the ObjectId prefix', async () => {

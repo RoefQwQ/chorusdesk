@@ -190,7 +190,22 @@ export function mapProfileNote(
     str(cover.urlPre) ||
     str(asRecord(coverInfoList[0]).url) ||
     str(asRecord(card.image).url);
-  const noteUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
+  // The note URL needs the page's `xsec_token`, or xiaohongshu answers
+  // `error_code=300031` 「当前笔记暂时无法浏览」 and a plain `explore/<id>` click
+  // lands on `/404` — which is what the user reported.
+  //
+  // Measured 2026-09-13 on a real profile response: `noteCard.xsecToken` is present
+  // on every note and is the SAME value for all 30 of them, i.e. it is a
+  // session/profile-scoped token rather than a per-note one. The adapter never read
+  // it, so every stored `originalUrl` was the tokenless form.
+  //
+  // The token belongs in the query string, and `xsec_source=pc_user` is what the
+  // page itself uses for a note reached from a creator's profile — both taken from
+  // the working URL the user supplied.
+  const shareToken = str(card.xsecToken) || str(item.xsecToken);
+  const noteUrl = shareToken
+    ? `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=${encodeURIComponent(shareToken)}&xsec_source=pc_user`
+    : `https://www.xiaohongshu.com/explore/${noteId}`;
 
   const imageListSource = card.imageList || card.imagesList || item.imageList || item.imagesList;
   const imageList = Array.isArray(imageListSource) ? imageListSource : [];

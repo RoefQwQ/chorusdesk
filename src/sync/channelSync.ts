@@ -179,14 +179,45 @@ function isStoredWithAppendedLink(stored: string, fresh: string): boolean {
 }
 
 /**
+ * A stored note link with no `xsec_token`, where the fresh one carries it.
+ *
+ * The shape the 404 bug produced: `https://www.xiaohongshu.com/explore/<id>` with
+ * nothing else, stored while the adapter now builds the same URL with the token
+ * the profile page supplies. Narrow by construction — the stored value must be a
+ * xiaohongshu `explore/<same id>` URL with NO query string at all, and the fresh
+ * one must be that same URL plus `xsec_token`. A link the user edited, a share
+ * link with other parameters, or a different id can never match, so the
+ * replacement can only ever add the token that was missing.
+ */
+function isXhsNoteLinkMissingToken(stored: string, fresh: string): boolean {
+  if (!stored || !fresh) return false;
+  let s: URL;
+  let f: URL;
+  try {
+    s = new URL(stored);
+    f = new URL(fresh);
+  } catch {
+    return false;
+  }
+  if (s.hostname !== 'www.xiaohongshu.com' || f.hostname !== 'www.xiaohongshu.com') return false;
+  // The stored form must be EXACTLY the bare link — any query at all means it is
+  // not the shape this bug wrote.
+  if (s.search !== '') return false;
+  if (s.pathname !== f.pathname) return false;
+  if (!/^\/explore\/[0-9a-f]{24}$/.test(s.pathname)) return false;
+  return f.searchParams.get('xsec_token') !== null;
+}
+
+/**
  * Whether a stored row's text should be replaced by what the adapter just parsed.
  *
  * Deliberately per-platform and narrow. Each rule matches only a shape that can
  * *only* be an artefact of a bug this project shipped, so the replacement can
  * never discard correct content: the RSS rule needs the freshly parsed body to be
- * strictly longer (bodies only ever get more complete), and the Twitter rules
- * need a body that is either solely a media link or the fresh text plus nothing
- * but trailing t.co links.
+ * strictly longer (bodies only ever get more complete), the Twitter rules need a
+ * body that is either solely a media link or the fresh text plus nothing but
+ * trailing t.co links, and the xiaohongshu rule needs a bare `explore/<id>` link
+ * that the fresh row improves with a token.
  */
 export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
   if (stored.platform !== fresh.platform) return false;
@@ -194,6 +225,9 @@ export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
   if (stored.platform === 'twitter') {
     return (isBareShortLink(stored.content) || isStoredWithAppendedLink(stored.content, fresh.content))
       && fresh.content !== stored.content;
+  }
+  if (stored.platform === 'xiaohongshu') {
+    return isXhsNoteLinkMissingToken(stored.originalUrl, fresh.originalUrl);
   }
   return false;
 }
@@ -544,8 +578,8 @@ async function runChannelUpdate(
               await db.posts.bulkPut(repaired);
               devLog.info(
                 'channelSync',
-                `已修正 ${repaired.length} 条历史动态的正文`,
-                `${channel.platform}：旧的错误文本已用重新解析的结果覆盖`,
+                `已修正 ${repaired.length} 条历史动态`,
+                `${channel.platform}：旧的错误字段已用重新解析的结果覆盖`,
               );
             }
           } catch {
