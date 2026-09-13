@@ -553,7 +553,7 @@ Twitter 标签页路径真的跑通了。
 | **20** | ~~**`autoSync` / `platformAuth` 单元测试**~~ **已完成 2026-09-13** | 证据 | `platformAuth` 9 例；`autoSync` 用法已在 `autoSync.capability.test.ts` 覆盖 |
 | **21** | ~~**规则 8 台账收敛**~~ **已一致（2026-09-13）** | 工程质量 | AGENTS 与实测**均为 7 处**；剩余直连属既定欠债，不是数字漂移 |
 | **22** | ~~**`AGENTS.md` 规则 9/28/30 压到 ≤8 行**~~ **已按实测改判 2026-09-13** | 工程质量 | 前提不成立（详见下）；改为**修规则 9 的误归类**，49 → 38 行 |
-| **23** | ~~**`dashboardToolbar` 偶发未处理拒绝**~~ **已不复现（2026-09-13）** | 工程质量 | 连跑 5 次 0 次未处理拒绝；原 ~1/8 已不可观测 |
+| **23** | ~~**`dashboardToolbar` 偶发未处理拒绝**~~ **已定位并修复（2026-09-14）** | 工程质量 | ~~连跑 5 次 0 次未处理拒绝~~ —— **那次关闭是假阴性**，「跑 5 次没看到」对 ~1/4 的概率不是证据。真因是 `afterEach` 在 `App.vue` 的 async `onMounted` 跑完前就 unmount + `unstubAllGlobals`，续体随后在 stub 已拆除的全局上抛 `localStorage.getItem is not a function`（每例一个，共 6 个）。修法与双向对照见「已知陷阱」。 |
 | **24** | ~~**release.yml 与 CI 门禁一致性**~~ **已完成 2026-09-13** | 工程质量 | 已对齐 `test:coverage`；`tests/workflows.gateParity.test.ts` 兜底 |
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 | **26** | ~~**小红书深挖只能取到最近一屏**~~ **已完成 2026-09-14** | 能力错配 | 页面驱动回溯（collector + contract + `FETCH_XHS_NOTES`）；**滚动是否真能加载第 31 条仍未实测**，见 `XIAOHONGSHU_RESEARCH` §9 |
