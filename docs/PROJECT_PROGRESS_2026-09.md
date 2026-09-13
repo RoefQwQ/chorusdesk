@@ -499,14 +499,14 @@ Twitter 标签页路径真的跑通了。
 | **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短**（无老用户，已降级为「不急」）** |
 | **14** | ~~**DNR 规则表驱动 + 测试**~~ **已完成 2026-09-13** | 工程质量 | 表驱动 + 10 例；`removeRuleIds` 与规则表派生自同一处 |
 | **15** | ~~**`toSecureMediaUrl` 的 `includes()` → `hostMatches`**~~ **已完成 2026-09-13** | 数据完整性 | 改用解析后的主机名；XHS 列表收敛到 `hosts.ts` |
-| **16** | **MessageMap 类型协议** | 工程质量 | 完全没有；改一条消息要同步 5 处 |
+| **16** | **MessageMap 类型协议**（长期） | 工程质量 | 完整版仍未做；**其可判定的一半已完成 2026-09-13**——`tests/messageRouter.test.ts` 钉住策略表↔分支双向一致 + fail-closed |
 | **17** | **Platform 声明性事实单一来源** | 工程质量 | 新增平台仍 8–10 个散点 |
 | **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
 | **19** | **weibo / pixiv / fantia 解析测试** — **阻塞于真实载荷**（见下） | 证据 | 三个适配器的解析**内联在 `fetchLatest` 里**，与请求纠缠 |
 | **20** | ~~**`autoSync` / `platformAuth` 单元测试**~~ **已完成 2026-09-13** | 证据 | `platformAuth` 9 例；`autoSync` 用法已在 `autoSync.capability.test.ts` 覆盖 |
 | **21** | **规则 8 台账收敛** | 工程质量 | 实测 **7 处**直连（原文写 8，已过期） |
 | **22** | **`AGENTS.md` 规则 9/28/30 压到 ≤8 行** | 工程质量 | 实测 51/**49**/**53** 行 |
-| **23** | **`dashboardToolbar` 偶发未处理拒绝** | 工程质量 | ~1/8 次 |
+| **23** | ~~**`dashboardToolbar` 偶发未处理拒绝**~~ **已不复现（2026-09-13）** | 工程质量 | 连跑 5 次 0 次未处理拒绝；原 ~1/8 已不可观测 |
 | **24** | ~~**release.yml 与 CI 门禁一致性**~~ **已完成 2026-09-13** | 工程质量 | 已对齐 `test:coverage`；`tests/workflows.gateParity.test.ts` 兜底 |
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 
