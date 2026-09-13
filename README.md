@@ -131,7 +131,15 @@ npm run zip        # 打包成可分发/上架的 zip
 - **禁止商用**：不得将本项目源码、构建产物或衍生版本用于任何商业盈利、付费售卖或商业推广行为。
 - **相同方式共享**：基于本项目修改或二创的代码，必须以相同的 CC BY-NC-SA 4.0 协议继续开源，并注明原作者署名。
 
-完整条款请阅读根目录的 [LICENSE](LICENSE) 文件。
+完整条款请阅读根目录的 [LICENSE](LICENSE) 文件（CC 官方原文，未作任何改动）。
+
+> **关于 GitHub 上显示为「Other」**：这是 GitHub 侧的限制，不是本仓库的配置问题。
+> GitHub 的协议识别引擎（[licensee](https://github.com/licensee/licensee)）内置的 CC 系列
+> **只有 `CC-BY-4.0` / `CC-BY-SA-4.0` / `CC0-1.0` 三个**，`CC-BY-NC-SA-4.0` 不在其中
+> （它在 licensee 仓库里仅作为测试样本存在）。因此无论 `LICENSE` 文本如何书写，GitHub
+> 都会显示为 `Other` / `NOASSERTION`。
+> `package.json` 的 `license` 字段与 SPDX 标识符 `CC-BY-NC-SA-4.0` 是准确的，
+> 以上述条款文本为准。
 
 ## 免责声明
 
