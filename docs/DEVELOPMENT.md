@@ -75,6 +75,7 @@
 6. 在 `src/utils/urlParser.ts` 增加 URL → `{ platform, accountId, cleanUrl }` 分支（注意域名顺序：`weibo.cn` 在 `weibo.com` 前等，避免子串误判；XHS 短链 `xhslink.com`、YouTube `youtu.be` 这类别名要并进同平台分支）。
    - **同时把该平台生成的占位名前缀加进同文件的 `GENERATED_NAME_PREFIXES`**。这是**必做项**：`channelSync` 的占位名识别从这份清单派生（`legacyPlaceholderName` / `legacyCreatorPlaceholderName` 用 `.some()` 判成员，没有第二份手写清单），`tests/urlParser.test.ts` 会双向断言「清单 ↔ 解析器实际产出」一致——漏加会让占位名永远不被真实昵称覆盖，且守卫测试会失败。
    > 更正（2026-09-12）：此前不存在这一步，也没有守卫；`AGENTS.md` 规则 9 记的正是漏加前缀导致 8 个平台的昵称写不进去那次事故。派生 + 守卫是本轮（审计 P1-5）的根治。
+   > **2026-09-13 起这里就是该步骤的唯一定义处**——它原本也写在 `AGENTS.md` 规则 9 里，而规则 9 讲的是页面驱动采集，与「新增平台」无关。旧行兜底语义（`nameSource` 缺失时退回一次形状判断，命中后盖 `platform`）见 [`ARCHITECTURE.md` §4.1](ARCHITECTURE.md)。
 7. 平台域名：只需把域名加入 `src/infrastructure/chrome/messages/hosts.ts` 的 `PLATFORM_HOSTS`。manifest 的 `host_permissions` 由 `platformHostMatchPatterns()` **派生生成**，图片代理白名单、凭据策略与 Referer 选择同样读取该清单——不要再手写第二份列表（`tests/hosts.singleSource.test.ts` 会断言这一点）。
    - 若走 Cookie 登录：在 `src/infrastructure/chrome/platformAuth.ts` 的 `platformsToCheck` 增加 `{ key, domain, authCookieNames }` 行（登录状态灯）。
    - 若该平台的图片 CDN 需要特定 Referer：在 `hosts.ts` 的 `MEDIA_REFERER_BY_DOMAIN` 增加映射；不需要 Referer 的 CDN 不要加（扩展会发不带 Referer 的请求）。

@@ -84,7 +84,9 @@ describe('parseProfileUrl still accepts the real hosts and their subdomains', ()
  * `channelSync` used to keep its own hand-written copy of these prefixes, and
  * the two drifted twice: Withny went unnoticed for its whole lifetime, then
  * eight prefixes were found missing at once. Nothing failed either time — a
- * missing prefix silently pins a machine name forever (AGENTS rule 9/32).
+ * missing prefix silently pins a machine name forever (AGENTS rule 32; the step
+ * itself is `docs/DEVELOPMENT.md` §6, and the incident is in `AGENTS_CASES.md`
+ * under Rule 9).
  *
  * `GENERATED_NAME_PREFIXES` is now the single exported list. This test derives
  * the prefixes from the parser's real output, so adding a `suggestedName`

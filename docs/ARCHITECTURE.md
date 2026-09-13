@@ -138,7 +138,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 - `isKnownPlatform(platform)`：类型守卫，把 `Platform` 收窄为 `KnownPlatform`；`getAdapter` 用它而非 `as` 断言——守卫即断言，写在代码里而不是注释里。
 - `KNOWN_PLATFORMS`：`KnownPlatform` 的运行时可枚举镜像（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）。**顺序无语义**——唯一消费方是 `isKnownPlatform` 的成员判断与守卫测试的双射断言；UI 的平台展示顺序来自 `PLATFORM_REGISTRY` 的键序，不要引用这里的顺序。
 - `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记（另见 `DEVELOPMENT.md` §3 的完整接入清单：三处类型改动缺一不可）。
-- `NameSource = 'generated' | 'platform' | 'user'`：`Creator.name` / `Channel.displayName` 的**来源**。同步层只允许覆盖**自己生成的**名字（`generated`）；用户改过的（`user`）与已由平台给出的（`platform`）不动。字段**缺失**＝`nameSource` 引入前写入的旧行，此时同步层退回一次字符串形状判断，命中后写入并盖上 `platform`，此后不再走那条路径。这取代了此前两份手写的前缀清单（见 `src/utils/urlParser.ts` 的 `GENERATED_NAME_PREFIXES` 与 AGENTS 规则 9）。
+- `NameSource = 'generated' | 'platform' | 'user'`：`Creator.name` / `Channel.displayName` 的**来源**。同步层只允许覆盖**自己生成的**名字（`generated`）；用户改过的（`user`）与已由平台给出的（`platform`）不动。字段**缺失**＝`nameSource` 引入前写入的旧行，此时同步层退回一次字符串形状判断，命中后写入并盖上 `platform`，此后不再走那条路径。这取代了此前两份手写的前缀清单（见 `src/utils/urlParser.ts` 的 `GENERATED_NAME_PREFIXES`；新增平台时该步骤在 [`DEVELOPMENT.md` §6](DEVELOPMENT.md)，事故经过在 `AGENTS_CASES.md` 的 Rule 9）。
 - `AccountRole = 'main' | 'sub' | 'alt' | 'custom'` 与它的四个映射，**必须一起改**：
   - `ACCOUNT_ROLE_ORDER`：**顺序即语义**——筛选行排列、「最高优先角色」判定与排序权重都读它，不是展示细节；
   - `ACCOUNT_ROLE_LABELS`（长式，账号行/徽章）、`ACCOUNT_ROLE_SHORT_LABELS`（筛选胶囊/选择器，须与 `AddCreatorModal` 的四个选项一致）；

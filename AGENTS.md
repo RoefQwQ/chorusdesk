@@ -211,22 +211,11 @@ with the direct fetch, which is why the two cannot drift).
 Nothing else may learn the page's shape. When the markup changes, only the collector, the contract,
 and the fixtures should need edits — never the db, `channelSync`, `buildPost`, or another platform.
 
-Two further invariants this exposed:
-
-- **Do not persist a signed CDN URL as identity or as a click target.** Douyin covers carry
-  `x-expires`/`x-signature`; a Post's `originalUrl` must be the canonical work page. Conversely, do
-  not "clean" query strings off media URLs — stripping the signature 403s every image.
-- **A new platform must add its generated placeholder-name prefixes to
-  `GENERATED_NAME_PREFIXES` in `src/utils/urlParser.ts`** — the single source. `channelSync`
-  derives its placeholder detection from that list (there is no longer a second hand-written copy
-  to keep in step), and `tests/urlParser.test.ts` asserts the list covers every prefix the parser
-  actually emits. A platform missing from it keeps its generated placeholder forever, because the
-  real nickname is only allowed to overwrite a name the sync layer recognizes as a placeholder.
-  > Changed 2026-09-12: this rule previously required adding the prefixes to **two hand-written
-  > lists inside `channelSync.ts`**. That structure is gone — deriving from the generator is the
-  > fix for the class, and the guard test is what replaced "remember to update both".
-  > A stored row from before `nameSource` existed still falls back to the old shape check once,
-  > then is stamped `platform` and never consults it again.
+> Two invariants were once filed here that are not about page-driven scraping. They moved to where
+> their own subject lives: **do not persist a signed CDN URL as identity or as a click target**
+> (rule 16 — it is a stored-row rule), and **a new platform's generated placeholder-name prefixes
+> go into `GENERATED_NAME_PREFIXES`** (`docs/DEVELOPMENT.md` §6 — it is a step in the add-a-platform
+> checklist, where the guidance is already more complete than the copy that lived here).
 
 > Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-9).
 
@@ -365,6 +354,12 @@ different things.
   written, so a fix that only touched the adapter cannot have taken effect.
 - A row outside the adapter's newest-N window can never acquire a fresh counterpart, so no sync
   will repair it — that is the case rule 22's Dexie migration exists for.
+- **Do not store a signed CDN URL as identity or as a click target.** Douyin covers carry
+  `x-expires`/`x-signature`, so such a URL is dead within hours while the row looks fine — the
+  defect only appears when the user clicks it. A Post's `originalUrl` must be the canonical work
+  page. Conversely, do NOT "clean" query strings off media URLs: stripping the signature 403s
+  every image. (Moved here from rule 9, which is about page-driven scraping — this is a rule about
+  what gets written.)
 
 > Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-16).
 
