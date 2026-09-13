@@ -254,7 +254,8 @@ RSS 源由用户自己填写，域名无法预知，所以只能运行时申请�
 
 ```bash
 # 1. 写发布说明。必须与版本号同名，且是真话不是占位符。
-cp docs/releases/v1.0.0.md docs/releases/v1.1.0.md   # 然后逐条改写
+#    以下面的命令取最新一份当模板（不要写死文件名——它会在下次发版时过期）。
+cp "$(ls docs/releases/*.md | sort -V | tail -1)" docs/releases/v1.1.0.md
 
 # 2. 先提交它。`npm version` 在有未提交改动时会直接拒绝执行（实测），
 #    所以 notes 不能等到版本提交里一起带。
