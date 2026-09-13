@@ -210,3 +210,58 @@ describe('xiaohongshu — parsing a captured profile page', () => {
     expect(res.error?.message).not.toContain('页面结构可能已调整');
   });
 });
+
+/**
+ * The `asRecord(a) || asRecord(b)` idiom, which is dead code.
+ *
+ * `asRecord()` returns `{}` for a miss and `{}` is truthy, so the right-hand side
+ * is never reached: the fallback reads as working and has never once run. Rule 15
+ * records this shape appearing three times already; `resolveAuthorMeta` held two
+ * more, in the author-name path, where the consequence is a wrong author rather
+ * than a crash — and the fixture always supplies `userPageData.basicInfo` and a
+ * `noteCard.user`, so nothing exercised either one.
+ *
+ * The assertions below are on the *author the user sees*, which is what the
+ * fallback exists to produce. They fail on the old code and pass on `firstFilled`.
+ */
+describe('xiaohongshu — author fallbacks that used to be unreachable', () => {
+  const note = {
+    id: '649c1f2e0000000012034567',
+    noteCard: { displayTitle: 'T', type: 'normal', time: 1686900000000 },
+  };
+
+  it('falls back to userProfile.basicInfo when userPageData.basicInfo is absent', async () => {
+    // The page carried the author under the other key; the fallback to it was dead.
+    served.push({
+      match: '/user/profile/',
+      body: pageWith({
+        user: {
+          userProfile: { basicInfo: { nickname: '备用昵称', images: 'https://sns-avatar-qc.xhscdn.com/a.jpg' } },
+          notes: [[note]],
+        },
+      }),
+    });
+
+    const res = await fetchLatest();
+
+    expect(res.authorMeta?.name).toBe('备用昵称');
+  });
+
+  it('falls back to the note\'s own user block when noteCard.user is absent', async () => {
+    // `sampleUserRaw` is found via `n.user.nickname`, then read from
+    // `noteCard.user` first — which is empty here, so only the second path can
+    // name the author.
+    served.push({
+      match: '/user/profile/',
+      body: pageWith({
+        user: {
+          notes: [[{ ...note, user: { nickname: '笔记作者', avatar: 'https://sns-avatar-qc.xhscdn.com/b.jpg' } }]],
+        },
+      }),
+    });
+
+    const res = await fetchLatest();
+
+    expect(res.authorMeta?.name).toBe('笔记作者');
+  });
+});

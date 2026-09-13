@@ -125,14 +125,25 @@ export function resolveAuthorMeta(
   channel: Channel,
 ): { name: string; avatar: string } {
   const stateUser = asRecord(state.user);
-  const basicInfo =
-    asRecord(asRecord(stateUser.userPageData).basicInfo) ||
-    asRecord(asRecord(stateUser.userProfile).basicInfo);
+  // `asRecord(a) || asRecord(b)` is dead — `asRecord` returns `{}`, and `{}` is
+  // truthy, so the second path is never reached. Both of these read as working
+  // fallbacks and neither has ever run; the fixture happens to carry
+  // `userPageData.basicInfo` and a `noteCard.user`, so nothing exercised them.
+  const basicInfo = firstFilled(
+    asRecord(asRecord(stateUser.userPageData).basicInfo),
+    asRecord(asRecord(stateUser.userProfile).basicInfo),
+  );
   const noteRecords = rawNotes.map((n) => asRecord(n));
+  // `str(asRecord(X).nickname) || str(asRecord(Y).nickname)` is fine — both sides
+  // are strings, so `||` means what it says here. Only the `asRecord(..) || …`
+  // shape is dead.
   const sampleUserRaw = noteRecords.find(
     (n) => str(asRecord(asRecord(n.noteCard).user).nickname) || str(asRecord(n.user).nickname),
   );
-  const sampleUser = asRecord(asRecord(sampleUserRaw?.noteCard).user) || asRecord(sampleUserRaw?.user);
+  const sampleUser = firstFilled(
+    asRecord(asRecord(sampleUserRaw?.noteCard).user),
+    asRecord(sampleUserRaw?.user),
+  );
   const userId = channel.accountId.trim();
   const name =
     str(basicInfo.nickname) ||
