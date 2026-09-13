@@ -22,7 +22,7 @@
  *
  * Usage:
  *   node e2e/avatar-probe.mjs <url> [<url> ...]
- *   CHROME_PATH=/path/to/chrome node e2e/avatar-probe.mjs https://fantia.jp/fanclubs/130541
+ *   CHROME_PATH=/path/to/chrome node e2e/avatar-probe.mjs https://fantia.jp/fanclubs/900001
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

@@ -39,10 +39,10 @@ const channel: Channel = {
   id: 'fantia:yume',
   creatorId: 'c1',
   platform: 'fantia',
-  accountId: '130541',
-  displayName: '迷夜ゆめ',
+  accountId: '900001',
+  displayName: '示例创作者',
   status: 'idle',
-  profileUrl: 'https://fantia.jp/fanclubs/130541',
+  profileUrl: 'https://fantia.jp/fanclubs/900001',
 };
 
 /** Detail payloads the mock serves, keyed by post id — verbatim captures each. */
@@ -138,7 +138,7 @@ describe('fantia — a Quill-delta comment becomes readable text', () => {
     expect(content).not.toContain('insert');
     expect(content).not.toContain('attributes');
     // The body text survives.
-    expect(content).toContain('まよ～');
+    expect(content).toContain('こんにちは～');
     expect(content.length).toBeGreaterThan(40);
   });
 

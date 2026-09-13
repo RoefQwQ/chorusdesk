@@ -143,8 +143,8 @@ describe('fantia — the avatar is the fanclub icon, not the OGC cover', () => {
     // picks a stranger — the id in the src is what identifies the owner.
     document.body.innerHTML = `
       <img class="img-fluid img-circle replace-if-no-image lazyloaded"
-           alt="まよいのうしろのいりぐち♡Yume Mayoi Fanclub"
-           src="https://c.fantia.jp/uploads/fanclub/icon_image/130541/thumb_webp_2961a61a.webp">
+           alt="サンプルクラブ♡Sample Fanclub"
+           src="https://c.fantia.jp/uploads/fanclub/icon_image/900001/thumb_webp_2961a61a.webp">
       <img class="img-fluid img-circle replace-if-no-image lazyload"
            alt="おずまのFantia (おずま)"
            src="https://fantia.jp/images/fallback/common/loading-md.jpg">
@@ -154,22 +154,22 @@ describe('fantia — the avatar is the fanclub icon, not the OGC cover', () => {
     `;
     // The injected script reads `window.location`; jsdom's default is localhost.
     Object.defineProperty(window, 'location', {
-      value: { hostname: 'fantia.jp', pathname: '/fanclubs/130541', href: 'https://fantia.jp/fanclubs/130541' },
+      value: { hostname: 'fantia.jp', pathname: '/fanclubs/900001', href: 'https://fantia.jp/fanclubs/900001' },
       writable: true,
     });
 
     const { parsed, extractActiveTabAuthorMeta, detectedAuthorMeta } = usePageDetection();
     parsed.value = {
       platform: 'fantia',
-      accountId: '130541',
-      cleanUrl: 'https://fantia.jp/fanclubs/130541',
-      suggestedName: 'Fantia俱乐部_130541',
+      accountId: '900001',
+      cleanUrl: 'https://fantia.jp/fanclubs/900001',
+      suggestedName: 'Fantia俱乐部_900001',
     };
-    await extractActiveTabAuthorMeta(1, 'https://fantia.jp/fanclubs/130541');
+    await extractActiveTabAuthorMeta(1, 'https://fantia.jp/fanclubs/900001');
 
     // Assert on what the user ends up seeing, not on the script's return value:
     // the composable is what writes the avatar into the follow form.
-    expect(detectedAuthorMeta.value.avatar).toContain('fanclub/icon_image/130541/');
+    expect(detectedAuthorMeta.value.avatar).toContain('fanclub/icon_image/900001/');
     expect(detectedAuthorMeta.value.avatar).not.toContain('plan/image');
     expect(detectedAuthorMeta.value.avatar).not.toContain('loading-md');
   });

@@ -18,7 +18,7 @@ function post(content: string): Post {
     creatorId: 'c1',
     channelId: 'fantia:yume',
     platform: 'fantia',
-    title: '【無料】ふとももすりすり',
+    title: '【無料】サンプル作品',
     content,
     mediaList: [],
     originalUrl: 'https://fantia.jp/posts/4236630',

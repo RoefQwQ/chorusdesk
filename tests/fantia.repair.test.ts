@@ -25,7 +25,7 @@ import type { Post } from '../src/types';
  * which is exactly what the user kept seeing.
  */
 
-const STORED_TITLE = '【無料】ふとももすりすり';
+const STORED_TITLE = '【無料】サンプル作品';
 const REAL_BODY = '本編→https://fantia.jp/posts/3210183';
 
 /** The exact bytes of the user's stored row, from the screenshot. */
@@ -73,7 +73,7 @@ describe('fantia stored-row repair', () => {
 
   it('leaves an author-written body alone even when it is short', () => {
     // A one-line post the author actually wrote is content, not an artefact.
-    expect(shouldRepairStoredContent(fantiaPost('おまけ画像集2か月分！'), fantiaPost(REAL_BODY))).toBe(false);
+    expect(shouldRepairStoredContent(fantiaPost('サンプル作品D'), fantiaPost(REAL_BODY))).toBe(false);
   });
 
   it('leaves a plain body that merely starts with a brace alone', () => {

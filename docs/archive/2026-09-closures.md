@@ -943,10 +943,10 @@ B23. **分层总评（逐条验证通过）**：12 个 adapter 零 db import（�
 **日志给出的事实**（`local://paste-2.md`，03:30:37–40）：
 
 ```
-fantia/迷夜ゆめ 开始同步（常规） | 上限 10 条，水位线 2026/9/13 11:29:37
+fantia/示例创作者 开始同步（常规） | 上限 10 条，水位线 2026/9/13 11:29:37
 bgFetch: fantia.jp → HTTP 200 | 23313 字符        ← 俱乐部列表成功
 bgFetch: fantia.jp → HTTP 403 | 26 字符           ← 详情请求被拒（共 3 次）
-channelSync: fantia/迷夜ゆめ 同步完成 | 新增 0 条，平台返回 6 条，hasMore=false
+channelSync: fantia/示例创作者 同步完成 | 新增 0 条，平台返回 6 条，hasMore=false
 ```
 
 **真根因（三条叠加，全部有实测或日志支撑）**
