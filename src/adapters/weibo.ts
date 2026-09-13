@@ -1,7 +1,7 @@
 import type { Channel, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
-import { fetchError } from './types';
+import { fetchError, httpStatusError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { asRecord } from '../utils/json';
 import { errorMessage } from '../utils/errorMessage';
@@ -191,10 +191,14 @@ export const weiboAdapter: PlatformAdapter = {
       });
 
       if (!res.ok) {
+        // 403 keeps its own wording (the weibo-specific "open weibo.com and log
+        // in" advice is what the user needs); every other status goes through the
+        // shared classifier, so a 429 here starts a cool-down instead of being
+        // reported as a connection problem.
         if (res.status === 403) {
           return { posts: [], error: fetchError('auth', '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
         }
-        return { posts: [], error: fetchError('network', `微博接口响应异常 HTTP ${res.status}`) };
+        return { posts: [], error: httpStatusError(res.status, '微博') };
       }
 
       if (typeof res.data === 'string' && (res.data.includes('Sina Visitor System') || res.data.includes('passport.weibo.com') || res.data.trim().startsWith('<'))) {

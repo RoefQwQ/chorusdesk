@@ -160,7 +160,7 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
   `backupService`) — including the whole recycle-bin lifecycle (fix queue #10; resolved — do
   not restate it as unfinished). What still imports `src/infrastructure/db/*` directly from
   UI is the bare `db` handle, `settingsRepository`, `statsService` and media maintenance
-  (`healBrokenPostMedia`, `cleanupOldPosts`) — **8 usage sites as of 2026-09-11, down from 9**,
+  (`healBrokenPostMedia`, `cleanupOldPosts`) — **7 usage sites as of 2026-09-13, down from 8**,
   in exactly these files (`grep -rn "infrastructure/db" entrypoints/` reproduces it; count the
   *usages*, not the files, and `import type` does not count — a type-only import crosses
   nothing at runtime):

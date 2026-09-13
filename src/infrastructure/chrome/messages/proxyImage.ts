@@ -1,13 +1,7 @@
 import { toSecureMediaUrl } from '../../../utils/media';
 import { devLog } from '../../../utils/devLog';
 import { errorMessage } from '../../../utils/errorMessage';
-import { hostMatches, isPlatformHost, parseFetchableUrl, resolveMediaReferer } from './hosts';
-
-/**
- * Xiaohongshu media hosts: images from these need the authenticated session and
- * the `sns-img-*` mirror rewrite, unlike every other platform's CDN.
- */
-const XHS_MEDIA_HOSTS = ['xhscdn.com', 'xhscdn.net', 'xiaohongshu.com'] as const;
+import { isPlatformHost, isXhsMediaHost, parseFetchableUrl, resolveMediaReferer } from './hosts';
 
 // Minimal local types for the PROXY_IMAGE runtime-message contract. They only
 // describe what this handler reads / replies with — the protocol shape itself
@@ -147,8 +141,7 @@ export function handleProxyImage(message: ProxyImageMessage, sendResponse: SendR
       // request is still bounded by `parseFetchableUrl` (http(s) only, no
       // embedded credentials) and by the sender guard on the message itself.
       const onPlatform = isPlatformHost(target.hostname);
-      const isXhs =
-        onPlatform && XHS_MEDIA_HOSTS.some((domain) => hostMatches(target.hostname, domain));
+      const isXhs = onPlatform && isXhsMediaHost(target.hostname);
       // Referer per platform, matched on the parsed hostname — the previous
       // `url.includes('weibo.com')` test would have matched a query parameter.
       // A host we know nothing about gets none: sending another platform's

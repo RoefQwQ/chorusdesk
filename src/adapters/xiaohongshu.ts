@@ -1,6 +1,6 @@
 import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
-import { fetchError } from './types';
+import { fetchError, httpStatusError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { MAX_RESPONSE_CHARS } from '../infrastructure/chrome/messages/bgFetch';
 import { toSecureMediaUrl } from '../utils/media';
@@ -36,9 +36,12 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       });
 
       if (!res.ok) {
+        // Every status used to be reported as `network`, so a 429 (the platform
+        // asking us to stop) never entered a cool-down and a 404 read as a
+        // connection problem. The shared classifier separates them.
         return {
           posts: [],
-          error: fetchError('network', `小红书页面访问异常 HTTP ${res.status}`),
+          error: httpStatusError(res.status, '小红书'),
         };
       }
 

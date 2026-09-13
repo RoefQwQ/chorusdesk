@@ -240,6 +240,21 @@ export interface PlatformAdapter {
 
 `fetchError(code, message)`：`FetchError` 的**唯一构造入口**（adapter 一律用它，不要手写字面量）——把「错误对象长这样」收在一处，改形状时不必搜全仓。
 
+`httpStatusError(status, platform)`：**HTTP 状态 → `FetchErrorCode` 的唯一分类入口**。
+`code` 不是文案而是策略（`rate_limit` 起**持久化**平台冷却并把 adapter 文案换成固定句；
+`not_found` 会让历史挖掘写 `__END__`，此后该频道再也不能挖），所以各 adapter 各写各的必然分叉——
+实测修复前：weibo 只有 403 特判、其余（**含 429**）一律 `network`；xiaohongshu 每种状态都 `network`；
+pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**429 报成 network 就不会进冷却**，
+而冷却正是规则 19 存在的理由。映射：`429→rate_limit`、`401/403→auth`、`404/410→not_found`、
+其余 `4xx→network`、`5xx→network`。
+> `not_found` 会让历史挖掘写终态，因此**不要**拿它表示「这一页是空的」——传输层 404 是关于
+> 这次请求的证据，不等于频道已挖尽（签名 URL 过期同样 404）。翻页信号才可以说「没有更多」。
+
+`HttpStatusError` + `toFetchError(err, platform, fallback)`：给「整个 try 包住采集」的 adapter
+（pixiv / fantia）用。它们只能在最外层 catch 分类，而那里看不到状态，于是状态一律被压成 `network`。
+抛 `HttpStatusError` 可保留 HTTP 类，外层 `toFetchError` 用它定 `code`、用 adapter 自己的消息作文案；
+非 `HttpStatusError` 的抛出意味着响应没解析成功，归 `parse`（缺字段是 schema 变化，不是网络故障）。
+
 `src/platform/registry.ts`（真实实现）：`ADAPTER_MAP` 记录 9 个平台 adapter；模块只导出一个函数 `getAdapter(platform)`，找不到时返回 `undefined`（channelSync 将其归类为 unsupported 错误，不静默回退）。没有运行时注册入口——新增平台就是在 `ADAPTER_MAP` 里加一行。
 
 各平台能力现状（`fetchLatest` 为必实现）：
@@ -347,6 +362,7 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
 ### 4.6 工具层 `src/utils/`
 
 - `media.ts`：`toSecureMediaUrl()`（补 `https:`、升级 `http:`、小红书 avatar 归一化到 `sns-avatar-qc.xhscdn.com`）；`proxyImage(url)`（`PROXY_IMAGE` 消息 → 返回 base64 data URL，带进程内 `imageProxyCache` Map 与 `pendingProxyFetches` 去重）；`isImageFailed/markImageFailed` 失败记忆。
+  > 主机判定走 `hosts.ts` 的 `isXhsMediaHost`（解析后的主机名），**不是 `includes()`**——这里决定的是「去哪台主机取这张图」，与规则 1 同类。修复前实测三个误判：`evil.example/avatar/xhscdn.com.jpg`（路径里带域名）、`xhscdn.com.attacker.tld`（域名当标签前缀）、`notxhscdn.com`（后缀伪装），三者都会被改写到平台 CDN 上。三个域名原本在本文件与 `proxyImage.ts` 各写一份，现由 `hosts.ts` 的 `XHS_MEDIA_HOSTS` 单点声明（规则 35）。
 - `timestamp.ts`：`toEpochMs(ts)` / `toEpochMsOr(ts, fallback)`。`Post.publishedAt` 的契约是 **Epoch ms**，但部分平台给秒，此前 4 处展示代码各自写 `ts < 1e12 ? ts*1000 : ts` 的猜测。**猜测只此一份**：≥1e12 视为 ms，否则视为秒；缺失/非有限/非正数返回 `null`（调用方渲染「未知时间」，而不是把 `NaN` 渲染成 Invalid Date、把 `0` 渲染成 1970）。新增读写时间戳的代码一律走这里，不要新写启发式。
 - `urlParser.ts`：`parseProfileUrl(rawUrl): ParsedProfile | null`，`ParsedProfile { platform, accountId, cleanUrl, suggestedName?, isContentUrl? }`；支持 `feed://` 前缀、RSS 特征（`.xml/.rss/.atom`、`/feed`、rsshub、`?feed` 等）与全部平台主页形态；`chrome://` 等内部页跳过 DOM 注入由调用方判断。**主机判定走 `hostMatches`（不是子串）**——`host.includes('bilibili.com')` 也匹配 `bilibili.com.attacker.example`，而这个判定决定频道建给哪个平台（AGENTS 规则 1）；`tests/urlParser.test.ts` 有 12 个 attacker 主机用例。同时导出 **`GENERATED_NAME_PREFIXES`**：本解析器会生成的 16 个占位名前缀，是 `channelSync` 占位名识别的唯一来源（见 §4.3 与 AGENTS 规则 9）。
 - `http.ts` 已移入 `src/infrastructure/chrome/http.ts`（它调用 `performBgFetch` 读 `chrome.cookies`，本就属于 chrome 层；见 §4.5/§5.4）。

@@ -1,4 +1,5 @@
 import { devLog } from './devLog';
+import { isXhsMediaHost } from '../infrastructure/chrome/messages/hosts';
 
 /**
  * Normalize a media/image URL so it is always an absolute, loadable https URL.
@@ -22,21 +23,43 @@ export function toSecureMediaUrl(url?: string | null): string {
     trimmed = trimmed.replace(/^http:/i, 'https:');
   }
 
-  // Normalize Xiaohongshu URLs without breaking paths
-  if (
-    trimmed.includes('xhscdn.com') ||
-    trimmed.includes('xhscdn.net') ||
-    trimmed.includes('xiaohongshu.com')
-  ) {
-    if (trimmed.includes('/avatar/')) {
-      const m = trimmed.match(/\/avatar\/[a-zA-Z0-9_.-]+/);
-      if (m) {
-        return `https://sns-avatar-qc.xhscdn.com${m[0]}`;
-      }
+  // Normalize Xiaohongshu avatars without breaking paths.
+  //
+  // Matched on the PARSED HOSTNAME, never on `includes(...)`. The substring form
+  // it replaces also matched hosts that merely mention the domain — measured:
+  //   https://evil.example/avatar/xhscdn.com.jpg       → rewritten onto the XHS CDN
+  //   https://xhscdn.com.attacker.tld/avatar/abc       → rewritten onto the XHS CDN
+  //   https://notxhscdn.com/avatar/abc                 → rewritten onto the XHS CDN
+  // In every case the original host was silently replaced by a platform host for
+  // an image that had nothing to do with Xiaohongshu, so the right image was
+  // never fetched. Same category as rule 1: any decision that changes where a
+  // request goes must be made on a parsed hostname.
+  if (isXhsMediaHost(hostnameOf(trimmed))) {
+    const m = pathnameOf(trimmed)?.match(/\/avatar\/[a-zA-Z0-9_.-]+/);
+    if (m) {
+      return `https://sns-avatar-qc.xhscdn.com${m[0]}`;
     }
   }
 
   return trimmed;
+}
+
+/** Hostname of an absolute http(s) URL, or `''` when it does not parse. */
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/** Pathname of an absolute http(s) URL, or `null` when it does not parse. */
+function pathnameOf(url: string): string | null {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return null;
+  }
 }
 
 // In-memory cache for base64 / blob URLs proxied via background

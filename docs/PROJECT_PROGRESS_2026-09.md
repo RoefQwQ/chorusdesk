@@ -96,24 +96,41 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 细节、两处刻意偏离与验收证据见[队列总表](#p8交接队列与未来方向唯一待办入口)的「已完成（本轮）」。
 本节不再保留原文，避免两处各记一份。
 
-### 2. `FetchError` 分类仍可提高精度
+### 2. `FetchError` 分类仍可提高精度 — 已完成（2026-09-13）
 
-部分 adapter 使用宽范围 `try/catch`：
+原缺口（三条，均属实）：
 
 - JSON/XML parse error 可能归类为 network。
 - 未特殊处理的 401/403 可能归类为 network。
 - 平台返回格式变化可能没有归类为 parse。
 
-已解决的一半：写库失败不再冒充 `network`（新增 `storage` code，`isStorageFailure` 判定，
+已解决：写库失败不再冒充 `network`（新增 `storage` code，`isStorageFailure` 判定，
 `channelSync` 与 `batchSync` 共用；**错误码驱动平台冷却**，所以这不只是文案问题）；
 多源适配器（bilibili 等）在主源失败但仍有内容时返回 `degraded: true` + `warnings`，
 由 `channelSync` 记 warn 日志，「安静地少数据」因此可被看见。
 
-**剩余**：按 HTTP / 解析 / schema / timeout / transport 五阶段分别分类，以及 401/403 专门归类。
+**本轮（2026-09-13）把剩下的三条一起收掉**，方式是让 HTTP 状态只有一个分类入口
+`httpStatusError(status, platform)`（`src/adapters/types.ts`）。修复前实测的分叉：
 
-> **不要**通过复活 `FetchError.retryable` 来做这件事——该字段已于 2026-09-12 删除：
-> 全仓无读取方，行为一直由 `code` 决定；且「按可重试性重试」与规则 19 的冷却机制直接冲突
-> （检测到限流后继续猛打比不检测更糟），当时也无实测收益数据支撑。要按阶段重试应重新设计。
+| adapter | 修复前 | 后果 |
+|---|---|---|
+| weibo | 403→`auth`，**其余（含 429）→`network`** | 429 不进冷却 |
+| xiaohongshu | **每种状态→`network`** | 404/429 全被当成连接问题 |
+| pixiv / fantia | 状态塞进消息 → 外层 catch 归 `network` | parse 与 429 混为一谈 |
+
+**429 报成 `network` 是行为性缺陷**：`rate_limit` 才会起**持久化**冷却（规则 19），
+所以平台明确说「慢一点」时我们反而是当网络故障处理、继续按原速打。
+
+映射：`429→rate_limit`、`401/403→auth`、`404/410→not_found`、其余 `4xx→network`、`5xx→network`。
+「整个 try 包住采集」的 adapter（pixiv / fantia）抛 `HttpStatusError`，由 `toFetchError`
+在最外层按状态定 `code`、保留 adapter 自己的文案；非该异常的抛出归 `parse`（缺字段是
+schema 变化，不是网络故障）。
+
+**验证**：15 例（映射 6 + 解析 4 + **四个 adapter 的端到端 429** 4 + 构造器 1），
+变异 4/4 全杀（429 归 network、`toFetchError` 丢状态、4xx 全归 auth、xiaohongshu 退回 network）。
+
+**仍然不做**：`FetchError.retryable`。该字段 2026-09-12 已删（全仓无读取方；且「按可重试性
+重试」与规则 19 的冷却直接冲突——检测到限流后继续猛打比不检测更糟）。要按阶段重试应重新设计。
 
 ### 3. 平台模块的测试覆盖不均
 
@@ -155,10 +172,10 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 **有意不补的**（记录以避免被当成疏漏）：`youtube.ts` 的 RSS 映射、`douyin` 的注入时序细节
 （只能真机观察）。见 [DEVELOPMENT.md](DEVELOPMENT.md) §10。
 
-### 4. 规则 8 的直连台账仍有 8 处
+### 4. 规则 8 的直连台账仍有 7 处
 
-`entrypoints/ → src/infrastructure/db/*` 的直接 import，当前 **8 处使用**（不是 8 个文件，
-`import type` 不计）：
+`entrypoints/ → src/infrastructure/db/*` 的直接 import，实测 **7 处使用**（不是 7 个文件，
+`import type` 不计；`grep -rn "infrastructure/db" entrypoints/ | grep -v "import type"`）：
 
 | 文件 | 用到什么 |
 |---|---|
@@ -225,7 +242,8 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 
 ### 9. 身份边界没桥接（数据完整性）
 
-- **RSS**：`rss_${stableHash(guid)}`（`rss.ts:199`），而 `guid` 只保证 **feed 内**唯一。
+- ~~**RSS**：`rss_${stableHash(guid)}`（`rss.ts:199`），而 `guid` 只保证 **feed 内**唯一。~~
+  **已完成 2026-09-13**（`e86325a`）：身份改为 `hash(channelId + guid)`，存量行走适配器上报的显式配对迁移。原文留存：
   但 `Post.id` 与 `PostSuppression.postId` 都是**全库主键**。两个 feed 各发
   `<guid>1</guid>` → 同一篇内容；更糟的是在 A 上「彻底删除」会**顺带压制 B**。
   这不是「也许碰撞」，是两层 scope 没对齐。
@@ -262,15 +280,19 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 ### 12. 工程质量项（不直接致错，抬高出错概率）
 
 - **E2E 一个 click 卡死一整串**：`backup.export` 失败 → backup 4 步 + alarm 4 步全 skip。
-  实测偶发约 4 次跑挂 1 次，**两次 CI 红灯都是它**。
+  **根因已于 2026-09-13 修复**（`dismissDialogs` 竞态，规则 34：失败信息自称「环境问题」是错的）；
+  **拆分仍未做**，所以放大效应还在：一次 click 失败仍会 skip 后面 8 步。
 - **`PROXY_IMAGE` 无大小/MIME 上限**（`arrayBuffer()` 后直接 base64），
   而它现在允许任意 http(s) 主机（为 RSS 图片）——这是合理的产品行为，但没有 byte ceiling。
-- **`toSecureMediaUrl` 仍用 `includes()`** 判小红书域名（`media.ts:27-29`），
-  与规则 1 的主机名纪律不一致（此处不决定凭据，故严重度低，但属双轨）。
-- **DNR 186 行零测试**，且 `removeRuleIds` / `addRules` 两处手维护规则 id。
+- ~~**`toSecureMediaUrl` 仍用 `includes()`** 判小红书域名。~~ **已完成 2026-09-13**：
+  实测三个误判（路径里带域名、`xhscdn.com.evil.tld`、`notxhscdn.com`）都会把陌生主机的图
+  改写到平台 CDN 上，且列表在 `media.ts` 与 `proxyImage.ts` 各写了一份——已解析化 + 收敛到 `hosts.ts`。
+- **DNR 186 行零测试**，且 `removeRuleIds` / `addRules` 两处手维护规则 id。**仍未做。**
 - **无 MessageMap**：改一条消息要同步「五件套」，靠文档提醒。
 - **新增平台 8–10 个散点**；`PLATFORM_REGISTRY` 不是 `Record<KnownPlatform, …>`。
-- **release.yml 跑 `npm test` 而 CI 跑 `test:coverage`**，注释却写「Same gates as CI」。
+- ~~**release.yml 跑 `npm test` 而 CI 跑 `test:coverage`**，注释却写「Same gates as CI」。~~
+  **已完成 2026-09-13**（规则 35）：已对齐，并有 `tests/workflows.gateParity.test.ts` 从两个
+  workflow 自身推导门禁清单来兜底。
 
 ---
 
@@ -306,10 +328,10 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | 层 | 现在的缺口 | 为什么排这个位置 |
 |---|---|---|
 | **1. 状态正确性** | 同步入口之间没有协调：`updateChannel` 无任何并发锁，`platformLastFinished` 是 batch 局部变量。同频道可被 alarm / 手动 / 深挖 / popup 同时同步，**后完成的覆盖前者的 `nextCursor`**——写错数据且**用户看不见** | 会静默写错状态，且没有任何观测手段能发现 |
-| **2. 数据完整性** | 备份校验已完成；剩余是 RSS 的 `guid` 只在 feed 内唯一却当全局主键（删除 A 可能顺带压制 B），媒体缓存的文件名截取 postId 前 16 位 | 会静默损坏或丢失用户数据 |
-| **3. 能力错配** | 模块各自"设计正确"却组合起来互相否定：Twitter 明确不支持 SW，autoSync 不筛；popup 首次抓取也走 SW。取消信号 caller ∪ deadline 是二选一。聚合层把 batch 结果丢掉（10/10 失败也记"完成"） | 功能时好时坏，表现为"平台抽风" |
+| **2. 数据完整性** | 备份校验、RSS 身份作用域、`FetchError` 分类、`toSecureMediaUrl` 主机判定 **均已完成**（2026-09-13）；剩余仅媒体缓存的文件名截取 postId 前 16 位（**无老用户，已降级为不急**） | 这一层基本收口 |
+| **3. 能力错配** | 取消信号与聚合诚实 **已完成**；**剩余 #6 Platform capability 模型**——Twitter 明确不支持 SW 而 autoSync 不筛，popup 首次抓取走 SW 也必然撞上 | **当前最大的一项**：功能时好时坏，表现为"平台抽风" |
 | **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条），且**先**全库跑一遍 `healBrokenPostMedia` | 每次都付税，随历史增长恶化 |
-| **5. 工程质量** | E2E 一个 click 让 backup+alarm 全 skip；无 MessageMap；DNR 零测试且两处手维护；新增平台 8–10 个散点 | 不直接致错，但抬高下一处缺陷的概率 |
+| **5. 工程质量** | E2E 竞态根因与 release/CI 门禁一致性 **已完成**；剩余 E2E 拆分、MessageMap、DNR 测试、新增平台散点 | 不直接致错，但抬高下一处缺陷的概率 |
 
 **明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流、待办迁 Issues
 （单人维护，不引入协作开销）、往微交互追加工程资源（AUDIT P3 冻结）。
@@ -445,10 +467,10 @@ Twitter 标签页路径真的跑通了。
 | **9** | ~~**后端聚合诚实**：autoSync 把结果丢了~~ **已完成 2026-09-13** | 能力错配 | autoSync 报 `failed/total` |
 | **10** | **Feed 数据分页**（IndexedDB query 取代全量 `toArray`） | 规模 | 全库进 Vue 内存，只显示 36 条 |
 | **11** | ~~**E2E 拆独立 scenario**~~ **根因已修 2026-09-13**（见「已知陷阱」）；拆分仍未做 | 工程质量 | `dismissDialogs` 竞态；本地 3/3 失败 → 5/5 通过 |
-| **12** | **`FetchError` 五阶段细分** | 数据完整性 | 本轮 A2，未做 |
+| **12** | ~~**`FetchError` 五阶段细分**~~ **已完成 2026-09-13** | 数据完整性 | `httpStatusError` 唯一入口；429 不再被当成网络故障 |
 | **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短**（无老用户，已降级为「不急」）** |
 | **14** | **DNR 规则表驱动 + 测试** | 工程质量 | 186 行零测试；remove/add 两处手维护 |
-| **15** | **`toSecureMediaUrl` 的 `includes()` → `hostMatches`** | 数据完整性 | `media.ts` 仍有 4 处 `includes(` |
+| **15** | ~~**`toSecureMediaUrl` 的 `includes()` → `hostMatches`**~~ **已完成 2026-09-13** | 数据完整性 | 改用解析后的主机名；XHS 列表收敛到 `hosts.ts` |
 | **16** | **MessageMap 类型协议** | 工程质量 | 完全没有；改一条消息要同步 5 处 |
 | **17** | **Platform 声明性事实单一来源** | 工程质量 | 新增平台仍 8–10 个散点 |
 | **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
@@ -469,6 +491,7 @@ Twitter 标签页路径真的跑通了。
 - **批次 4（工程质量）**：#11 E2E 根因已修、#24 已完成；**#11 的拆分仍未做**（一个 click 失败
   仍会 skip 掉后面 8 步——根因修好后这个放大效应才成为主要遗留问题）。
 - **批次 5（证据）**：#18/#19/#20。
+- **批次 6（能力错配）**：仅剩 **#6**（Platform capability 模型）。
 - **长期**：#10 分页重构、#16 MessageMap、#17 平台单一来源、#13 缓存 identity。
 
 ---

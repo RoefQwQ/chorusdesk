@@ -101,6 +101,27 @@ export function resolveMediaReferer(hostname: string): string | undefined {
 }
 
 /**
+ * Xiaohongshu media hosts, declared in the single-source file with everything else.
+ *
+ * Images from these need the authenticated session and the `sns-avatar-qc` /
+ * `sns-img-*` mirror rewrites, unlike every other platform's CDN. It lives here
+ * because it *was* declared in two places: `proxyImage.ts` kept the list and
+ * `utils/media.ts` hand-wrote the same three domains again. A third copy was the
+ * next edit's shape (rule 35), and **which host an image is fetched from** is a
+ * decision this list gates — the substring test it replaced rewrote
+ * `https://evil.example/avatar/xhscdn.com.jpg` onto the platform CDN.
+ *
+ * A subset of `PLATFORM_HOSTS` by construction; asserted in
+ * `tests/hosts.singleSource.test.ts`.
+ */
+export const XHS_MEDIA_HOSTS = ['xhscdn.com', 'xhscdn.net', 'xiaohongshu.com'] as const;
+
+/** True when `hostname` is one of the Xiaohongshu media hosts. */
+export function isXhsMediaHost(hostname: string): boolean {
+  return XHS_MEDIA_HOSTS.some((domain) => hostMatches(hostname, domain));
+}
+
+/**
  * Parse a request URL and reject anything unsuitable for a background fetch:
  * non-http(s) schemes (`data:`, `file:`, `blob:`, …) and embedded credentials
  * (`https://user:pass@host/`, which some servers echo into logs).

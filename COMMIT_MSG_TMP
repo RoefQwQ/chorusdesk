@@ -1,0 +1,53 @@
+fix(adapters): one HTTP-status classifier — a 429 was reported as a network fault
+
+`code` is policy, not a label: `rate_limit` starts a PERSISTED platform cool-down
+(batchSync → noteRateLimit) and replaces the adapter's message with a hardcoded
+wait; `not_found` makes a history dig write `__END__`, permanently stopping that
+channel from digging. Every other code changes only the wording.
+
+Each adapter therefore classified HTTP status its own way, and they disagreed:
+
+  weibo        403 → auth, everything else (INCLUDING 429) → network
+  xiaohongshu  every status → network
+  pixiv/fantia threw the status into a message; the outer catch made it network
+
+So a platform answering `429 Too Many Requests` — the one response rule 19 exists
+for — was reported as a connection problem and never entered a cool-down. We kept
+requesting at full speed while the platform was asking us to stop.
+
+`httpStatusError(status, platform)` is now the single mapping: `429 → rate_limit`,
+`401/403 → auth`, `404/410 → not_found`, other `4xx → network`, `5xx → network`.
+`404/410` is deliberately NOT used for an empty page: a transport-level 404 is
+evidence about the request, not proof a channel is exhausted, and `not_found`
+reaches `statesEndOfHistory`.
+
+Adapters that wrap a whole try around acquisition can only classify in that catch,
+where no status is visible — which is why pixiv/fantia flattened it. They now throw
+`HttpStatusError`, and `toFetchError(err, platform, fallback)` takes the class from
+the status while keeping the adapter's own message. A plain throw means the response
+did not match the parser (`parse`), which is the other half of the queue entry:
+a missing or renamed field is a schema change, not a network fault.
+
+Also #15, same rule-1 category one layer down: `toSecureMediaUrl` decided where an
+image is fetched from with `includes(...)`. Measured before the fix — all three
+rewritten onto the platform CDN:
+
+  https://evil.example/avatar/xhscdn.com.jpg   (domain in the path)
+  https://xhscdn.com.attacker.tld/avatar/abc   (domain as a label prefix)
+  https://notxhscdn.com/avatar/abc             (suffix spoof)
+
+Now matched on the parsed hostname, and the three domains — which were written out
+in `media.ts` AND in `proxyImage.ts` — live once in `hosts.ts` (`XHS_MEDIA_HOSTS`,
+a subset of `PLATFORM_HOSTS`, asserted).
+
+Tests: 15 for the classifier (mapping, error resolution, and the four HTTP-fetching
+adapters driven with a real `bgFetch` answering 429) and 8 for the host match.
+Mutation-verified 4/4 + 3/3, each with a named assertion: 429 → network,
+`toFetchError` losing the status, all 4xx → auth, xiaohongshu reverted to network;
+and for the media fix the substring form restored.
+
+ARCHITECTURE §4.2/§4.6 updated in the same commit (rule 33 — its test failed first,
+which is the point). Rule 8's usage count corrected to the measured 7.
+
+Gates: tsc + vue-tsc 0 errors, eslint 0 problems, 775 passed / 6 skipped,
+coverage ratchet green (channelSync.ts 79.48% branches vs 78).

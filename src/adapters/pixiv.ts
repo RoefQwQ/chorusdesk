@@ -1,9 +1,8 @@
 import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
-import { fetchError } from './types';
+import { HttpStatusError, toFetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
-import { errorMessage } from '../utils/errorMessage';
 
 export const pixivAdapter: PlatformAdapter = {
   platform: 'pixiv',
@@ -33,7 +32,7 @@ export const pixivAdapter: PlatformAdapter = {
       ]);
 
       if (!res.ok) {
-        throw new Error(`Pixiv 接口响应异常: HTTP ${res.status}`);
+        throw new HttpStatusError(res.status, `Pixiv 接口响应异常: HTTP ${res.status}`);
       }
 
       let authorName = channel.displayName;
@@ -121,10 +120,11 @@ export const pixivAdapter: PlatformAdapter = {
         hasMore,
       };
     } catch (err: unknown) {
-      const message = errorMessage(err);
+      // The status decides the class (429 → a real cool-down, 401/403 → auth);
+      // a plain throw means the response did not parse, which is `parse`.
       return {
         posts: [],
-        error: fetchError('network', message || 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)'),
+        error: toFetchError(err, 'Pixiv', 'Pixiv 抓取失败 (请确认当前浏览器是否登录 Pixiv)'),
       };
     }
   },

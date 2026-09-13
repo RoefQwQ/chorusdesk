@@ -63,6 +63,90 @@ export function fetchError(code: FetchErrorCode, message: string): FetchError {
   return { code, message };
 }
 
+/**
+ * Classify an HTTP failure status into a `FetchErrorCode`.
+ *
+ * Why this is shared rather than left to each adapter: `code` is not a label, it
+ * is policy. `rate_limit` starts a PERSISTED platform cool-down (rule 19) and
+ * replaces the adapter's message with a hardcoded 「请等待 2~3 分钟」; `not_found`
+ * makes a history dig write the `__END__` sentinel, which permanently stops the
+ * channel from ever digging again. Every other code changes only the wording.
+ *
+ * The adapters each hand-classified this and disagreed. Measured before this
+ * existed: weibo mapped 403 to `auth` and everything else — including 429 — to
+ * `network`; xiaohongshu mapped every status to `network`; pixiv and fantia threw
+ * the status into a message that the outer catch turned into `network`. So a
+ * platform answering `429 Too Many Requests` was reported as a connection problem
+ * and **never entered a cool-down**, which is the one response rule 19 exists for.
+ *
+ * `4xx` is deliberately specific:
+ *  - `401`/`403` are `auth`. Both mean "your session is not good enough", and the
+ *    user can act on that; calling them `network` sends them to check their wifi.
+ *  - `429` is `rate_limit`. The platform is telling us to stop for a while.
+ *  - `404`/`410` are `not_found` — the platform says the thing is not there.
+ *    **Caveat, and it is why this is not used for an empty page:** `not_found`
+ *    reaches `statesEndOfHistory`, so on a history dig it writes `__END__`. A
+ *    transport-level 404 is evidence about the REQUEST, not proof the channel is
+ *    exhausted (an expired signed URL answers 404 too). Adapters that dig should
+ *    keep saying "no more" only from a real pagination signal.
+ *  - other `4xx` is `network`: a request the server refused for its own reasons,
+ *    which retrying identically will not fix and which is not the user's session.
+ * `5xx` is `network` — the platform is broken, not the request.
+ *
+ * `platform` only shapes the message so the user knows where to look.
+ */
+export function httpStatusError(status: number, platform: string): FetchError {
+  if (status === 429) {
+    return fetchError('rate_limit', `${platform} 触发了请求频率限制（HTTP 429），已进入冷却。`);
+  }
+  if (status === 401 || status === 403) {
+    return fetchError(
+      'auth',
+      `${platform} 拒绝了本次请求（HTTP ${status}）。通常表示浏览器未登录或登录已过期，请登录后重试。`,
+    );
+  }
+  if (status === 404 || status === 410) {
+    return fetchError('not_found', `${platform} 表示该内容不存在（HTTP ${status}）。`);
+  }
+  return fetchError('network', `${platform} 响应异常 HTTP ${status}。`);
+}
+
+/**
+ * An HTTP-status failure carrying its own wording, to be resolved by
+ * `toFetchError` at the adapter's outer catch.
+ *
+ * Adapters that wrap a whole `try` around the acquisition (pixiv, fantia) can
+ * only classify centrally in that catch, and `errorMessage(err)` there cannot see
+ * a status — so the status used to be flattened into `network` regardless of what
+ * it was. Throwing this instead keeps the class (`rate_limit`, `auth`, …) while
+ * letting the adapter keep the message its platform warrants.
+ */
+export class HttpStatusError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'HttpStatusError';
+    this.status = status;
+  }
+}
+
+/**
+ * Classify a caught error, preserving an `HttpStatusError`'s HTTP class.
+ *
+ * `toFetchError(err, 'Pixiv', 'Pixiv 抓取失败…')` — the adapter's own message is
+ * used when it threw a plain `Error` (parse/schema problems, which are `parse`),
+ * and the status decides the code when it threw an `HttpStatusError`.
+ */
+export function toFetchError(err: unknown, platform: string, fallbackMessage: string): FetchError {
+  if (err instanceof HttpStatusError) {
+    const classified = httpStatusError(err.status, platform);
+    // Status decides the class; the adapter's message explains THIS endpoint.
+    return { code: classified.code, message: err.message };
+  }
+  return fetchError('parse', err instanceof Error && err.message ? err.message : fallbackMessage);
+}
+
 export interface FetchResult {
   posts: Post[];
   authorMeta?: {

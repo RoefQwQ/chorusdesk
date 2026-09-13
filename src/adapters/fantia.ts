@@ -1,7 +1,7 @@
 import type { Channel, MediaItem, Post } from '../types';
 import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
 import { buildPost } from './buildPost';
-import { fetchError } from './types';
+import { fetchError, HttpStatusError, toFetchError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 
 interface FantiaThumb {
@@ -73,7 +73,7 @@ export const fantiaAdapter: PlatformAdapter = {
       });
 
       if (!res.ok) {
-        throw new Error(`Fantia API 响应异常: HTTP ${res.status}`);
+        throw new HttpStatusError(res.status, `Fantia API 响应异常: HTTP ${res.status}`);
       }
 
       let json: unknown;
@@ -180,11 +180,11 @@ export const fantiaAdapter: PlatformAdapter = {
         hasMore,
       };
     } catch (err: unknown) {
+      // Same as pixiv: an HTTP status keeps its class, anything else is `parse`
+      // (a missing/renamed field is a schema change, not a network fault).
       return {
         posts: [],
-        error: err instanceof Error
-          ? fetchError('network', err.message)
-          : fetchError('network', 'Fantia 更新抓取失败 (请确认是否在浏览器中登录过 Fantia)'),
+        error: toFetchError(err, 'Fantia', 'Fantia 更新抓取失败 (请确认是否在浏览器中登录过 Fantia)'),
       };
     }
   },
