@@ -202,15 +202,28 @@ weibo / pixiv / fantia 现在还**不具备**这个前提：三者的解析**内
 **口径**：优先加 service 方法，而不是新增直连 import；新增时**同一提交内**把文件加进
 `AGENTS.md` 规则 8 的表。上一轮漂移的原因就是「一处」没有定义——现在定义为「使用次数」。
 
-### 5. 新增平台仍涉及多个配置点
+### 5. 新增平台仍涉及多个配置点 — 已按本节自己的标准收口（2026-09-13）
 
 新增平台需要同步修改 adapter、registry、platform metadata、URL parser 与 cookie auth。
 （域名这一侧已收敛：`PLATFORM_HOSTS` 是唯一来源，manifest 由其**派生**，代理白名单与
 Referer 同样读它，见 AGENTS 规则 2；占位名前缀也已改为从 `urlParser.GENERATED_NAME_PREFIXES`
 单一来源派生 + 双向守卫测试，见规则 9。）
 
-未来出现**真实**新增平台需求时，可评估统一的 `PlatformDefinition`；
-**当前不应为预想需求提前增加复杂抽象**。
+**2026-09-13 实测：原先记的「8–10 个散点」已不成立，剩下的每一处都有守卫。**
+
+- `KnownPlatform`（联合类型）与 `KNOWN_PLATFORMS`（数组）确实是**两份手写清单**，
+  但**两个方向都由编译器兜住**，实测：只加联合不加数组 → `registry.ts` 报
+  `Property 'ghostly' is missing in type … Record<KnownPlatform, PlatformAdapter>`；
+  只加数组不加联合 → `Type '"ghostly"' is not assignable to type 'KnownPlatform'`。
+  **无法静默漂移**——而这正是当初列这条的理由。
+- `PLATFORM_REGISTRY` ↔ `KNOWN_PLATFORMS` ↔ `ADAPTER_MAP` 已由
+  `tests/platformRegistry.test.ts` 双向断言（含「未知平台不得回退到别的 adapter」）。
+- **本轮补的唯一真缺口**：`PLATFORM_HOSTS` 与平台键**没有**任何东西连接（一个键 vs 一组域名），
+  新增平台忘了加 host 就拿不到 `host_permissions` 与凭据策略，而适配器照跑、请求全部匿名发出，
+  看起来像平台侧问题。已补断言（含 `rss` **必须不在**白名单里的反向断言——规则 3）。
+
+结论：**不引入 `PlatformDefinition`**。本节原本就写着「当前不应为预想需求提前增加复杂抽象」，
+而实测表明「散点」已经各自被守卫覆盖，抽象会是为不存在的问题加复杂度。
 
 ### 6. Twitter/X 路径先天脆弱（外部依赖）
 
@@ -359,7 +372,7 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | **2. 数据完整性** | 备份校验、RSS 身份作用域、`FetchError` 分类、`toSecureMediaUrl` 主机判定 **均已完成**（2026-09-13）；剩余仅媒体缓存的文件名截取 postId 前 16 位（**无老用户，已降级为不急**） | 这一层基本收口 |
 | **3. 能力错配** | **整层已完成 2026-09-13**：取消信号、聚合诚实、Platform capability 模型（`backgroundSync` / `paginates` / `archivesMedia`）。后台/页面上下文的分工现在由适配器声明，消费点按声明筛选 | 已收口 |
 | **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条），且**先**全库跑一遍 `healBrokenPostMedia` | 每次都付税，随历史增长恶化 |
-| **5. 工程质量** | E2E 竞态根因、release/CI 门禁一致性、DNR 测试 **已完成**；剩余 E2E 拆分、MessageMap、新增平台散点 | 不直接致错，但抬高下一处缺陷的概率 |
+| **5. 工程质量** | E2E 竞态根因、E2E 拆分、release/CI 门禁一致性、DNR 测试、平台散点守卫 **均已完成**；剩余 MessageMap 完整版（长期）与规则文档去重（低优先） | 已基本收口 |
 
 **明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流、待办迁 Issues
 （单人维护，不引入协作开销）、往微交互追加工程资源（AUDIT P3 冻结）。
@@ -500,7 +513,7 @@ Twitter 标签页路径真的跑通了。
 | **14** | ~~**DNR 规则表驱动 + 测试**~~ **已完成 2026-09-13** | 工程质量 | 表驱动 + 10 例；`removeRuleIds` 与规则表派生自同一处 |
 | **15** | ~~**`toSecureMediaUrl` 的 `includes()` → `hostMatches`**~~ **已完成 2026-09-13** | 数据完整性 | 改用解析后的主机名；XHS 列表收敛到 `hosts.ts` |
 | **16** | **MessageMap 类型协议**（长期） | 工程质量 | 完整版仍未做；**其可判定的一半已完成 2026-09-13**——`tests/messageRouter.test.ts` 钉住策略表↔分支双向一致 + fail-closed |
-| **17** | **Platform 声明性事实单一来源** | 工程质量 | 新增平台仍 8–10 个散点 |
+| **17** | ~~**Platform 声明性事实单一来源**~~ **已按本节标准收口 2026-09-13** | 工程质量 | 两份清单双向编译器兜底；补了 `PLATFORM_HOSTS` 覆盖断言；**不引入 `PlatformDefinition`** |
 | **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
 | **19** | **weibo / pixiv / fantia 解析测试** — **阻塞于真实载荷**（见下） | 证据 | 三个适配器的解析**内联在 `fetchLatest` 里**，与请求纠缠 |
 | **20** | ~~**`autoSync` / `platformAuth` 单元测试**~~ **已完成 2026-09-13** | 证据 | `platformAuth` 9 例；`autoSync` 用法已在 `autoSync.capability.test.ts` 覆盖 |

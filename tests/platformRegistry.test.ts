@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PLATFORM_REGISTRY, KNOWN_PLATFORMS, isKnownPlatform, type KnownPlatform } from '../src/types';
 import { getAdapter } from '../src/platform/registry';
+import { PLATFORM_HOSTS } from '../src/infrastructure/chrome/messages/hosts';
 
 /**
  * The registry keys and the known-platform set must not drift (audit P1-12).
@@ -43,5 +44,33 @@ describe('KnownPlatform is the closed set the registry is keyed by', () => {
     // union is that this list can be exhaustively switched over.
     const exhaustive = (p: KnownPlatform): string => p;
     expect(exhaustive('douyin')).toBe('douyin');
+  });
+
+  it('every shippable platform has at least one host in PLATFORM_HOSTS', () => {
+    // The two lists are keyed differently — a platform key vs its registrable
+    // domains — so nothing else connects them, and a new platform that forgets
+    // `PLATFORM_HOSTS` gets no `host_permissions` (the manifest derives from it)
+    // and no credential policy. The adapter would run and every request would go
+    // out unauthenticated, which looks like a platform-side problem.
+    //
+    // `rss` is exempt and must stay so: its hosts are user-supplied and cannot be
+    // allowlisted (rule 3 — the allowlist governs credentials, never
+    // reachability). Asserting the exemption explicitly is what keeps a future
+    // reader from "fixing" it by adding a host.
+    const NO_FIXED_HOST: readonly string[] = ['rss'];
+    const domains = PLATFORM_HOSTS.join(' ');
+    for (const platform of KNOWN_PLATFORMS) {
+      if (NO_FIXED_HOST.includes(platform)) {
+        expect(
+          PLATFORM_HOSTS as readonly string[],
+          `${platform} must not be allowlisted — its hosts are user-supplied`,
+        ).not.toContain(platform);
+        continue;
+      }
+      expect(
+        domains.includes(platform),
+        `no PLATFORM_HOSTS entry mentions ${platform}; its requests would carry no session (rule 3)`,
+      ).toBe(true);
+    }
   });
 });
