@@ -192,3 +192,70 @@ describe('every release has a body', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The publish step's reads must not be able to kill it.
+ *
+ * GitHub runs a `run:` block as `bash -e`, and `-e` exits on ANY failing command
+ * — including a command substitution in an assignment. The step is a retry loop
+ * whose whole purpose is to tolerate a transient 5xx on `gh api`, so a probe that
+ * is not guarded makes the loop unreachable: the first failure ends the step.
+ *
+ * This shipped, and its signature is worth recognising. On the v1.0.1 release the
+ * release WAS created, the asset WAS attached and the tag WAS published — and the
+ * step still exited 1 with no `::error::` line and no completion line, because it
+ * died at a probe after `sleep 5`. A red X on a successful release is worse than a
+ * failure, because the next person re-runs it or hand-publishes.
+ *
+ * The check is deliberately narrow: `|| true` on the reads that carry output, not
+ * a blanket ban on failing commands anywhere in the file.
+ */
+describe('the publish step survives a failed read', () => {
+  const workflow = read(RELEASE);
+
+  /** The body of the `Publish GitHub release` step. */
+  const publishStep = (() => {
+    const start = workflow.indexOf('Publish GitHub release');
+    expect(start, `${RELEASE} has no Publish GitHub release step`).toBeGreaterThan(-1);
+    return workflow.slice(start);
+  })();
+
+  it.each([
+    // The helper name, and the shape of its closing line, which is what carries
+    // the guard. Anchoring on the helper keeps this readable; anchoring on the
+    // exact line keeps it honest (a lone `|| true` elsewhere would not satisfy it).
+    ['target_id'],
+    ['published_id'],
+  ])('%s tolerates a failed read', (helper) => {
+    // Match the helper's body up to the next helper definition or the end of the
+    // `bash -e` block — not up to a line starting with `}`: the closing brace is
+    // YAML-indented, so an anchored `\n}` never matches and the test would fail
+    // for a reason that has nothing to do with the guard.
+    const body = publishStep.match(
+      new RegExp(`${helper}\\(\\) \\{([\\s\\S]*?)\\n\\s*(?=(?:\\w+\\(\\) \\{|asset_names|ok=0))`),
+    )?.[1];
+    expect(body, `${helper} not found in the publish step`).toBeTruthy();
+    expect(
+      /2>\/dev\/null[^\n]*\|\| true/.test(body as string),
+      `${helper} has no \`|| true\`. The runner executes this step as \`bash -e\`, so one transient ` +
+        '5xx on this read exits the step before the retry loop can retry — a red X on a release that ' +
+        'actually published (measured on v1.0.1; reproduced under `bash -e` with a stub gh).',
+    ).toBe(true);
+  });
+
+  it('the final read cannot fail the step after it has published', () => {
+    // Found by reading the step after fixing the two helpers: the last `gh api`
+    // was unguarded too. It is the worst place for the bug, because "ok=1" means
+    // the release is already live — a failure here turns a completed release into
+    // a red X, and an empty `published_id` would build a URL ending in
+    // `/releases/` that 404s.
+    const lines = publishStep.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+    const last = lines[lines.length - 1];
+    expect(last, 'the publish step is empty').toBeTruthy();
+    expect(
+      last.includes('|| true'),
+      `the publish step ends with an unguarded command:\n  ${last.trim()}\n` +
+        'A failure there exits 1 after the release is public.',
+    ).toBe(true);
+  });
+});

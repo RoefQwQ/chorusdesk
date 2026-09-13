@@ -195,16 +195,28 @@ jobs:
           # An earlier version computed "any" and "published" separately, so a pass
           # could upload to the oldest draft while testing a newer one and create
           # yet another — it published correctly but left a stray draft behind.
+          # Every read below MUST tolerate failure. GitHub's runner executes a
+          # `run:` block as `bash -e`, and `-e` kills the script on ANY failing
+          # command — including a command substitution in an assignment. A
+          # transient 5xx here is not an error condition; it is the reason the
+          # retry loop exists. Without the guards, that loop could never retry:
+          # the first failed probe ended the step.
+          #
+          # Measured on the v1.0.1 release: the release was created, the asset
+          # attached and the tag published correctly, and the step STILL exited 1
+          # with no error line — it died at a probe after `sleep 5`, so users saw
+          # a red X on a successful release. Reproduced by running this exact
+          # script under `bash -e` with a stub `gh` that fails one read.
           target_id() {
             gh api "repos/${GITHUB_REPOSITORY}/releases" --jq "
               [ .[] | select(.tag_name == \"${tag}\") ] as \$r
               | ( \$r | map(select(.draft == false)) | .[0]
                   // \$r | sort_by(.id) | .[0] )
-              | .id // empty" 2>/dev/null
+              | .id // empty" 2>/dev/null || true
           }
           published_id() {
             gh api "repos/${GITHUB_REPOSITORY}/releases" \
-              --jq ".[] | select(.tag_name == \"${tag}\") | select(.draft == false) | .id" 2>/dev/null | head -1
+              --jq ".[] | select(.tag_name == \"${tag}\") | select(.draft == false) | .id" 2>/dev/null | head -1 || true
           }
           asset_names() {
             gh api "repos/${GITHUB_REPOSITORY}/releases/$1" --jq '.assets[].name' 2>/dev/null || true
@@ -275,5 +287,9 @@ jobs:
               --jq '.[] | select(.tag_name == "'"${tag}"'") | "\(.id) draft=\(.draft) assets=\([.assets[].name] | join(","))"' || true
             exit 1
           fi
+          # The same guard as the helpers, and for the same reason: this is the
+          # LAST command, so an unguarded failure here exits 1 after the release
+          # has already gone public. `published_id` returning empty would even
+          # build a URL ending in `/releases/`, which 404s.
           gh api "repos/${GITHUB_REPOSITORY}/releases/$(published_id)" \
-            --jq '"released \(.tag_name): assets=\([.assets[].name] | join(", "))"' 
+            --jq '"released \(.tag_name): assets=\([.assets[].name] | join(", "))"' || true
