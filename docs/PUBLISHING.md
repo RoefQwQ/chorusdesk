@@ -160,7 +160,7 @@ non-functioning features—are not allowed."**——对一个会被平台改版�
 
 ## 3. 权限逐条理由（提交审核时逐项填写）
 
-产物申请了 6 个 `permissions`、19 条 `host_permissions`、1 条 `optional_host_permissions`。
+产物申请了 6 个 `permissions`、18 条 `host_permissions`、1 条 `optional_host_permissions`。
 逐条的**代码依据**如下（审核问「为什么需要 X」时照此回答）：
 
 | 权限 | 为什么必须要 | 代码位置 |
@@ -172,7 +172,7 @@ non-functioning features—are not allowed."**——对一个会被平台改版�
 | `declarativeNetRequestWithHostAccess` | 为防盗链图片改写 `Referer`，否则 B站/Pixiv/微博/小红书的图片全部裂图。**规则用 `initiatorDomains: [chrome.runtime.id]` 限定为扩展自己发起的请求**，不影响你正常浏览。 | `src/infrastructure/chrome/declarativeNetRequest.ts` |
 | `alarms` | MV3 后台自动同步的定时器。 | `src/infrastructure/chrome/autoSync.ts` |
 
-**host_permissions 为什么是这 19 条**：每一条都对应「同步时确实要请求的域」，分三类——
+**host_permissions 为什么是这 18 条**：每一条都对应「同步时确实要请求的域」，分三类——
 平台页面/接口域（`bilibili.com`、`x.com`、`youtube.com`、`pixiv.net`、`fantia.jp`、
 `xiaohongshu.com`、`weibo.com`/`weibo.cn`、`douyin.com`）、平台 CDN 图片域
 （`hdslb.com`、`twimg.com`、`pximg.net`、`xhscdn.com`/`.net`、`sinaimg.cn`、`douyinpic.com`）、

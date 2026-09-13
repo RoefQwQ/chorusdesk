@@ -91,4 +91,21 @@ describe('manifest wiring', () => {
     expect(proxy).not.toMatch(/bilibili\\\.com\|hdslb/);
     expect(proxy).toContain('isPlatformHost(');
   });
+
+  it('keeps PUBLISHING.md\'s hand-written host count equal to the derived one', () => {
+    // PUBLISHING.md is the store-submission document, and it stated the count in
+    // prose: 「19 条 host_permissions」 while the manifest had 18 — the file's own
+    // list was already correct, so only the number had drifted. That is how a
+    // hand-maintained count fails (removing Withny took it 19 -> 18 and nothing
+    // noticed), and it is the same shape as rule 2's second-list failure: one
+    // fact, two places, no signal when they disagree.
+    const doc = readFileSync(new URL('../docs/PUBLISHING.md', import.meta.url), 'utf8');
+    const expected = platformHostMatchPatterns().length;
+
+    const stated = [...doc.matchAll(/host_permissions (?:为什么是这 )?(\d+) 条/g)].map((m) => m[1]);
+    expect(stated.length, 'PUBLISHING.md no longer states the count in either place').toBeGreaterThan(0);
+    for (const n of stated) {
+      expect(Number(n), `PUBLISHING.md says ${n} host_permissions, the allowlist derives ${expected}`).toBe(expected);
+    }
+  });
 });
