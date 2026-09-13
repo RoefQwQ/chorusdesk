@@ -297,7 +297,10 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 - ~~**`toSecureMediaUrl` 仍用 `includes()`** 判小红书域名。~~ **已完成 2026-09-13**：
   实测三个误判（路径里带域名、`xhscdn.com.evil.tld`、`notxhscdn.com`）都会把陌生主机的图
   改写到平台 CDN 上，且列表在 `media.ts` 与 `proxyImage.ts` 各写了一份——已解析化 + 收敛到 `hosts.ts`。
-- **DNR 186 行零测试**，且 `removeRuleIds` / `addRules` 两处手维护规则 id。**仍未做。**
+- ~~**DNR 186 行零测试**，且 `removeRuleIds` / `addRules` 两处手维护规则 id。~~
+  **已完成 2026-09-13**：改为表驱动（`MEDIA_HEADER_RULES`），`removeRuleIds` 与规则体从同一处派生；
+  新增 10 例测试，其中最重要的一条是**逐条**断言 `initiatorDomains` 作用域——那正是让规则
+  不干扰用户其它标签页的安全属性，此前只写在注释里。改造经深比较**证明与原规则逐字节等价**。
 - **无 MessageMap**：改一条消息要同步「五件套」，靠文档提醒。
 - **新增平台 8–10 个散点**；`PLATFORM_REGISTRY` 不是 `Record<KnownPlatform, …>`。
 - ~~**release.yml 跑 `npm test` 而 CI 跑 `test:coverage`**，注释却写「Same gates as CI」。~~
@@ -341,7 +344,7 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | **2. 数据完整性** | 备份校验、RSS 身份作用域、`FetchError` 分类、`toSecureMediaUrl` 主机判定 **均已完成**（2026-09-13）；剩余仅媒体缓存的文件名截取 postId 前 16 位（**无老用户，已降级为不急**） | 这一层基本收口 |
 | **3. 能力错配** | **整层已完成 2026-09-13**：取消信号、聚合诚实、Platform capability 模型（`backgroundSync` / `paginates` / `archivesMedia`）。后台/页面上下文的分工现在由适配器声明，消费点按声明筛选 | 已收口 |
 | **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条），且**先**全库跑一遍 `healBrokenPostMedia` | 每次都付税，随历史增长恶化 |
-| **5. 工程质量** | E2E 竞态根因与 release/CI 门禁一致性 **已完成**；剩余 E2E 拆分、MessageMap、DNR 测试、新增平台散点 | 不直接致错，但抬高下一处缺陷的概率 |
+| **5. 工程质量** | E2E 竞态根因、release/CI 门禁一致性、DNR 测试 **已完成**；剩余 E2E 拆分、MessageMap、新增平台散点 | 不直接致错，但抬高下一处缺陷的概率 |
 
 **明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流、待办迁 Issues
 （单人维护，不引入协作开销）、往微交互追加工程资源（AUDIT P3 冻结）。
@@ -479,7 +482,7 @@ Twitter 标签页路径真的跑通了。
 | **11** | ~~**E2E 拆独立 scenario**~~ **根因已修 2026-09-13**（见「已知陷阱」）；拆分仍未做 | 工程质量 | `dismissDialogs` 竞态；本地 3/3 失败 → 5/5 通过 |
 | **12** | ~~**`FetchError` 五阶段细分**~~ **已完成 2026-09-13** | 数据完整性 | `httpStatusError` 唯一入口；429 不再被当成网络故障 |
 | **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短**（无老用户，已降级为「不急」）** |
-| **14** | **DNR 规则表驱动 + 测试** | 工程质量 | 186 行零测试；remove/add 两处手维护 |
+| **14** | ~~**DNR 规则表驱动 + 测试**~~ **已完成 2026-09-13** | 工程质量 | 表驱动 + 10 例；`removeRuleIds` 与规则表派生自同一处 |
 | **15** | ~~**`toSecureMediaUrl` 的 `includes()` → `hostMatches`**~~ **已完成 2026-09-13** | 数据完整性 | 改用解析后的主机名；XHS 列表收敛到 `hosts.ts` |
 | **16** | **MessageMap 类型协议** | 工程质量 | 完全没有；改一条消息要同步 5 处 |
 | **17** | **Platform 声明性事实单一来源** | 工程质量 | 新增平台仍 8–10 个散点 |
