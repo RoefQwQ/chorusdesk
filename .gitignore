@@ -6,6 +6,13 @@ node_modules/
 # Produced by `release.yml`; never a source file.
 dist/
 
+# Photos dropped into docs/images for the README, before they are replaced by
+# captures from `e2e/screenshots.mjs`. A screenshot of the real app shows real
+# accounts, so only the generated ones may be committed.
+docs/images/*.png
+!docs/images/feed.png
+!docs/images/creators.png
+
 # Environment and credentials
 .env
 .env.*
