@@ -20,9 +20,8 @@
 > **接手本项目**：待办入口是[四.P8 队列](#p8交接队列与未来方向唯一待办入口)。
 > 本节只描述状态。
 >
-> **未提交**：批次 8（2026-09-14，三个适配器缺陷 + 媒体卡片几何）与批次 9（同日的
-> fantia 正文取错来源 + 空媒体）改动都在工作区里，
-> 见[四.P8 基线](#交接基线接手前先核对)。
+> **未提交**：无。批次 8 / 批次 9 / 两份手册的维护均已于 2026-09-14 提交，工作区干净
+> （`git status` 是唯一真源）。
 
 **质量门禁（2026-09-14 实测）**
 
@@ -52,22 +51,25 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
 - **数据入口**：备份导入校验**已完成四层**（必填字段 / 字段类型与范围 / settings / 跨表关系）；
   两处刻意偏离（`platform` 不查枚举、时间戳不查单位）记在[队列总表](#p8交接队列与未来方向唯一待办入口)
   的「已证伪 / 不采纳」。
-- **状态正确性**：同步入口之间**无协调**——`updateChannel` 没有任何并发锁，
-  `platformLastFinished` 是 batch 局部变量。同一频道可被 alarm / 手动 / 深挖 / popup 并发同步，
-  **后完成的覆盖前者的 `nextCursor`**（详见[队列总表](#p8交接队列与未来方向唯一待办入口) #2）。
-- **数据完整性**：RSS 的 `guid` 只在 feed 内唯一却当全局主键（#3）、媒体缓存文件名截取
-  postId 前 16 位（#13）、`PROXY_IMAGE` 无 byte/MIME 上限（#8）。
-- **能力错配**：Twitter 不支持 SW 而 autoSync 不筛（#6）、取消信号是 caller/timeout 二选一（#7）、
-  聚合层丢弃 batch 结果（10/10 失败仍记「完成」，#9）。
-- **规模**：每次 reload 全库 `toArray` 进 Vue 内存且**先**全库跑 `healBrokenPostMedia`（#5 / #10）。
-- **失败语义**：`FetchError` 的 HTTP/解析/schema/timeout 细分仍未做，401/403 未专门归类（#12）。
-- **证据缺口**：真实载荷 fixture 只覆盖 4 个平台（bilibili / douyin / rss / xiaohongshu）；
-  weibo / pixiv / fantia 三个适配器连解析测试都没有（二.3）。
-- **无测试的活模块**：`declarativeNetRequest.ts`（186 行，全部防盗链规则）零测试引用（二.3）。
-- **债务台账**：规则 8 的 `entrypoints → infrastructure/db` 直连仍有 8 处（二.4）。
+- **状态正确性**：~~同步入口之间无协调~~ **已完成 2026-09-13**（#2 `syncCoordinator`：
+  同频道 single-flight + 跨入口共享平台节流）。
+- **数据完整性**：~~RSS 的 `guid` 只在 feed 内唯一（#3）~~ **已完成 2026-09-13**；
+  ~~`PROXY_IMAGE` 无上限（#8）~~ **已完成 2026-09-13**；
+  **仍未做**：媒体缓存文件名截取 postId 前 16 位（#13，因无老用户而降级为「不急」）。
+- **能力错配**：~~Twitter 不支持 SW 而 autoSync 不筛（#6）~~、~~取消信号二选一（#7）~~、
+  ~~聚合层丢弃 batch 结果（#9）~~ **三项均已完成 2026-09-13**。
+- **规模**：~~reload 前全库跑 `healBrokenPostMedia`（#5）~~ **已完成 2026-09-13**；
+  **仍未做**：每次 reload 全库 `toArray` 进 Vue 内存（#10，长期项）。
+- **失败语义**：~~`FetchError` 细分（#12）~~ **已完成 2026-09-13**（HTTP 状态单一入口，
+  429 不再被当作网络故障）。
+- **证据缺口**：真实载荷 fixture 覆盖 **6 个平台**（bilibili / douyin / fantia / pixiv /
+  rss / xiaohongshu）；**weibo 仍无任何解析测试**，Twitter 的 fixture 仍是手工构造的（#18 / #19 剩项）。
+- **无测试的活模块**：~~`declarativeNetRequest.ts` 零测试~~ **已完成 2026-09-13**；
+  **只剩 `optionalHostAccess.ts` 的 `originPattern()`**（二.3）。
+- **债务台账**：规则 8 的 `entrypoints → infrastructure/db` 直连 **7 处**（二.4）。
 - **外部依赖风险**（本地重构无法消除）：Twitter/X 路径先天脆弱（二.6）、抖音 DOM 耦合（二.7）。
 - **待真机确认**：见[四.P7](#p7真实浏览器行为验证滚动清单) —— RSS 阅读视图、抖音重试期限、
-  图片代理 403 冷却。
+  图片代理 403 冷却；以及**小红书回溯是否真能加载第 31 条**（`XIAOHONGSHU_RESEARCH` §9）。
 - **未排期**：四.P6 整体 UI 风格重设计。
 - **已否决（不要重新提出）**：PR-first 工作流、待办迁 GitHub Issues——单人维护的项目
   不引入协作开销（[PRODUCT_DECISIONS.md](PRODUCT_DECISIONS.md)）。
@@ -138,7 +140,8 @@ schema 变化，不是网络故障）。
 
 ### 3. 平台模块的测试覆盖不均
 
-**真实载荷 fixture 只有 4 个平台**：bilibili / douyin / rss / xiaohongshu（`tests/fixtures/`）。
+**真实载荷 fixture 覆盖 6 个平台**：bilibili / douyin / fantia / pixiv / rss / xiaohongshu（`tests/fixtures/`）。
+**仍未覆盖**：weibo（无解析测试）、twitter（fixture 是手工构造的）、youtube（RSS 映射有意不补）。
 
 | 平台 | 直接 import adapter 的测试 | 真实 fixture |
 |---|---|---|
@@ -265,9 +268,10 @@ Referer 同样读它，见 AGENTS 规则 2；占位名前缀也已改为从 `url
 - **capability 边界**：与 Twitter 路径同属「借真实页面绕过反爬」的方案，
   风控升级或页面架构变化都可能使其失效。
 
-### 8. 同步入口之间没有协调（状态正确性，2026-09-12 核实）
+### 8. 同步入口之间没有协调（状态正确性）— 已完成 2026-09-13
 
-**最严重的一条**，因为它写错数据且**用户看不见**。
+**当年的最严重一条**（它会写错数据且用户看不见）。修法即队列 #2 的 `syncCoordinator`，
+原文留存：
 
 `updateChannel` 不在任何并发锁下运行（`grep inFlight|lock|mutex src/sync/` 为空），
 `status: 'updating'` 只是写入的字段、不是互斥。而能进入它的入口有五个：
@@ -280,7 +284,9 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 - `platformLastFinished` 是 batch 局部变量（`batchSync.ts:83/167`）→
   **跨入口并发时规则 19 的平台节流下限整体失效**（「检测到限流还继续打」）。
 
-这不是「偶发」，是结构上必然、只差一次时序巧合。修法见队列 #2。
+它不是「偶发」，是结构上必然、只差一次时序巧合。现由 `src/sync/syncCoordinator.ts` 收口：
+同频道 single-flight（第二个调用**加入**第一个并拿到同一结果）+ `platformLastFinished`
+改为跨入口共享（含失败路径），见 §10 的完成记录。
 
 ### 9. 身份边界没桥接（数据完整性）
 
@@ -483,8 +489,8 @@ UI 面约 26 个组件/视图，`assets/main.css` 仅 36 行设计令牌。用�
 
 - **代码基线**：`master`，与 `origin/master` 同步。接手第一件事：`git status -sb`
   与 `git log -1 --oneline`（此处**不写提交哈希**——它每次提交都变，写死即过期）。
-  **注意**：批次 8（2026-09-14）**尚未提交**——工作区有 4 个改动文件 + 4 个新测试文件
-  + 1 个新探针，`git status --short` 会看到它们。先决定提交还是继续。
+  **批次 8 / 9 + 两份手册的维护已于 2026-09-14 提交完毕**，工作区是干净的
+  （此前这里写着「批次 8 尚未提交」——已过期，`git status` 会告诉你真相）。
 - **门禁全绿**：`npm run typecheck`、`npm run lint`、`npm test`、`npm run test:coverage`、
   `npm run build`、`npm run e2e`。**具体测试数不写死**（运行即得）。
 - **读序**：`AGENTS.md`（33 条规则 + Non-goals，**必读**）→ `docs/ARCHITECTURE.md`（当前事实
@@ -535,7 +541,7 @@ Twitter 标签页路径真的跑通了。
 | **16** | **MessageMap 类型协议**（长期） | 工程质量 | 完整版仍未做；**其可判定的一半已完成 2026-09-13**——`tests/messageRouter.test.ts` 钉住策略表↔分支双向一致 + fail-closed |
 | **17** | ~~**Platform 声明性事实单一来源**~~ **已按本节标准收口 2026-09-13** | 工程质量 | 两份清单双向编译器兜底；补了 `PLATFORM_HOSTS` 覆盖断言；**不引入 `PlatformDefinition`** |
 | **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
-| **19** | ~~**weibo / pixiv / fantia 解析测试**~~ **pixiv + fantia 已完成 2026-09-14（批次 8）** | 证据 | 两者现用真实 fixture 直测（4 + 7 例）；**weibo 仍缺**——解析仍内联在 `fetchLatest` 里 |
+| **19** | ~~**weibo / pixiv / fantia 解析测试**~~ **pixiv + fantia 已完成 2026-09-14（批次 8/9）** | 证据 | 两者现用真实 fixture 直测（pixiv 4 例；fantia 12 + 8 + 2 例）；**weibo 仍缺**——解析仍内联在 `fetchLatest` 里 |
 | **20** | ~~**`autoSync` / `platformAuth` 单元测试**~~ **已完成 2026-09-13** | 证据 | `platformAuth` 9 例；`autoSync` 用法已在 `autoSync.capability.test.ts` 覆盖 |
 | **21** | ~~**规则 8 台账收敛**~~ **已一致（2026-09-13）** | 工程质量 | AGENTS 与实测**均为 7 处**；剩余直连属既定欠债，不是数字漂移 |
 | **22** | ~~**`AGENTS.md` 规则 9/28/30 压到 ≤8 行**~~ **已按实测改判 2026-09-13** | 工程质量 | 前提不成立（详见下）；改为**修规则 9 的误归类**，49 → 38 行 |
@@ -672,10 +678,10 @@ channelSync: fantia/迷夜ゆめ 同步完成 | 新增 0 条，平台返回 6 �
 **已知未做**
 
 - **未在用户的真实会话里复验**。当前证据是：数据库逐条核对 + 独立实例实测 + 40 个 URL 全通。
-  用户需要刷新扩展后实际看一眼（`.output/chrome-mv3` 已是最新构建）。
+  需要刷新扩展后实际看一眼。
 - 「空白」的第二机制（探测慢）**未在用户环境复现**，只做了机制分析与上限修复；上面 40 URL
   实测说明网络层不背这个锅。
-- 未提交。
+- ~~未提交。~~ 已随 `4218631` 提交（2026-09-14）。
 
 ---
 
