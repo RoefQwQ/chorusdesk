@@ -301,8 +301,9 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | 轴 | 缺省 | 声明为 `false` | 消费点 |
 |---|---|---|---|
 | `backgroundSync` | 是 | `douyin`、`twitter` | `channelSync` dispatch 前拒绝；`autoSync` 批量前筛掉并记日志 |
-| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `cursorState.terminalCursorIsStated` 的新来源 |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `cursorState.terminalCursorIsStated` 的新来源；`historySync` 的单发中断 |
 | `archivesMedia` | 是 | `rss` | `imageCache` / 设置页（改走同一个 helper） |
+| `digScrollsUserPage`（2026-09-14 加） | **否** | —（只有 `xiaohongshu` 声明为 `true`） | `useDeepSync` 的回溯前确认框措辞 |
 
 `paginates` 顺手修掉一处**已分叉的第二真源**：`cursorState.ts` 的
 `SINGLE_SHOT_ACQUISITION = ['douyin']` 与适配器各存一份，而 `youtube` / `rss`
@@ -530,6 +531,7 @@ Twitter 标签页路径真的跑通了。
 | **23** | ~~**`dashboardToolbar` 偶发未处理拒绝**~~ **已不复现（2026-09-13）** | 工程质量 | 连跑 5 次 0 次未处理拒绝；原 ~1/8 已不可观测 |
 | **24** | ~~**release.yml 与 CI 门禁一致性**~~ **已完成 2026-09-13** | 工程质量 | 已对齐 `test:coverage`；`tests/workflows.gateParity.test.ts` 兜底 |
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
+| **26** | ~~**小红书深挖只能取到最近一屏**~~ **已完成 2026-09-14** | 能力错配 | 页面驱动回溯（collector + contract + `FETCH_XHS_NOTES`）；**滚动是否真能加载第 31 条仍未实测**，见 `XIAOHONGSHU_RESEARCH` §9 |
 
 **批次建议**（每批独立可交付、可验证）：
 
@@ -541,6 +543,66 @@ Twitter 标签页路径真的跑通了。
 - **批次 5（证据）**：#20 已完成；**#18/#19 阻塞于真实载荷**（见 §3 的说明）。
 - **批次 6（能力错配）**：**已完成**（#6，2026-09-13）。
 - **长期**：#10 分页重构、#16 MessageMap、#17 平台单一来源、#13 缓存 identity。
+
+---
+
+#### 已完成（批次 7：小红书历史回溯，2026-09-14）
+
+**#26 小红书深挖只能取到最近一屏** —— **已完成（2026-09-14）**。
+
+**背景**（`docs/XIAOHONGSHU_RESEARCH_2026-09.md`）：主页文档只带一屏（约 30 条），下一页接口
+`user_posted` 需要页面运行时生成的 `X-S` 签名。**签名路线已在 `DOUYIN_RESEARCH` 明确排除**
+（会把扩展变成搬运签名与设备标识的东西），所以能走的只有页面驱动滚动 —— 而这份调查自己写下的
+设计方向是「常规同步保持 `bgFetch`，只有带游标的深挖走页面驱动」。本批实现了那个方向。
+
+**改了什么**
+
+| 文件 | 作用 |
+|---|---|
+| `src/adapters/xiaohongshu/collector.ts` | 注入页面的采集器：滚动**所有**可滚动祖先 + 窗口，从 `__INITIAL_STATE__` 读笔记 |
+| `src/adapters/xiaohongshu/contract.ts` | 校验不可信快照（id 24 位十六进制、时间有限、媒体必须 http(s)） |
+| `src/infrastructure/chrome/messages/xiaohongshuNotes.ts` | `FETCH_XHS_NOTES` handler：标签页生命周期、`world: 'MAIN'`、把「无返回值」当「没跑」并重试 |
+| `src/adapters/xiaohongshu.ts` | 按 `isDeepRequest` 分流；新增页面路径的映射与端点判定 |
+| `entrypoints/dashboard/composables/useDeepSync.ts` | 回溯前确认框（由 `digScrollsUserPage` 驱动，≥3 个账号时加重措辞） |
+| `src/adapters/types.ts` | 新增 `digScrollsUserPage`（缺省 `false`）+ `digRisksUserAccount()` |
+
+**过程中抓到两个我自己的真实缺陷**（都由测试/变异发现，不是推测）：
+
+1. **模块级常量 = 规则 9 的原形态，且只在求值源码时可复现。** collector 一开始把
+   `SCROLL_MIN` / `SETTLE_MS` 等放在模块作用域 —— `executeScript` 只序列化函数本身，
+   注入后这些标识符**不存在**。用 `new Function('return (' + fn.toString() + ')')()` 求值
+   立刻得到 `ReferenceError: SCROLL_MIN is not defined`。这正是 Twitter bearer 那一类
+   （「页面路径从未运行过，且没有任何东西能看出来」），新测试就是这个模板。
+2. **`/作品\s*(\d+)/` 把「作品 1.2万」读成 1** —— 而 `notes.length >= statedTotal` 一旦
+   为真就返回 `hasMore: false`，`channelSync` 随即写入 `__END__`，**永久封死**这个大 V 的
+   历史回溯（规则 10 不可恢复的那个方向）。现在只接受纯整数（含千分位），缩写/小数一律
+   视为**未知**，未知永不构成完整性证据。
+
+**分层的两个判断，都基于实测而非直觉**
+
+- **`backgroundSync` 保持为真、`paginates` 保持为假。** 实测：worker 里 `douyin`/`twitter`
+  在发出任何请求**之前**就拒绝（bgFetch=0），而小红书**照常发出请求**（bgFetch=1）——
+  所以常规同步确实能在 worker 内完成，声明 `false` 会把一个能用的平台从自动同步里摘掉。
+  `paginates` 问的是「平台是否签发真实游标」，注入路径用的是本地偏移，答案仍是否。
+- **单发中断从 `platform === 'douyin'` 改为读 `paginates` 声明。** 该处注释本来就写着
+  「scoped to the single-shot acquisition model」，而小红书加入后，写死名字会让它**每轮
+  重滚同一页四次** —— 在同一批风控最在意的平台上，四倍的自动化信号，换零条新数据。
+
+**验证**
+
+- **15 例新测试**：注入采集器（求值源码）9 + 边界校验 3 + 头部计数 1 + 单发模型 2；
+  另有页面驱动的适配器用例 11 与回溯确认框 5 重写/新增。
+- **变异 5/5 全杀**：模块级常量 → `ReferenceError`；缩写计数 → 读成 1；写死 `'douyin'`
+  单发名 → 小红书滚 5 轮；默认值反向 → 给 bilibili 也弹确认；页面分流去掉 `world:'MAIN'`
+  的等价改动由 `IS_SERVICE_WORKER` 拒绝用例覆盖。
+- 三处**既有测试被本批改动推翻**，均已按新契约重写而非放宽：`xiaohongshu.parse.test.ts`
+  的深挖组（旧断言的是 SSR 本地偏移，那已是死代码）、`platformCapabilities.test.ts` 的
+  「声明与实际一致」（它按**源码文本**正则匹配 `IS_SERVICE_WORKER`，而它自己的姊妹用例
+  正批评这种做法；改为**行为**断言：worker 里是否真的发出请求）。
+
+**仍未验证**（写进 `XIAOHONGSHU_RESEARCH` §9，不要当成已结论）：滚动是否真的让小红书加载出
+第 31 条之后的内容。本批断言的是代码性质（状态增长则收集器增长、三轮不增长即停、常量不能是
+模块级），不是平台行为。要证它得用 `e2e/xhs-scroll-probe.mjs` 跑一次真实已登录账号。
 
 ---
 
@@ -614,8 +676,9 @@ CASES 自述为「**拆分前的完整原文，冻结**……作用是作证据�
 | 轴 | 缺省 | `false` | 消费点 |
 |---|---|---|---|
 | `backgroundSync` | 是 | `douyin`、`twitter` | dispatch 前拒绝 / autoSync 批量前筛掉 |
-| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `terminalCursorIsStated` |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `terminalCursorIsStated` / 单发中断 |
 | `archivesMedia` | 是 | `rss` | imageCache / 设置页 |
+| `digScrollsUserPage` | **否** | —（`xiaohongshu` 为 `true`） | 回溯前确认框（2026-09-14 加） |
 
 **修掉的两个真实缺陷**：
 

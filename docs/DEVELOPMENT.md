@@ -116,7 +116,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
    - type 名称（涉及两端字符串字面量）；
    - 入参解析与校验（handler 内局部接口 + `typeof` 收窄；外部数据用 `unknown` 收窄，不用 `any`）；
    - `sendResponse` 出参结构（handler 文件顶部注释固化契约，一并更新）；
-   - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/twitterTimeline/douyinSnapshot/**syncChannel** 五个 handler 均如此，新增 handler 照抄）；
+   - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/twitterTimeline/douyinSnapshot/xiaohongshuNotes/**syncChannel** 六个 handler 均如此，新增 handler 照抄）；
    - 发送方错误处理（`chrome.runtime.lastError`、`res` 为空、`ok/success` 为 false 的文案）。
 3. handler 不直接承担 Vue 状态或数据库业务；复杂业务抽到 `src/sync` 或独立服务再被 handler 调用（参考 autoSync 的 `setupAutoSync/handleAutoSyncAlarm` 分层）。
 4. 同步类消息（如 `UPDATE_AUTO_SYNC`）要能被 Dashboard 设置页即时触发且幂等（先 clear 再 create Alarm 的写法）。

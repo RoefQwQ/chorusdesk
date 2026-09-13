@@ -168,7 +168,7 @@ non-functioning features—are not allowed."**——对一个会被平台改版�
 | `storage` | 界面偏好、平台顺序、自动同步间隔、冷却状态。 | `settingsRepository`、`src/sync/rateLimit.ts` |
 | `cookies` | 向**你已登录的平台**发起动态同步；扩展不新建会话，只复用浏览器里已有的。用于 B站/微博/小红书的登录态判断与 X 的会话请求。 | `bgFetch`（`performBgFetch`）、各 adapter 的登录检查 |
 | `activeTab` | 你在创作者主页点扩展图标时，读取**当前这一个**标签页的地址与标题以识别创作者。只在点击后临时生效。 | `entrypoints/popup/composables/usePageDetection.ts` |
-| `scripting` | ① 关注弹窗里提取**页面上已公开展示**的昵称/头像；② 抖音同步时向抖音标签页注入只读采集脚本（抖音无法从后台请求采集）。 | `usePageDetection`、`douyinSnapshot`、`src/adapters/douyin/collector.ts` |
+| `scripting` | ① 关注弹窗里提取**页面上已公开展示**的昵称/头像；② 抖音同步时向抖音标签页注入只读采集脚本（抖音无法从后台请求采集）；③ 小红书**历史回溯**时向已登录的小红书标签页注入只读采集脚本（更早的笔记需页面滚动才能加载，且需 `world:'MAIN'` 才能读到页面自己的状态对象）。三处都**只读已渲染内容**，不读取 Cookie/本地存储/请求头/设备标识。 | `usePageDetection`、`douyinSnapshot` + `src/adapters/douyin/collector.ts`、`messages/xiaohongshuNotes.ts` + `src/adapters/xiaohongshu/collector.ts` |
 | `declarativeNetRequestWithHostAccess` | 为防盗链图片改写 `Referer`，否则 B站/Pixiv/微博/小红书的图片全部裂图。**规则用 `initiatorDomains: [chrome.runtime.id]` 限定为扩展自己发起的请求**，不影响你正常浏览。 | `src/infrastructure/chrome/declarativeNetRequest.ts` |
 | `alarms` | MV3 后台自动同步的定时器。 | `src/infrastructure/chrome/autoSync.ts` |
 

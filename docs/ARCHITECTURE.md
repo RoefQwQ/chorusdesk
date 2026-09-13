@@ -262,11 +262,20 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
 | `backgroundSync` | 是 | `fetchLatest` 能否在扩展 Service Worker 内完成 | `douyin`、`twitter`（页面/消息往返，worker 收不到自己的 `sendMessage`，规则 6） |
 | `paginates` | 是 | 适配器是否走平台签发的真实游标 | `douyin`、`youtube`、`fantia`、`rss` |
 | `archivesMedia` | 是 | 媒体是否值得写入用户磁盘 | `rss` |
+| `digScrollsUserPage` | 否 | **历史回溯**是否驱动用户自己的已登录页面（因而可能触发平台风控） | 只有 `xiaohongshu` 声明为 `true` |
 
-查询走 `canRunInServiceWorker()` / `hasPlatformStatedEnd()` / `archivesMedia()`（`adapters/types.ts`，
-与接口同居，因为 `sync/cursorState.ts` 要用而它不该 import registry）。**三者都把「缺省/无适配器」
-判为 `true`**：它们门的是**机会**（一次后台同步、一次历史挖掘），错判 `false` 会静默去掉一个
-正常功能，错判 `true` 是这套模型之前的行为、且由适配器自己的 `unsupported` 兜底。
+`digScrollsUserPage` 的缺省是**否**，与前三个相反，因为它门的是**要不要给用户看提醒**：
+提醒应当由一个平台真正声明过的事实触发，而不是默认弹出。它只决定回溯**开始前**确认框的措辞
+（`useDeepSync`），从不阻止功能本身——代价由用户的账号承担，所以由用户决定。小红书填 `true`
+的依据是参考实现（JoeanAmier/XHS-Downloader）把同类滚动**默认关闭并附带风险警告**。
+注意它**故意不与抬高的 `minRequestIntervalMs` 配对**：那个下限是**按平台**的，而风险只在
+回溯这条路径上（打开一个页面后自行节流），抬高会连累廉价的常规 SSR 同步而无安全收益。
+
+查询走 `canRunInServiceWorker()` / `hasPlatformStatedEnd()` / `archivesMedia()` / `digRisksUserAccount()`
+（`adapters/types.ts`，与接口同居，因为 `sync/cursorState.ts` 要用而它不该 import registry）。
+**前三者都把「缺省/无适配器」判为 `true`**：它们门的是**机会**（一次后台同步、一次历史挖掘），
+错判 `false` 会静默去掉一个正常功能，错判 `true` 是这套模型之前的行为、且由适配器自己的
+`unsupported` 兜底；`digRisksUserAccount` 反向判 `false`，理由见上。
 
 `hasPlatformStatedEnd` 是 **`cursorState.terminalCursorIsStated` 的新来源**。此前该事实在
 `cursorState.ts` 的 `SINGLE_SHOT_ACQUISITION = ['douyin']` 与适配器里**各存了一份**（规则 35），
@@ -288,7 +297,7 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
 | `twitter.ts` | 不直接发请求：`FETCH_TWITTER_TIMELINE` 消息 → background | `parseGraphQLResult`（归一化 GraphQL 响应） |
 | `pixiv.ts` | `www.pixiv.net/ajax/user/{uid}/profile/all` + `ajax/user/{uid}?full=1` | — |
 | `fantia.ts` | `fantia.jp/api/v1/fanclubs/{id}`（内嵌 recent posts） | — |
-| `xiaohongshu.ts` | 抓取 `www.xiaohongshu.com/user/profile/{userId}` 页面 HTML 解析 | — |
+| `xiaohongshu.ts` | 常规同步抓 `www.xiaohongshu.com/user/profile/{userId}` HTML 解析 SSR；**历史回溯**走 `FETCH_XHS_NOTES` 注入页面采集（`xiaohongshu/collector.ts` + `contract.ts`，同抖音形态，规则 9） | `digScrollsUserPage: true` |
 | `weibo.ts` | `m.weibo.cn/api/container/getIndex`（uid + containerid 翻页） | `fetchAjaxFallback`（`weibo.com/ajax/statuses/mymblog`） |
 | `douyin.ts` | 不直接请求抖音：经 `FETCH_DOUYIN_SNAPSHOT` 从已打开的抖音标签页采集 DOM 快照（后台直连只会拿到反爬 JS 挑战页） | — |
 | `youtube.ts` | 官方 RSS `www.youtube.com/feeds/videos.xml?channel_id=`（先尝试抓频道页解析 `channel_id`） | — |
@@ -506,6 +515,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 | `SYNC_CHANNEL` | `entrypoints/popup/composables/useQuickFollow.ts`（关注后的首轮抓取） | `messages/syncChannel.ts` `handleSyncChannel` | `{ channelId, limit }` | `{ success, ... }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit, deep }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`；`deep=true` 时先滚动作品网格再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
+| `FETCH_XHS_NOTES` | `src/adapters/xiaohongshu.ts`（**仅历史回溯**；常规同步仍走 `bgFetch`） | `messages/xiaohongshuNotes.ts` `handleXhsNotes` | `{ userId, limit, deep }`（`userId` 需匹配 `^[0-9a-fA-F]{24}$`；`deep=true` 时滚动作品墙再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 同上 | 是（返回 `true`） |
 
 各 handler 文件顶部注释均固化了自己那一半契约（入参/出参），改动协议时这些注释与 `bgFetch`/`proxyImage`/`twitterAdapter` 的调用面必须一并核对。
 
