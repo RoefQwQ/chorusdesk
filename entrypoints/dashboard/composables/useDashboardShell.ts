@@ -6,7 +6,6 @@ import {
   saveSettings as saveSettingsRecord,
 } from '../../../src/infrastructure/db/settingsRepository';
 import { getDatabaseStats } from '../../../src/infrastructure/db/statsService';
-import { healBrokenPostMedia } from '../../../src/infrastructure/db/postRepository';
 import { updateChannel } from '../../../src/sync';
 import { channelService } from '../../../src/application';
 import { useDashboardData } from './useDashboardData';
@@ -44,7 +43,6 @@ export function useDashboardShell(): DashboardShellState {
     db,
     getSettings,
     getDatabaseStats,
-    healBrokenPostMedia,
   });
   const {
     creators,

@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { healBrokenPostMedia, cleanupOldPosts } from '../../../src/infrastructure/db/postRepository';
+import { cleanupOldPosts } from '../../../src/infrastructure/db/postRepository';
 import { errorMessage } from '../../../src/utils/errorMessage';
 import { dialog } from './useDialog';
 
@@ -8,33 +8,23 @@ export interface MediaMaintenanceDependencies {
 }
 
 /**
- * Dashboard Settings "data maintenance" actions: XHS broken-media healing and
- * old unbookmarked-post cleanup. Both live behind the Settings view context;
- * delegates to the postRepository helpers (via direct repository import, the
- * same seam the existing `useDashboardData` uses for healing during reload).
+ * Dashboard Settings "data maintenance": remove old unbookmarked posts.
+ *
+ * **The 「一键修复小红书图裂」 action is gone** (user decision, 2026-09-14). It
+ * called `postRepository.healBrokenPostMedia`, which walked EVERY post with
+ * `db.posts.toArray()` and rewrote the media URLs it could normalize — but the
+ * only thing it did was re-run `toSecureMediaUrl`, and every render path already
+ * calls that on read. So it was a full-table scan, on the user's request, to
+ * write back values the readers derive anyway.
+ *
+ * Nothing needs it for correctness: a stored row with an un-normalized URL
+ * renders correctly regardless, because normalization happens at read time. The
+ * action, the repository helper, and the reload-time `runMediaHealingOnce` pass
+ * that existed to bound its cost are all removed together — leaving any one of
+ * them behind would be dead code with no caller.
  */
 export function useMediaMaintenance(deps: MediaMaintenanceDependencies) {
-  const isHealingMedia = ref(false);
   const isCleaningStorage = ref(false);
-
-  async function handleHealBrokenMedia() {
-    if (isHealingMedia.value) return;
-    isHealingMedia.value = true;
-    try {
-      const healed = await healBrokenPostMedia();
-      await deps.reloadData();
-      if (healed > 0) {
-        await dialog.alert(`【小红书图裂修复完成】成功修复并重写了本地数据库中 ${healed} 条动态的媒体链接！`);
-      } else {
-        await dialog.alert(`【检测完成】本地所有小红书动态与图片的 CDN 地址均已为最新兼容格式。`);
-      }
-    } catch (err: unknown) {
-      const message = errorMessage(err);
-      await dialog.alert('修复异常：' + message);
-    } finally {
-      isHealingMedia.value = false;
-    }
-  }
 
   async function handleCleanupPosts(days: number) {
     const daysText = days === 0 ? '所有未收藏的动态' : `${days} 天前的未收藏历史动态`;
@@ -55,5 +45,5 @@ export function useMediaMaintenance(deps: MediaMaintenanceDependencies) {
     }
   }
 
-  return { isHealingMedia, isCleaningStorage, handleHealBrokenMedia, handleCleanupPosts };
+  return { isCleaningStorage, handleCleanupPosts };
 }

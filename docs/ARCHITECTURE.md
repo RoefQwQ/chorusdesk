@@ -430,7 +430,6 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
   - `getSuppressedPostIds(ids)` / `clearSuppressions(ids)`：同步层的抑制查询/解除（按 `postId`，非 channelId）。
   - `adoptRenamedPostIds(pairs)`：把已存在行从旧 id **搬**到新 id（连同伴随的抑制记录），用于适配器改了 id 方案时（RSS 的 `guid` 纳入 feed 作用域，队列 #3）。`Post.id` 是全库主键且抑制也按它索引，所以必须「搬家」而不是「再写一行」——否则同一内容出现两次，且旧 id 上的彻底删除不再生效。
   - `countSuppressionsForChannels(ids)` / `countSuppressionsForCreator(id)`：取关提示的计数来源。
-  - `healBrokenPostMedia()`：把小红书（等）动态媒体 URL 经 `toSecureMediaUrl` 重写自愈，返回修复条数。
 
 ### 4.5 Chrome 基础设施 `src/infrastructure/chrome/`
 

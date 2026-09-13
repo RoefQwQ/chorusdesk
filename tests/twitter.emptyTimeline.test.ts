@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { twitterAdapter } from '../src/adapters/twitter';
+import { parseGraphQLResult } from '../src/adapters/twitter';
 import type { Channel } from '../src/types';
 
 /**
@@ -240,7 +240,7 @@ function payload(entries: unknown[], includeCursor = true) {
 }
 
 function parse(tweetData: unknown, onlyOriginal?: boolean) {
-  return twitterAdapter.parseGraphQLResult!(
+  return parseGraphQLResult(
     channel,
     tweetData,
     undefined,
@@ -274,7 +274,7 @@ describe('twitter parseGraphQLResult', () => {
     // source (a known displayName or avatar wins), so the channel here carries
     // neither — which is exactly the post-follow state.
     const bare: Channel = { ...channel, displayName: '', avatarUrl: undefined };
-    const res = twitterAdapter.parseGraphQLResult!(
+    const res = parseGraphQLResult(
       bare,
       payload([visibilityLimitedEntry('limited_1')]),
       undefined,

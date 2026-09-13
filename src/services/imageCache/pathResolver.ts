@@ -52,7 +52,20 @@ export function formatDateSegment(timestamp?: number): string {
 
 /**
  * Resolve standard directory segments for a post
- * Structure: [creatorName, platformName, `${date}_${postId}`]
+ * Structure: [creatorName, platformName, `${date}_${rawPostId}`]
+ *
+ * The post id is kept **whole**. It used to be `slice(0, 16)`, which is not a
+ * shortening but a colliding transformation for the platforms whose ids are
+ * time-ordered ("snowflake") values: Twitter's and Douyin's leading digits ARE
+ * the timestamp, so two posts from the same second share them —
+ * `1234567890123456789` and `1234567890123456799` both truncate to
+ * `1234567890123456`. Two posts then resolve to one directory, and since files
+ * inside it are named `${mediaIndex}.${ext}`, the second post's first image
+ * **overwrites** the first post's first image with no error anywhere.
+ *
+ * Nothing was bought in exchange: measured against the worst realistic layout
+ * (a long creator name, a Chinese platform folder, a 24-character id), the full
+ * path is ~87 characters against Windows' 260, so the cap was never the reason.
  */
 export function resolvePostDirSegments(params: {
   creatorName?: string;
@@ -63,12 +76,11 @@ export function resolvePostDirSegments(params: {
 }): [string, string, string] {
   const creatorDir = sanitizePathSegment(params.creatorName || '默认创作者');
   const platformDir = PLATFORM_DIR_NAMES[params.platform] || sanitizePathSegment(params.platform);
-  
+
   // Clean post ID (strip platform prefix like xiaohongshu_)
   const rawId = params.postId.replace(/^[a-z0-9]+_/i, '');
-  const shortId = rawId.slice(0, 16);
   const dateStr = formatDateSegment(params.publishedAt);
-  const postFolder = sanitizePathSegment(`${dateStr}_${shortId}`);
+  const postFolder = sanitizePathSegment(`${dateStr}_${rawId}`);
 
   return [creatorDir, platformDir, postFolder];
 }

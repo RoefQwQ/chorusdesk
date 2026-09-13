@@ -159,17 +159,18 @@ platform because adapters messaged `BG_FETCH` from inside the SW and got `lastEr
   backup go through `src/application` (`creatorService`, `channelService`, `postService`,
   `backupService`) — including the whole recycle-bin lifecycle (fix queue #10; resolved — do
   not restate it as unfinished). What still imports `src/infrastructure/db/*` directly from
-  UI is the bare `db` handle, `settingsRepository`, `statsService` and media maintenance
-  (`healBrokenPostMedia`, `cleanupOldPosts`) — **7 usage sites as of 2026-09-13, down from 8**,
-  in exactly these files (`grep -rn "infrastructure/db" entrypoints/` reproduces it; count the
+  UI is the bare `db` handle, `settingsRepository`, `statsService` and old-post cleanup
+  (`cleanupOldPosts`) — **6 usage sites as of 2026-09-14, down from 7** (the media-healing
+  action was removed; see below), in exactly these files
+  (`grep -rn "infrastructure/db" entrypoints/` reproduces it; count the
   *usages*, not the files, and `import type` does not count — a type-only import crosses
   nothing at runtime):
 
   |file|what|
   |---|---|
-  |`dashboard/composables/useDashboardShell.ts`|`db`, `settingsRepository`, `statsService`, `healBrokenPostMedia`|
+  |`dashboard/composables/useDashboardShell.ts`|`db`, `settingsRepository`, `statsService`|
   |`dashboard/composables/useFeedFilters.ts`|`settingsRepository`|
-  |`dashboard/composables/useMediaMaintenance.ts`|`healBrokenPostMedia`, `cleanupOldPosts`|
+  |`dashboard/composables/useMediaMaintenance.ts`|`cleanupOldPosts`|
   |`popup/composables/useQuickFollow.ts`|`db`|
 
   Do not treat the remaining direct imports as sanctioned. Prefer adding a service method

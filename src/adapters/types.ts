@@ -300,23 +300,28 @@ export interface PlatformAdapter {
     authorName?: string,
     authorAvatar?: string,
   ): Promise<FetchResult>;
-  /** Optional platform-specific fallback request implementation. */
-  fetchAjaxFallback?(
-    channel: Channel,
-    limit: number,
-    page: number,
-    options?: FetchOptions,
-  ): Promise<FetchResult>;
-  /** Optional platform-specific response normalizer. */
-  parseGraphQLResult?(
-    channel: Channel,
-    tweetData: unknown,
-    userData: unknown,
-    limit: number,
-    onlyOriginal?: boolean,
-    bottomCursor?: string,
-  ): FetchResult;
 }
+
+/**
+ * Deliberately NOT on `PlatformAdapter`.
+ *
+ * Two methods used to live here as optional members while being called by
+ * exactly one adapter each, from the inside:
+ *
+ *  - `parseGraphQLResult` — Twitter's own normalizer. It was declared optional,
+ *    so `twitter.ts` had to read `this.parseGraphQLResult`, check it existed,
+ *    and bail with a runtime `parse` error if it did not: a function proving its
+ *    own existence to itself, and a missing parser that the compiler could not
+ *    catch.
+ *  - `fetchAjaxFallback` — Weibo's second request channel, reached four times as
+ *    `this.fetchAjaxFallback!(...)` with a non-null assertion, which is the same
+ *    admission in different clothes.
+ *
+ * Both are now module-scoped functions exported by name from their adapter, so
+ * the shared contract carries only what the framework actually calls. A platform
+ * that needs a second request channel or a response normalizer keeps it as a
+ * private function of its own module — the sync layer never looked either up.
+ */
 
 /**
  * Capability queries over a declaration that may be absent.

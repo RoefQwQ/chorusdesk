@@ -37,7 +37,6 @@ export interface SettingsViewContext {
   deletedPostsList: RecycleSnapshot[];
   filteredDeletedPostsList: RecycleSnapshot[];
   deletedPostsSearchQuery: string;
-  isHealingMedia: boolean;
   isCleaningStorage: boolean;
   onAddSource: () => void;
   onCheckPlatformLogins: () => void | Promise<void>;
@@ -48,7 +47,6 @@ export interface SettingsViewContext {
   onUpdateSettings: (patch: Partial<AppSettings>) => void | Promise<void>;
   onNotifyAutoSyncChanged: () => void;
   onRefresh: () => void | Promise<void>;
-  onHealBrokenMedia: () => void | Promise<void>;
   onCleanupPosts: (days: number) => void | Promise<void>;
   onRestoreAll: () => void | Promise<void>;
   onEmptyRecycleBin: () => void | Promise<void>;
@@ -424,16 +422,6 @@ async function updateBooleanSetting(key: 'enableAutoSync' | 'hideReposts', event
           收藏的动态不会被清理，永久保留。
         </div>
         <div class="flex items-center gap-2">
-          <button
-            type="button"
-            @click="context.onHealBrokenMedia"
-            :disabled="context.isHealingMedia"
-            class="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 rounded-xl font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-            title="自动扫描并纠正本地数据库中小红书受限 CDN 域名，恢复旧笔记正常显示"
-          >
-            <Sparkles class="w-3.5 h-3.5" :class="{ 'animate-spin': context.isHealingMedia }" />
-            <span>{{ context.isHealingMedia ? '修复中…' : '一键修复小红书图裂' }}</span>
-          </button>
           <button
             type="button"
             @click="context.onCleanupPosts(60)"

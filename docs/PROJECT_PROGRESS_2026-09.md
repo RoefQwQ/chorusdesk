@@ -74,7 +74,7 @@ CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑 typecheck + lint + **
   rss / xiaohongshu）；**weibo 仍无任何解析测试**，Twitter 的 fixture 仍是手工构造的（#18 / #19 剩项）。
 - **无测试的活模块**：~~`declarativeNetRequest.ts` 零测试~~ **已完成 2026-09-13**；
   **只剩 `optionalHostAccess.ts` 的 `originPattern()`**（二.3）。
-- **债务台账**：规则 8 的 `entrypoints → infrastructure/db` 直连 **7 处**（二.4）。
+- **债务台账**：规则 8 的 `entrypoints → infrastructure/db` 直连 **6 处**（二.4）。
 - **外部依赖风险**（本地重构无法消除）：Twitter/X 路径先天脆弱（二.6）、抖音 DOM 耦合（二.7）。
 - **待真机确认**：见[四.P7](#p7真实浏览器行为验证滚动清单) —— RSS 阅读视图、抖音重试期限、
   图片代理 403 冷却；以及**小红书回溯是否真能加载第 31 条**（`XIAOHONGSHU_RESEARCH` §9）。
@@ -212,16 +212,16 @@ pixiv/fantia 这批断言的是「真实响应 → `Post` 的字段」，正好�
 
 **weibo 仍未做**（队列 #19 剩下的那半）。
 
-### 4. 规则 8 的直连台账仍有 7 处
+### 4. 规则 8 的直连台账仍有 6 处
 
-`entrypoints/ → src/infrastructure/db/*` 的直接 import，实测 **7 处使用**（不是 7 个文件，
+`entrypoints/ → src/infrastructure/db/*` 的直接 import，实测 **6 处使用**（不是 6 个文件，
 `import type` 不计；`grep -rn "infrastructure/db" entrypoints/ | grep -v "import type"`）：
 
 | 文件 | 用到什么 |
 |---|---|
-| `dashboard/composables/useDashboardShell.ts` | `db`、`settingsRepository`、`statsService`、`healBrokenPostMedia` |
+| `dashboard/composables/useDashboardShell.ts` | `db`、`settingsRepository`、`statsService` |
 | `dashboard/composables/useFeedFilters.ts` | `settingsRepository` |
-| `dashboard/composables/useMediaMaintenance.ts` | `healBrokenPostMedia`、`cleanupOldPosts` |
+| `dashboard/composables/useMediaMaintenance.ts` | `cleanupOldPosts` |
 | `popup/composables/useQuickFollow.ts` | `db` |
 
 **口径**：优先加 service 方法，而不是新增直连 import；新增时**同一提交内**把文件加进
@@ -408,7 +408,7 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | **1. 状态正确性** | 同步入口之间没有协调：`updateChannel` 无任何并发锁，`platformLastFinished` 是 batch 局部变量。同频道可被 alarm / 手动 / 深挖 / popup 同时同步，**后完成的覆盖前者的 `nextCursor`**——写错数据且**用户看不见** | 会静默写错状态，且没有任何观测手段能发现 |
 | **2. 数据完整性** | 备份校验、RSS 身份作用域、`FetchError` 分类、`toSecureMediaUrl` 主机判定 **均已完成**（2026-09-13）；剩余仅媒体缓存的文件名截取 postId 前 16 位（**无老用户，已降级为不急**） | 这一层基本收口 |
 | **3. 能力错配** | **整层已完成 2026-09-13**：取消信号、聚合诚实、Platform capability 模型（`backgroundSync` / `paginates` / `archivesMedia`）。后台/页面上下文的分工现在由适配器声明，消费点按声明筛选 | 已收口 |
-| **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条），且**先**全库跑一遍 `healBrokenPostMedia` | 每次都付税，随历史增长恶化 |
+| **4. 规模与性能** | 每次 reload 全库 `toArray` 进 Vue 内存（只显示 36 条）。~~且**先**全库跑一遍 `healBrokenPostMedia`~~ —— 那一项已随 #27（2026-09-14 删除该功能）彻底不存在 | 只剩全量 `toArray` 这一半，随历史增长恶化 |
 | **5. 工程质量** | E2E 竞态根因、E2E 拆分、release/CI 门禁一致性、DNR 测试、平台散点守卫 **均已完成**；剩余 MessageMap 完整版（长期）与规则文档去重（低优先） | 已基本收口 |
 
 **明确不做**：整体 UI 风格重设计（P6，用户不排期）、PR-first 工作流、待办迁 Issues
@@ -563,7 +563,7 @@ Twitter 标签页路径真的跑通了。
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 | **26** | ~~**小红书深挖只能取到最近一屏**~~ **已完成 2026-09-14** | 能力错配 | 页面驱动回溯（collector + contract + `FETCH_XHS_NOTES`）；**滚动是否真能加载第 31 条仍未实测**，见 `XIAOHONGSHU_RESEARCH` §9 |
 
-| **27** | **删除「小红书图裂修复」**（`healBrokenPostMedia` + 设置页入口） | 工程质量 | 用户 2026-09-14 明确表态：「那个修小红书图裂的是超级老的功能了，后续已经可以考虑删了」。它做的事只有 `toSecureMediaUrl` 与头像 https 化，且**是全表 `toArray()` 扫描**；`runMediaHealingOnce` 已把它移出 reload hot path（#5）。删它要连**设置页按钮 + `useMediaMaintenance.handleHealBrokenMedia` + 规则 8 台账里的 `postRepository` 直连**一起动 |
+| **27** | ~~**删除「小红书图裂修复」**~~ **已完成 2026-09-14**（用户授权全删） | 工程质量 | 删除范围：`postRepository.healBrokenPostMedia` + `useMediaMaintenance.handleHealBrokenMedia` + 设置页按钮 + `useDashboardData.runMediaHealingOnce`（它存在只为摊薄那次全表扫描）+ 三个测试块。**删它安全**：它只重跑 `toSecureMediaUrl`，而各渲染路径**本来就在读取时调用**它，所以存量行不修也显示正确。规则 8 台账因此 **7 → 6 处** |
 
 **批次建议**（每批独立可交付、可验证）：
 
@@ -600,7 +600,6 @@ Twitter 标签页路径真的跑通了。
 - **alarm 跨浏览器重启的长期行为**：CDP `loadUnpacked` 加载的扩展不跨重启留存，
   重启后重新加载等同全新安装。要验只能在真实安装的扩展上做。
 - **Twitter / 抖音路径的固有脆弱性**（二.6 / 二.7）：属外部依赖，本地重构无法消除。
-- **`healBrokenPostMedia` 的真实收益**：本地无大库，无法测量它在大历史下的实际代价（#5）。
 
 #### 已知陷阱（踩过，省你时间）
 

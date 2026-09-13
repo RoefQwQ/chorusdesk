@@ -30,14 +30,14 @@ export const weiboAdapter: PlatformAdapter = {
       });
 
       if (!indexRes.ok) {
-        return await this.fetchAjaxFallback!(channel, limit, page, options);
+        return await fetchAjaxFallback(channel, limit, page, options);
       }
 
       let indexJson: Record<string, unknown>;
       try {
         indexJson = JSON.parse(indexRes.data);
       } catch {
-        return await this.fetchAjaxFallback!(channel, limit, page, options);
+        return await fetchAjaxFallback(channel, limit, page, options);
       }
 
       const userInfo = asRecord(asRecord(indexJson.data).userInfo);
@@ -67,14 +67,14 @@ export const weiboAdapter: PlatformAdapter = {
       });
 
       if (!timelineRes.ok) {
-        return await this.fetchAjaxFallback!(channel, limit, page, options);
+        return await fetchAjaxFallback(channel, limit, page, options);
       }
 
       let timelineJson: Record<string, unknown>;
       try {
         timelineJson = JSON.parse(timelineRes.data);
       } catch {
-        return await this.fetchAjaxFallback!(channel, limit, page, options);
+        return await fetchAjaxFallback(channel, limit, page, options);
       }
 
       const timelineData = asRecord(timelineJson.data);
@@ -177,103 +177,117 @@ export const weiboAdapter: PlatformAdapter = {
       };
     }
   },
-
-  async fetchAjaxFallback(channel: Channel, limit: number, page: number, options?: FetchOptions): Promise<FetchResult> {
-    try {
-      const uid = channel.accountId.trim();
-      const ajaxUrl = `https://weibo.com/ajax/statuses/mymblog?uid=${encodeURIComponent(uid)}&page=${page}&feature=0`;
-      const res = await bgFetch(ajaxUrl, {
-        signal: options?.signal,
-        headers: {
-          Referer: `https://weibo.com/u/${uid}`,
-          Accept: 'application/json, text/plain, */*',
-        },
-      });
-
-      if (!res.ok) {
-        // 403 keeps its own wording (the weibo-specific "open weibo.com and log
-        // in" advice is what the user needs); every other status goes through the
-        // shared classifier, so a 429 here starts a cool-down instead of being
-        // reported as a connection problem.
-        if (res.status === 403) {
-          return { posts: [], error: fetchError('auth', '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
-        }
-        return { posts: [], error: httpStatusError(res.status, '微博') };
-      }
-
-      if (typeof res.data === 'string' && (res.data.includes('Sina Visitor System') || res.data.includes('passport.weibo.com') || res.data.trim().startsWith('<'))) {
-        return { posts: [], error: fetchError('auth', '微博访客系统拦截。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
-      }
-
-      const json: Record<string, unknown> = JSON.parse(res.data);
-      const list = (Array.isArray(asRecord(json.data).list) ? asRecord(json.data).list : []) as unknown[];
-      const posts: Post[] = [];
-      let authorName = channel.displayName;
-      let authorAvatar = channel.avatarUrl;
-
-      for (const rawItem of list) {
-        if (posts.length >= limit) break;
-        const item = asRecord(rawItem);
-
-        const isRetweet = Boolean(item.retweeted_status);
-        if (options?.onlyOriginal && isRetweet) continue;
-
-        const user = asRecord(item.user);
-        if (user.screen_name) authorName = str(user.screen_name);
-        if (user.avatar_hd) authorAvatar = str(user.avatar_hd);
-
-        const text = cleanWeiboHtml(str(item.text_raw) || str(item.text));
-        const id = str(item.id) || str(item.mid);
-        if (!id) continue; // skip rather than collide all items on weibo_undefined
-        const parsedTime = str(item.created_at) ? new Date(str(item.created_at)).getTime() : Date.now();
-        const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
-
-        const mediaList: Post['mediaList'] = [];
-        const picInfos = asRecord(item.pic_infos);
-        if (item.pic_infos) {
-          for (const key of Object.keys(picInfos)) {
-            const p = asRecord(picInfos[key]);
-            const origImg = toHttps(str(asRecord(p.large).url) || str(asRecord(p.original).url));
-            const previewImg = toHttps(str(asRecord(p.bmiddle).url) || str(asRecord(p.thumbnail).url) || origImg);
-            if (origImg) {
-              mediaList.push({
-                type: 'image',
-                previewUrl: previewImg,
-                originalUrl: origImg,
-              });
-            }
-          }
-        }
-
-        posts.push(buildPost(channel, {
-          id: `weibo_${id}`,
-          title: text.slice(0, 40),
-          content: text,
-          mediaList,
-          originalUrl: `https://weibo.com/${uid}/${str(item.mblogid) || id}`,
-          publishedAt: pubDate,
-          isRepost: isRetweet,
-        }));
-      }
-
-      // Sort strictly newest first
-      posts.sort((a, b) => b.publishedAt - a.publishedAt);
-
-      return {
-        posts,
-        authorMeta: {
-          name: authorName,
-          avatar: authorAvatar,
-        },
-        nextCursor: list.length > 0 ? String(page + 1) : undefined,
-        hasMore: list.length > 0,
-      };
-    } catch (e: unknown) {
-      const message = errorMessage(e);
-      return { posts: [], error: fetchError('network', message || '微博网络连接异常') };
-    }
-  },
 };
+
+/**
+ * Weibo's second request channel (`weibo.com/ajax/statuses/mymblog`).
+ *
+ * Module-scoped rather than an optional member of `PlatformAdapter`: it is
+ * called only from inside this file, and declaring it on the shared interface
+ * forced four call sites to write `this.fetchAjaxFallback!(...)` — a non-null
+ * assertion that only existed because the interface said the method might not be
+ * there. See the note in `types.ts`.
+ */
+export async function fetchAjaxFallback(
+  channel: Channel,
+  limit: number,
+  page: number,
+  options?: FetchOptions,
+): Promise<FetchResult> {
+  try {
+  const uid = channel.accountId.trim();
+  const ajaxUrl = `https://weibo.com/ajax/statuses/mymblog?uid=${encodeURIComponent(uid)}&page=${page}&feature=0`;
+  const res = await bgFetch(ajaxUrl, {
+    signal: options?.signal,
+    headers: {
+      Referer: `https://weibo.com/u/${uid}`,
+      Accept: 'application/json, text/plain, */*',
+    },
+  });
+
+  if (!res.ok) {
+    // 403 keeps its own wording (the weibo-specific "open weibo.com and log
+    // in" advice is what the user needs); every other status goes through the
+    // shared classifier, so a 429 here starts a cool-down instead of being
+    // reported as a connection problem.
+    if (res.status === 403) {
+      return { posts: [], error: fetchError('auth', '微博接口访问受限 (HTTP 403)。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
+    }
+    return { posts: [], error: httpStatusError(res.status, '微博') };
+  }
+
+  if (typeof res.data === 'string' && (res.data.includes('Sina Visitor System') || res.data.includes('passport.weibo.com') || res.data.trim().startsWith('<'))) {
+    return { posts: [], error: fetchError('auth', '微博访客系统拦截。请在浏览器中打开 weibo.com 并完成登录，随后重试同步。') };
+  }
+
+  const json: Record<string, unknown> = JSON.parse(res.data);
+  const list = (Array.isArray(asRecord(json.data).list) ? asRecord(json.data).list : []) as unknown[];
+  const posts: Post[] = [];
+  let authorName = channel.displayName;
+  let authorAvatar = channel.avatarUrl;
+
+  for (const rawItem of list) {
+    if (posts.length >= limit) break;
+    const item = asRecord(rawItem);
+
+    const isRetweet = Boolean(item.retweeted_status);
+    if (options?.onlyOriginal && isRetweet) continue;
+
+    const user = asRecord(item.user);
+    if (user.screen_name) authorName = str(user.screen_name);
+    if (user.avatar_hd) authorAvatar = str(user.avatar_hd);
+
+    const text = cleanWeiboHtml(str(item.text_raw) || str(item.text));
+    const id = str(item.id) || str(item.mid);
+    if (!id) continue; // skip rather than collide all items on weibo_undefined
+    const parsedTime = str(item.created_at) ? new Date(str(item.created_at)).getTime() : Date.now();
+    const pubDate = Number.isFinite(parsedTime) ? parsedTime : Date.now();
+
+    const mediaList: Post['mediaList'] = [];
+    const picInfos = asRecord(item.pic_infos);
+    if (item.pic_infos) {
+      for (const key of Object.keys(picInfos)) {
+        const p = asRecord(picInfos[key]);
+        const origImg = toHttps(str(asRecord(p.large).url) || str(asRecord(p.original).url));
+        const previewImg = toHttps(str(asRecord(p.bmiddle).url) || str(asRecord(p.thumbnail).url) || origImg);
+        if (origImg) {
+          mediaList.push({
+            type: 'image',
+            previewUrl: previewImg,
+            originalUrl: origImg,
+          });
+        }
+      }
+    }
+
+    posts.push(buildPost(channel, {
+      id: `weibo_${id}`,
+      title: text.slice(0, 40),
+      content: text,
+      mediaList,
+      originalUrl: `https://weibo.com/${uid}/${str(item.mblogid) || id}`,
+      publishedAt: pubDate,
+      isRepost: isRetweet,
+    }));
+  }
+
+  // Sort strictly newest first
+  posts.sort((a, b) => b.publishedAt - a.publishedAt);
+
+  return {
+    posts,
+    authorMeta: {
+      name: authorName,
+      avatar: authorAvatar,
+    },
+    nextCursor: list.length > 0 ? String(page + 1) : undefined,
+    hasMore: list.length > 0,
+  };
+} catch (e: unknown) {
+  const message = errorMessage(e);
+  return { posts: [], error: fetchError('network', message || '微博网络连接异常') };
+}
+}
 
 function cleanWeiboHtml(html: string): string {
   if (!html) return '';

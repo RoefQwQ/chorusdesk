@@ -230,11 +230,9 @@ const { exportBackup, exportBackupToFile, handleImportFile } = useBackupManager(
   settings,
 });
 
-// Settings-page data maintenance (media heal / old-post cleanup).
+// Settings-page data maintenance (old-post cleanup).
 const {
-  isHealingMedia,
   isCleaningStorage,
-  handleHealBrokenMedia,
   handleCleanupPosts,
 } = useMediaMaintenance({ reloadData: () => reloadData() });
 
@@ -439,7 +437,6 @@ const settingsContext = computed(() => ({
   deletedPostsList: deletedPostsList.value,
   filteredDeletedPostsList: filteredDeletedPostsList.value,
   deletedPostsSearchQuery: deletedPostsSearchQuery.value,
-  isHealingMedia: isHealingMedia.value,
   isCleaningStorage: isCleaningStorage.value,
   onAddSource: () => openAddModal('new', undefined, 'https://'),
   onCheckPlatformLogins: checkPlatformLogins,
@@ -450,7 +447,6 @@ const settingsContext = computed(() => ({
   onUpdateSettings: updateDashboardSettings,
   onNotifyAutoSyncChanged: notifyAutoSyncChanged,
   onRefresh: reloadData,
-  onHealBrokenMedia: handleHealBrokenMedia,
   onCleanupPosts: handleCleanupPosts,
   onRestoreAll: handleRestoreAllAndSync,
   onReleaseAllSuppressions: handleReleaseAllSuppressions,

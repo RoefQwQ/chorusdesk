@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Post } from '../src/types';
-import { CACHED_IMAGE_EXTENSIONS, resolveFileExtension } from '../src/services/imageCache/pathResolver';
+import {
+  CACHED_IMAGE_EXTENSIONS,
+  resolveFileExtension,
+  resolvePostDirSegments,
+} from '../src/services/imageCache/pathResolver';
 
 /**
  * Regression test for the incremental-archive disk probe
@@ -136,5 +140,47 @@ describe('cached media extensions', () => {
     for (const [url, mime] of samples) {
       expect(CACHED_IMAGE_EXTENSIONS).toContain(resolveFileExtension(url, mime));
     }
+  });
+});
+
+/**
+ * The post directory must distinguish two posts that are not the same post.
+ *
+ * The id used to be `slice(0, 16)`. For Twitter and Douyin — whose ids are
+ * time-ordered, so the leading digits are the TIMESTAMP — two posts from the
+ * same second therefore produced the SAME directory name. Files inside are
+ * `${mediaIndex}.${ext}`, so the later post's first image silently overwrote the
+ * earlier one's, with no error on any path.
+ *
+ * The severity is what this pins: not "a directory name is slightly different",
+ * but "two distinct posts must never share a directory".
+ */
+describe('post directory identity', () => {
+  const base = {
+    creatorName: '示例创作者',
+    platform: 'twitter',
+    publishedAt: Date.UTC(2026, 8, 13, 12, 0, 0),
+  };
+
+  it('gives two ids that agree on their first 16 digits different directories', () => {
+    // Real snowflake shape: same leading digits, different tail.
+    const a = resolvePostDirSegments({ ...base, postId: 'twitter_1234567890123456789' });
+    const b = resolvePostDirSegments({ ...base, postId: 'twitter_1234567890123456799' });
+
+    expect(a[2]).not.toBe(b[2]);
+  });
+
+  it('keeps the whole id, so the directory is derivable from the post', () => {
+    const segs = resolvePostDirSegments({ ...base, postId: 'xiaohongshu_65a1b2c3d4e5f60718293a4b' });
+
+    // Platform prefix stripped, id intact — a reader can match folder to post.
+    expect(segs[2]).toContain('65a1b2c3d4e5f60718293a4b');
+  });
+
+  it('still sanitizes a post id that carries characters a path cannot hold', () => {
+    const segs = resolvePostDirSegments({ ...base, postId: 'weibo_a/b:c*d' });
+
+    // The sanitizer's contract, unchanged by keeping the id longer.
+    expect(segs[2]).not.toMatch(/[\\/:*?"<>|]/);
   });
 });

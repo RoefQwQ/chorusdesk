@@ -3,20 +3,22 @@ import 'fake-indexeddb/auto';
 import type { Post } from '../src/types';
 import { db } from '../src/infrastructure/db/database';
 import { postService } from '../src/application';
-import { cleanupOldPosts, healBrokenPostMedia } from '../src/infrastructure/db/postRepository';
+import { cleanupOldPosts } from '../src/infrastructure/db/postRepository';
 
 /**
  * The non-deletion half of `postRepository`.
  *
  * The deletion lifecycle has its own invariant suite (`deletionInvariants.test.ts`);
- * these are the other exported mutations — bookmark / read flags, the storage
- * cleanup, and media healing — which had NO test at all until the coverage
- * baseline (audit P2-14) exposed `postRepository.ts` at 26% branch while
- * `channelSync` sat at 78%.
+ * these are the other exported mutations — bookmark / read flags and the storage
+ * cleanup — which had NO test at all until the coverage baseline (audit P2-14)
+ * exposed `postRepository.ts` at 26% branch while `channelSync` sat at 78%.
  *
  * Each assertion here is on stored state, because that is what the rest of the
- * app reads back: the flags are `0 | 1` for the index reason, cleanup must not
- * invent suppressions, and healing must rewrite the URL a card will render.
+ * app reads back: the flags are `0 | 1` for the index reason, and cleanup must not
+ * invent suppressions.
+ *
+ * (`healBrokenPostMedia` used to be covered here too. It was deleted 2026-09-14 —
+ * see the note in `useMediaMaintenance.ts` — so its block went with it.)
  */
 
 function post(overrides: Partial<Post> = {}): Post {
@@ -108,35 +110,3 @@ describe('cleanupOldPosts', () => {
   });
 });
 
-describe('healBrokenPostMedia', () => {
-  it('rewrites media and avatar URLs through toSecureMediaUrl and re-saves the row', async () => {
-    // Xiaohongshu's strict CDN form: `http://`/bare host must become the
-    // https, secure form the card renders.
-    await db.posts.put(post({
-      mediaList: [{ type: 'image', previewUrl: 'http://sns-img.example/a.jpg', originalUrl: 'http://sns-img.example/a.jpg' }],
-      authorMeta: { name: 'n', avatar: 'http://sns-avatar.example/b.jpg' },
-    }));
-
-    const healed = await healBrokenPostMedia();
-
-    expect(healed).toBe(1);
-    const row = await db.posts.get('xiaohongshu_heal_1');
-    expect(row?.mediaList[0].previewUrl.startsWith('https://')).toBe(true);
-    expect(row?.authorMeta?.avatar?.startsWith('https://')).toBe(true);
-  });
-
-  it('leaves already-secure rows untouched and reports zero healed', async () => {
-    await db.posts.put(post({
-      mediaList: [{ type: 'image', previewUrl: 'https://sns-img.example/a.jpg', originalUrl: 'https://sns-img.example/a.jpg' }],
-    }));
-
-    expect(await healBrokenPostMedia()).toBe(0);
-  });
-
-  it('handles rows with no media and no avatar without touching them', async () => {
-    await db.posts.put(post({ mediaList: [] }));
-
-    expect(await healBrokenPostMedia()).toBe(0);
-    expect(await db.posts.count()).toBe(1);
-  });
-});

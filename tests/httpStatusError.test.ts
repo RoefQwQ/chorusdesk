@@ -126,15 +126,17 @@ describe('every HTTP-fetching adapter routes its status through the classifier',
       bgFetch: async () => ({ ok: false, status: 429, data: '', statusText: 'Too Many Requests' }),
     }));
     const mod = (await import(modulePath)) as Record<string, { [k: string]: (...a: unknown[]) => Promise<{ error?: { code: string } }> }>;
+    // The adapter object is what carries `fetchLatest`; `fetchAjaxFallback` is a
+    // module-scoped function now (see `types.ts`), so it is imported by name
+    // rather than read off the adapter.
     const adapter = Object.values(mod).find((v) => v && typeof v === 'object' && 'platform' in v) as unknown as {
       platform: string;
       fetchLatest: (c: unknown, limit?: number, o?: unknown) => Promise<{ error?: { code: string } }>;
-      fetchAjaxFallback?: (c: unknown, limit: number, page: number) => Promise<{ error?: { code: string } }>;
     };
     const ch = channel(platform, 'u1');
     return method === 'fetchLatest'
       ? adapter.fetchLatest(ch, 10)
-      : adapter.fetchAjaxFallback!(ch, 10, 1);
+      : (await import(modulePath)).fetchAjaxFallback(ch, 10, 1);
   }
 
   it('xiaohongshu reports a 429 as rate_limit, so the platform cools down', async () => {

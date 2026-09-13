@@ -1,5 +1,4 @@
 import type { Post, RecycleSnapshot } from '../../types';
-import { toSecureMediaUrl } from '../../utils/media';
 import { db } from './database';
 
 /**
@@ -361,42 +360,4 @@ export async function setPostBookmarked(id: string, isBookmarked: boolean): Prom
  */
 export async function setPostRead(id: string): Promise<void> {
   await db.posts.update(id, { isRead: 1 });
-}
-
-/**
- * Heal broken or stale image URLs in local IndexedDB posts (e.g. Xiaohongshu strict CDN domains).
- * Returns the count of healed posts.
- */
-export async function healBrokenPostMedia(): Promise<number> {
-  const posts = await db.posts.toArray();
-  let healedCount = 0;
-
-  for (const post of posts) {
-    let changed = false;
-
-    if (post.mediaList && post.mediaList.length > 0) {
-      const newMediaList = post.mediaList.map(m => {
-        const securedPreview = toSecureMediaUrl(m.previewUrl);
-        const securedOriginal = toSecureMediaUrl(m.originalUrl);
-        if (securedPreview !== m.previewUrl || securedOriginal !== m.originalUrl) {
-          changed = true;
-        }
-        return { ...m, previewUrl: securedPreview, originalUrl: securedOriginal };
-      });
-      if (changed) post.mediaList = newMediaList;
-    }
-
-    const securedAvatar = post.authorMeta?.avatar ? toSecureMediaUrl(post.authorMeta.avatar) : undefined;
-    if (securedAvatar && securedAvatar !== post.authorMeta?.avatar) {
-      post.authorMeta = { ...post.authorMeta, avatar: securedAvatar };
-      changed = true;
-    }
-
-    if (changed) {
-      await db.posts.put(post);
-      healedCount++;
-    }
-  }
-
-  return healedCount;
 }

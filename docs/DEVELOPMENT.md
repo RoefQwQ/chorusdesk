@@ -192,7 +192,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 遵守平台节流：adapter 不做无界循环；批量/深挖的间隔由 sync 层保证（§8.3 表）。
 
 ### 8.2 图片三件套
-- 入库前：`toSecureMediaUrl()` 归一化（协议补全、小红书 avatar → `sns-avatar-qc.xhscdn.com`、XHS 永久 fileId 直链等已在 `utils/media.ts` 处理，改动先读该文件与 `postRepository.healBrokenPostMedia`）。
+- 入库前：`toSecureMediaUrl()` 归一化（协议补全、小红书 avatar → `sns-avatar-qc.xhscdn.com`、XHS 永久 fileId 直链等已在 `utils/media.ts` 处理，改动先读该文件）。
 - 渲染失败：先 `markImageFailed`，再 `proxyImage()`（`PROXY_IMAGE` 消息、候选 URL 列表、data URL）；不要在组件里重复实现 base64 转换（`handleProxyImage` 已有，含 8192 分块避免栈溢出）。
 - 离线缓存：`src/services/imageCache/`（File System Access）。写盘只在用户绑定目录后；目录选择必须由用户手势触发；路径分段由 `resolvePostDirSegments` 决定（`[创作者名, 平台中文名, YYYYMMDD_短id]`），文件名经 `sanitizePathSegment` 净化。
   - **新平台默认参与归档**；只有在「这个平台的图片存下来没有意义（源可随时重取，或托管方一律拒绝外站引用）」时才在 adapter 上声明 `archivesMedia: false`（见 `rss.ts`）。门在 `cacheMediaItem`/`cachePost` 的入口，卡片的自动保存与批量归档共用，不要在 UI 侧另加判断——两处条件必然分叉（AGENTS 规则 1 的同类失败模式）。**读取侧不加门**：已归档的文件必须继续可读。
