@@ -28,14 +28,20 @@ jobs:
 
       # Same gates as CI: a release must never be the first place a broken
       # build is discovered.
+      #
+      # `test:coverage`, not `test` — the per-file branch thresholds in
+      # vitest.config.ts apply ONLY when coverage runs, so `npm test` silently
+      # dropped the ratchet that protects the three modules whose bugs corrupt
+      # user data. `tests/workflows.gateParity.test.ts` now fails if this list and
+      # CI's diverge, so the two cannot drift apart again unnoticed.
       - name: Typecheck
         run: npm run typecheck
 
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests (with core-module coverage ratchet)
+        run: npm run test:coverage
 
       - name: Verify the tag matches package.json
         if: startsWith(github.ref, 'refs/tags/')

@@ -876,6 +876,46 @@ error message's own evidence pointed *at* the overlay, and its conclusion pointe
 
 ---
 
+## 35. Two hand-maintained lists of the same thing will diverge — derive one from the other
+
+`release.yml` carried the comment 「Same gates as CI: a release must never be the first place a
+broken build is discovered」 and then ran `npm test` while CI ran `npm run test:coverage`.
+
+**That one word mattered.** The per-file branch thresholds in `vitest.config.ts` apply **only**
+when coverage runs — `ci.yml`'s own comment says so on the step that runs it — so the ratchet
+protecting the three modules whose bugs silently corrupt user data **did not exist on the release
+path**. It was found by reading the two files side by side, and nothing could fail.
+
+- **Fixing the word is not fixing the class.** Both files hand-listed the gates, so the next gate
+  added would have been added to one of them again. This is the same shape as rule 27's missing
+  template import (a thing referenced but not declared) and rule 33's undocumented exports (a
+  contract with no failure signal): **a promise in a comment, and no signal when it stops being
+  true.**
+- **Derive both sides from the artifacts, never restate them.** `tests/workflows.gateParity.test.ts`
+  reads each workflow's own `run:` lines and extracts the npm scripts it invokes (checked against
+  `package.json`, so a typo is invisible rather than counted) — so "CI gained a gate" fails the
+  test too. A hardcoded expectation would go stale exactly as the comment did.
+- **State legitimate differences explicitly, one per line.** `SATISFIED_BY` says `test:coverage`
+  is satisfied only by itself, and `build` may be satisfied by `zip` — measured, by deleting
+  `.output/` and confirming `npm run zip` recreates `.output/chrome-mv3`. A blanket "must be
+  equal" would have been wrong; a blanket "roughly equal" would have let the real drift back in.
+- **Compare invocations, not just names.** The E2E step's `-s "-screen 0 1920x1080x24"` was a
+  genuine past defect (Xvfb's default screen is narrower than the window, so clicks near its edge
+  are dropped). One recipe, two callers — so the *command line* is asserted identical, not merely
+  "both run the gate".
+- **A hand-rolled structural check does not catch malformed YAML.** The first version of this test
+  scanned the files with regexes; breaking one `run:`'s indentation left every assertion green
+  while the file was already unparseable. Parse it with a real parser — and **declare** that
+  dependency (`js-yaml` was present only transitively, and relying on a transitive dep is the same
+  defect as rule 21). js-yaml v5 is ESM-only: `import * as yaml from 'js-yaml'`.
+- The generic test: **when the same list exists twice, make one of them computable from the
+  other, or add the test that fails when they disagree.** A comment claiming they agree is the
+  thing that was already there.
+
+> Full case history, measurements and logs: [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md#rule-35).
+
+---
+
 ## Fix queue
 
 全部 12 项 DONE 的债务台账**已移入 [docs/AGENTS_CASES.md](docs/AGENTS_CASES.md) 文末**（`## Fix queue`）。

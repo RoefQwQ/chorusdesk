@@ -881,3 +881,50 @@ await dialog.alert('已恢复为备份快照…')                   // ← 此�
 
 **推广形态**：「后续动作会出现在 `await` 之后」——任何假定「后续同步出现」的
 就绪探测，在中间有异步工作的应用里都是错的。要要求**静默期**，不是单次采样。
+
+---
+
+## Rule 35
+
+**35. Two hand-maintained lists of the same thing will diverge — derive one from the other**
+
+**事故**：`release.yml` 的注释写着
+
+> Same gates as CI: a release must never be the first place a broken build is discovered
+
+然后它跑 `npm test`，而 CI 跑 `npm run test:coverage`。
+
+**这一字之差是有后果的**：`vitest.config.ts` 的分文件分支阈值**只在 coverage 模式下生效**
+（`ci.yml` 在那一步的注释里自己写着这一点），所以保护「三个会静默损坏用户数据的模块」的
+棘轮（`channelSync.ts` / `postRepository.ts` / `backupRepository.ts`，见 audit P2-14）
+**在发布路径上根本不存在**。发现方式是人工对读两个文件——**没有任何东西会红**。
+
+**为什么这不是「改一个字」**：两个文件各自手工维护一份门禁清单。同形案例：
+规则 27（模板里用了但没导入的组件）、规则 33（加了导出但 ARCHITECTURE §4 没写）——
+**注释里的承诺 + 没有失败信号**。
+
+**改法**：
+- `release.yml` 改为 `npm run test:coverage`，与 CI 逐字一致。
+- 新增 `tests/workflows.gateParity.test.ts`：**从两个 workflow 自己的 `run:` 行推导**各自调用了
+  哪些 npm script（再对 `package.json` 的 scripts 过滤，所以写错的脚本名是「看不见」而不是
+  「算一个跑过的门禁」），然后要求 release 覆盖 CI 的每一个。**推导而非硬编码**——
+  「CI 加了门禁、release 忘了」也会红，否则这张清单自己也会像那句注释一样过期。
+- 两处**已测实的合法差异**用 `SATISFIED_BY` 逐条显式声明：`test:coverage` 只能由自身满足
+  （单向）；`build` 可由 `zip` 满足——**实测**：删掉 `.output/` 后 `npm run zip` 重建了
+  `.output/chrome-mv3`（规则 21：不靠未验证的上游行为）。一刀切的「必须相等」是错的，
+  「大致相等」则会把这个真缺陷放回来。
+- 还断言 E2E 的**命令行逐字相同**：`-s "-screen 0 1920x1080x24"` 曾经是真缺陷
+  （`xvfb-run` 默认 1280x1024 比 1440 宽的窗口还窄），一份配方两个调用方。
+
+**变异验证**：5/5 全杀，各自带具名断言——
+把 release 改回 `npm test` → `does not run: test:coverage`；
+删掉 release 的 lint 步骤 → `does not run: lint`；
+E2E 调用去掉 `-s` 屏幕参数 → `the E2E gate invocation differs between CI and release`；
+删掉 `steps:` 列表 → `has no steps list`；
+**把某个 `run:` 的缩进改坏 → `is not valid YAML: bad indentation of a mapping entry`**。
+
+**最后一条抓到了一个我自己的错**：第一版结构检查是**手写的正则扫描**，它在缩进坏掉时
+**仍然全绿**（YAML 已非法，正则却都能匹配）。我差点把这个假绿写进文档——
+改成**真正的 `js-yaml` 解析**才抓住。为此把 `js-yaml` 从**传递依赖提升为声明的
+devDependency**（原本只作为 `eslint` 的传递依赖存在，靠它属于规则 21 的形态）。
+顺带：js-yaml v5 是纯 ESM、**没有 default export**，必须 `import * as yaml`。

@@ -457,16 +457,17 @@ Twitter 标签页路径真的跑通了。
 | **21** | **规则 8 台账收敛** | 工程质量 | 实测 **7 处**直连（原文写 8，已过期） |
 | **22** | **`AGENTS.md` 规则 9/28/30 压到 ≤8 行** | 工程质量 | 实测 51/**49**/**53** 行 |
 | **23** | **`dashboardToolbar` 偶发未处理拒绝** | 工程质量 | ~1/8 次 |
-| **24** | **release.yml 与 CI 门禁一致性** | 工程质量 | Release 跑 `npm test`，CI 跑 `test:coverage`（棘轮在发布路径不生效） |
+| **24** | ~~**release.yml 与 CI 门禁一致性**~~ **已完成 2026-09-13** | 工程质量 | 已对齐 `test:coverage`；`tests/workflows.gateParity.test.ts` 兜底 |
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 
 **批次建议**（每批独立可交付、可验证）：
 
 - **批次 1（状态正确性）**：#2 SyncCoordinator + #3 RSS identity + #7 取消信号。
   三者都是"同一次操作在不同时序/不同入口下结果不同"，一起做才不会出现三套补丁。
-- **批次 2（规模）**：#5 hot-path 修复（便宜，先做）+ #9 聚合诚实。
-- **批次 3（能力模型）**：#6 capability + #8 proxy 上限。
-- **批次 4（工程质量）**：#11 E2E 拆分（CI 可信度是它自己的产品）+ #24 release 一致性。
+- **批次 2（规模）**：#5 hot-path 修复 + #9 聚合诚实——**两项均已完成**。
+- **批次 3（能力模型）**：#6 capability（**未做**）+ #8 proxy 上限（**已完成**）。
+- **批次 4（工程质量）**：#11 E2E 根因已修、#24 已完成；**#11 的拆分仍未做**（一个 click 失败
+  仍会 skip 掉后面 8 步——根因修好后这个放大效应才成为主要遗留问题）。
 - **批次 5（证据）**：#18/#19/#20。
 - **长期**：#10 分页重构、#16 MessageMap、#17 平台单一来源、#13 缓存 identity。
 
@@ -499,6 +500,36 @@ await dialog.alert('已恢复为备份快照…')      // ← 空窗之后才入
 
 **修法**：不再假设同步。`answered > 0` 之后，要求「连续 `DIALOG_SETTLE_MS` 内没有新 dialog」
 才认定突发结束，总预算 `DIALOG_SETTLE_BUDGET_MS` 封顶（规则 24：量级要显式）。
+
+**#24 release.yml 与 CI 门禁一致性 —— 已完成（2026-09-13）**
+
+`release.yml` 写着「Same gates as CI: a release must never be the first place a broken build is
+discovered」，然后跑 `npm test`，而 CI 跑 `npm run test:coverage`。**这一字之差是有后果的**：
+`vitest.config.ts` 里的分文件分支阈值**只在 coverage 模式下生效**（`ci.yml` 自己的注释就写着
+这一点），所以那道保护「三个会静默损坏用户数据的模块」的棘轮，**在发布路径上根本不存在**。
+发现方式是人工对读两个文件——**没有任何东西会红**。
+
+**为什么不是「改一个字」就完事**：两个文件各自手工维护一份门禁清单。这和规则 27 缺失的
+模板导入、规则 33 未登记的导出是同一个形状——**清单靠手抄，注释里写着承诺，两边分叉时没有信号**。
+只改那一字，下次加门禁还会只加一边。
+
+**改法**：
+- `release.yml` 的测试步骤改为 `npm run test:coverage`（与 CI 逐字一致）。
+- 新增 `tests/workflows.gateParity.test.ts`：**从两个 workflow 自己的 `run:` 行推导**各自调用了
+  哪些 npm script，然后要求 release 覆盖 CI 的每一个。推导而非硬编码，所以「CI 加了门禁、
+  release 忘了」也会红——否则这张清单自己也会过期。
+- 两处**已测实的合法差异**用 `SATISFIED_BY` **显式声明**，而不是放宽成「大致相等」：
+  - `test:coverage` 只能由 `test:coverage` 满足（单向，`test` 不算）；
+  - `build` 可由 `zip` 满足——**实测**：删掉 `.output/` 后 `npm run zip` 会重新生成
+    `.output/chrome-mv3`（规则 21：不要靠未验证的上游行为）。
+- 另外断言 E2E 的**调用方式**两边逐字相同：那个 `-s "-screen 0 1920x1080x24"` 曾经是真缺陷
+  （`xvfb-run` 默认 1280x1024 比 1440 宽的窗口还窄，窗口边缘的点击会被 X server 丢弃），
+  一份配方两个调用方，不该各写一遍。
+
+**验证**：3 个变异全部被具名断言杀死——
+把 release 改回 `npm test` → `does not run: test:coverage`；删掉 release 的 lint 步骤 →
+`does not run: lint`；把 E2E 调用去掉 `-s` 屏幕参数 →
+`the E2E gate invocation differs between CI and release`。恢复后全绿。
 
 **#2 SyncCoordinator** —— **已完成**。新增 `src/sync/syncCoordinator.ts`。
 
