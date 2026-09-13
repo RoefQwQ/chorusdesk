@@ -159,6 +159,24 @@ const localMediaUrls = ref<Record<string, string>>({});
  */
 const mediaProbed = ref<Record<string, boolean>>({});
 
+/**
+ * How long the disk probe may gate an `<img>` before the card shows the network
+ * image anyway.
+ *
+ * The gate exists to avoid a wasted request when a file is already on disk (the
+ * browser aborts an in-flight image load the moment `src` changes). That is worth
+ * having — but not at the price of a blank card: `getLocalCachedMediaUrl` walks
+ * `getDirectoryHandle` for the post directory and, on a miss, retries **every**
+ * extension in `CACHED_IMAGE_EXTENSIONS`, so on a real filesystem it can take
+ * seconds. The user reported pixiv cards that stayed blank, and the placeholder
+ * is a pulsing icon, which reads as "loading" indefinitely rather than as a
+ * failure.
+ *
+ * Past this deadline the network URL is shown; the probe keeps running and
+ * `localMediaUrls` upgrades the image to the local blob on a later render.
+ */
+const MEDIA_PROBE_DEADLINE_MS = 700;
+
 // Pre-initialize mediaFailedMap with already known failed URLs
 const mediaFailedMap = ref<Record<string, boolean>>({});
 
@@ -229,7 +247,7 @@ async function probeMedia(): Promise<void> {
 
   // Probe every item, then release the `<img>`s together: a per-item release
   // would re-trigger layout for each answer.
-  await Promise.all(cardMedia.value.map(async (item, i) => {
+  const probe = Promise.all(cardMedia.value.map(async (item, i) => {
     const original = item.previewUrl || item.originalUrl;
     if (!original) return;
     try {
@@ -250,6 +268,14 @@ async function probeMedia(): Promise<void> {
       // Local cache miss is expected on first view; fall through to network.
     }
   }));
+
+  // Release the gate on a deadline, not only on the probe's answer: a probe that
+  // is slow or wedged must not leave the card blank forever (see
+  // `MEDIA_PROBE_DEADLINE_MS`).
+  await Promise.race([
+    probe,
+    new Promise((resolve) => setTimeout(resolve, MEDIA_PROBE_DEADLINE_MS)),
+  ]);
 
   for (const item of cardMedia.value) {
     const key = item.previewUrl || item.originalUrl;
@@ -518,18 +544,33 @@ function toggleBookmark() {
             </a>
           </div>
 
-          <!-- Normal Single Image Display -->
+          <!-- Normal Single Image Display
+
+               `object-cover` cropped it. Measured in a real browser (isolated
+               instance, the extension's own stylesheet) on this feed's own data:
+               a 900x1200 work in a 433px column was given a 433x460 holder,
+               because `max-h-[460px]` capped the height the ratio asked for
+               (577px). The box's ratio became 0.94 while the image's is 0.75, so
+               `object-cover` cut the sides off — the user's 「只显示一部分图片」,
+               reproduced exactly, and it hits precisely the 801x1200 / 900x1200
+               works while landscape ones are unaffected (their ratio is >= 1).
+
+               The height now follows the width and the real ratio (`h-auto`)
+               with no cap on the holder, and `object-contain` as a belt-and-
+               braces guarantee: at the ratio the box already matches the image,
+               so contain and cover are identical, and if a future cap does bite,
+               the image letterboxes instead of losing its edges. -->
           <div
             v-else
             @click.stop="openMedia(localMediaUrls[post.mediaList[0].previewUrl] || post.mediaList[0].previewUrl, 'image')"
-            class="relative min-h-[160px] max-h-[460px] rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 cursor-zoom-in group/img flex items-center justify-center"
+            class="relative min-h-[160px] rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 cursor-zoom-in group/img flex items-center justify-center"
           >
             <img
               v-if="mediaProbed[post.mediaList[0].previewUrl]"
               :src="getMediaDisplayUrl(post.mediaList[0].previewUrl)"
               referrerpolicy="no-referrer"
               loading="lazy"
-              class="w-full h-full max-h-[460px] object-cover group-hover/img:scale-103 transition-transform duration-300 ease-out"
+              class="w-full h-auto max-h-[560px] object-contain group-hover/img:scale-103 transition-transform duration-300 ease-out"
               @load="handleMediaLoad(post.mediaList[0].previewUrl, 0)"
               @error="handleMediaError($event, post.mediaList[0].previewUrl, 0)"
             />

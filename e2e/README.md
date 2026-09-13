@@ -92,6 +92,28 @@ Chrome 路径可用 `--chrome <path>` 或 `CHROME_PATH` 指定；profile 自建�
 
 ## 一次性探针
 
+### `media-card-geometry.mjs` — 媒体卡片的几何（图片有没有被裁）
+
+回答单元测试回答不了的问题：单图卡片**实际给作品多大的框**，`object-fit` 有没有裁掉它。
+jsdom 把每个高度都报成 0，这些数字只在真实排版引擎里存在（规则 30）。
+
+```bash
+npm run build
+node e2e/media-card-geometry.mjs                    # 1568x898（报告者的窗口）
+node e2e/media-card-geometry.mjs --width 2100       # 更宽的列
+node e2e/media-card-geometry.mjs --shot out.png     # 另存全页截图
+```
+
+它播种 6 张**公开** pixiv 作品（比例跨故障边界：801×1200、900×1200、1200×1200、1200×800…），
+然后逐卡打印 `natural / holder / object-fit / 是否裁切`；**有裁切或未加载则退出码 1**。
+
+2026-09-14 用它定位到：`max-h-[460px]` 把 900×1200 的作品在 433px 列下压成 433×460，
+比例从 0.75 扭成 0.94，`object-cover` 于是裁掉两边——**只有比例低于列宽的竖图受影响**，
+横图从来没事，这正是用户点名特定几张的原因。
+
+图片 URL 走扩展页面加载，因为 `i.pximg.net` 需要 pixiv Referer，而那由扩展自己的 DNR
+规则（1002）提供——在裸 `about:blank` 上跑是 403。
+
 ### `douyin-probe.mjs` — 抖音创作者页面结构探针
 
 验证采集器依赖的页面事实：登录面板状态、作品总数候选元素、作品网格与真实滚动容器、驱动滚动后的网格增长与声明总数对比。结果同时打印到 stdout 并写入 `[out.json]`（默认 `e2e/probe-result.json`，该文件按 `.gitignore` 不入库——它是本机一次实测的产物，不是仓库内容）。

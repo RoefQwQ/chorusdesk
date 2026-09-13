@@ -1,0 +1,18 @@
+{
+  "error": false,
+  "body": {
+    "createDate": "2026-07-22T16:14:00+00:00",
+    "uploadDate": "2026-07-22T16:14:00+00:00",
+    "illustType": 0,
+    "pageCount": 1,
+    "urls": {
+      "mini": "https://i.pximg.net/c/48x48/custom-thumb/img/2026/07/23/01/14/52/147520202_p0_custom1200.jpg",
+      "thumb": "https://i.pximg.net/c/250x250_80_a2/custom-thumb/img/2026/07/23/01/14/52/147520202_p0_custom1200.jpg",
+      "small": "https://i.pximg.net/c/540x540_70/img-master/img/2026/07/23/01/14/52/147520202_p0_master1200.jpg",
+      "regular": "https://i.pximg.net/img-master/img/2026/07/23/01/14/52/147520202_p0_master1200.jpg",
+      "original": "https://i.pximg.net/img-original/img/2026/07/23/01/14/52/147520202_p0.png"
+    },
+    "id": "147520202",
+    "title": "帰り道"
+  }
+}

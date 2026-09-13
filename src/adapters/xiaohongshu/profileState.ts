@@ -40,6 +40,103 @@ export function hasInitialStateMarker(html: string): boolean {
   return STATE_MARKERS.some((marker) => html.includes(marker));
 }
 
+/**
+ * Make an SSR state object literal parseable as JSON.
+ *
+ * The page writes this object as **JavaScript**, not JSON, so it embeds values
+ * JSON has no syntax for. The user's own log is the evidence:
+ *
+ *     Unexpected token 'e', ..."tailMap":new Map([])"... is not valid JSON
+ *
+ * The previous version replaced bare `undefined` only, so `new Map([])` — which is
+ * on the **note detail** page, the one `enrichImageNoteMedia` fetches — made the
+ * whole parse throw. The result was user-visible and silent: the detail page
+ * carried no `imageList`, so a multi-image note kept its single cover, and the
+ * only symptom was that images were missing.
+ *
+ * Every non-JSON construct becomes `null`: these are page-internal caches and
+ * sentinels (`tailMap`, MobX bookkeeping) that no consumer reads, and preserving
+ * the surrounding data is what matters — losing one cache field beats losing the
+ * whole state, which is what throwing does.
+ *
+ * The scan tracks string literals so a body that merely *contains* the text
+ * `new Map(` is left alone; `JSON.parse` then always sees the original string.
+ */
+function toJsonObjectLiteral(raw: string): string {
+  let out = '';
+  let i = 0;
+  let inString = false;
+
+  while (i < raw.length) {
+    const ch = raw[i];
+
+    if (inString) {
+      out += ch;
+      if (ch === '\\') {
+        // Copy the escaped character verbatim, whatever it is.
+        out += raw[i + 1] ?? '';
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i++;
+      continue;
+    }
+
+    const rest = raw.slice(i);
+
+    // `new Map([])`, `new Set([…])`, `new Date(…)` — skip the whole expression,
+    // balanced, so a nested `)` or a string inside it cannot end it early.
+    const ctor = /^new\s+(?:Map|Set|WeakMap|WeakSet|Date)\s*\(/.exec(rest);
+    if (ctor) {
+      let depth = 0;
+      let j = i;
+      for (; j < raw.length; j++) {
+        const c = raw[j];
+        if (c === '"') {
+          // A string inside the constructor: skip it, escapes included.
+          for (j++; j < raw.length && raw[j] !== '"'; j++) {
+            if (raw[j] === '\\') j++;
+          }
+          continue;
+        }
+        if (c === '(') depth++;
+        else if (c === ')') {
+          depth--;
+          if (depth === 0) {
+            j++;
+            break;
+          }
+        }
+      }
+      out += 'null';
+      i = j;
+      continue;
+    }
+
+    // The single-token non-JSON literals. `-Infinity` first: `Infinity` would
+    // match it at offset 1 and leave a stray `-`.
+    const literal = /^(?:-Infinity|undefined|NaN|Infinity)\b/.exec(rest);
+    if (literal) {
+      out += 'null';
+      i += literal[0].length;
+      continue;
+    }
+
+    out += ch;
+    i++;
+  }
+
+  return out;
+}
+
 /** The `window.__INITIAL_STATE__` / `__INITIAL_SSR_STATE__` payload of a page. */
 export function extractInitialState(html: string): JsonRecord | null {
   if (!html) return null;
@@ -60,12 +157,12 @@ export function extractInitialState(html: string): JsonRecord | null {
               const quoteEnd = raw.lastIndexOf('"');
               if (quoteStart !== -1 && quoteEnd > quoteStart) {
                 const inner = JSON.parse(raw.slice(quoteStart, quoteEnd + 1)) as unknown;
-                return asRecord(JSON.parse(String(inner)));
+                // The string inside `JSON.parse("…")` is itself a JS literal, so
+                // it needs the same treatment after unescaping.
+                return asRecord(JSON.parse(toJsonObjectLiteral(String(inner))) as unknown);
               }
             } else if (raw.startsWith('{')) {
-              // Real SSR HTML contains bare `undefined` tokens, which are not JSON.
-              const cleaned = raw.replace(/:\s*undefined\b/g, ': null');
-              return asRecord(JSON.parse(cleaned) as unknown);
+              return asRecord(JSON.parse(toJsonObjectLiteral(raw)) as unknown);
             }
           }
         }

@@ -4,6 +4,7 @@ import { PLATFORM_REGISTRY } from '../types';
 import type { FetchError, FetchOptions, FetchResult } from '../adapters/types';
 import { canRunInServiceWorker, fetchError } from '../adapters/types';
 import { getAdapter } from '../platform/registry';
+import { fantiaCommentText } from '../adapters/fantia';
 import { IS_SERVICE_WORKER } from '../utils/runtime';
 import { isChannelRunning, notePlatformFinished, withChannelRun } from './syncCoordinator';
 import { GENERATED_NAME_PREFIXES } from '../utils/urlParser';
@@ -209,6 +210,40 @@ function isXhsNoteLinkMissingToken(stored: string, fresh: string): boolean {
 }
 
 /**
+ * A stored Fantia body that must be replaced by the freshly parsed one.
+ *
+ * Two shapes, both produced by bugs this project shipped, and both measured on
+ * the user's own database:
+ *
+ *  1. **The stored body is a raw Quill delta.** Before `fantiaCommentText`
+ *     existed, `p.comment` was written into `Post.content` verbatim, so the card
+ *     rendered `{"ops":[{"insert":"本編→"},{"attributes":{"link":"…"},…`. The shape
+ *     is unambiguous: a body that *parses as a delta* and carries no prose of its
+ *     own. `fantiaCommentText(stored) !== stored` is the exact test — it asks the
+ *     shipped decoder whether it would have changed this string, which is the
+ *     same question the bug answers.
+ *  2. **The stored body is exactly the stored title.** The club list omits
+ *     `comment` for most posts, `fantiaCommentText` falls back to the title, and
+ *     the card renders no heading when body and title agree
+ *     (`titleRepeatsContent`) — so the post read as one line and then stopped.
+ *
+ * Both converge: after one repair the fresh body differs and neither condition
+ * matches again. `fresh.content !== stored.content` is required in both cases so
+ * a genuinely empty fresh body never rewrites a row with nothing.
+ */
+function isFantiaBodySuperseded(stored: Post, fresh: Post): boolean {
+  if (fresh.content.trim() === stored.content.trim()) return false;
+  const body = stored.content.trim();
+  // Raw delta: the decoder changes it. `fantiaCommentText` returns plain text
+  // unchanged, so this cannot fire on a body that was already decoded — and a
+  // stored body that merely *starts* with `{` but is valid plain text is left
+  // alone by that same function (it returns it verbatim when it does not parse).
+  if (fantiaCommentText(body) !== body) return true;
+  const title = (stored.title || '').trim();
+  return title.length > 0 && body === title;
+}
+
+/**
  * Whether a stored row's text should be replaced by what the adapter just parsed.
  *
  * Deliberately per-platform and narrow. Each rule matches only a shape that can
@@ -216,8 +251,9 @@ function isXhsNoteLinkMissingToken(stored: string, fresh: string): boolean {
  * never discard correct content: the RSS rule needs the freshly parsed body to be
  * strictly longer (bodies only ever get more complete), the Twitter rules need a
  * body that is either solely a media link or the fresh text plus nothing but
- * trailing t.co links, and the xiaohongshu rule needs a bare `explore/<id>` link
- * that the fresh row improves with a token.
+ * trailing t.co links, the xiaohongshu rule needs a bare `explore/<id>` link
+ * that the fresh row improves with a token, and the fantia rule needs the stored
+ * body to be a raw delta or exactly the stored title.
  */
 export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
   if (stored.platform !== fresh.platform) return false;
@@ -228,6 +264,9 @@ export function shouldRepairStoredContent(stored: Post, fresh: Post): boolean {
   }
   if (stored.platform === 'xiaohongshu') {
     return isXhsNoteLinkMissingToken(stored.originalUrl, fresh.originalUrl);
+  }
+  if (stored.platform === 'fantia') {
+    return isFantiaBodySuperseded(stored, fresh);
   }
   return false;
 }

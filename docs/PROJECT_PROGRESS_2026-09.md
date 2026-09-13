@@ -6,7 +6,7 @@
 > 两者都是**冻结的历史**，不与代码同步，其中的行数、测试计数与提交号只是当时的快照。
 >
 > **目录**
-> - [现状速览](#现状速览截至-2026-09-12) — 只写**现在**是什么状态
+> - [现状速览](#现状速览截至-2026-09-14) — 只写**现在**是什么状态
 > - [二、仍然存在的不足](#二仍然存在的不足) — 只列**仍未关闭**的项
 > - [三、当前成熟度判断](#三当前成熟度判断)
 > - [四、未来开发方向与待办](#四未来开发方向与待办) — P6（不排期）/ **P7 真机验证清单** /
@@ -15,12 +15,16 @@
 > 规则与案例：[../AGENTS.md](../AGENTS.md) / [AGENTS_CASES.md](AGENTS_CASES.md)。
 > 已做的产品决定：[PRODUCT_DECISIONS.md](PRODUCT_DECISIONS.md)。
 
-## 现状速览（截至 2026-09-12）
+## 现状速览（截至 2026-09-14）
 
 > **接手本项目**：待办入口是[四.P8 队列](#p8交接队列与未来方向唯一待办入口)。
 > 本节只描述状态。
+>
+> **未提交**：批次 8（2026-09-14，三个适配器缺陷 + 媒体卡片几何）与批次 9（同日的
+> fantia 正文取错来源 + 空媒体）改动都在工作区里，
+> 见[四.P8 基线](#交接基线接手前先核对)。
 
-**质量门禁（2026-09-12 实测）**
+**质量门禁（2026-09-14 实测）**
 
 | 门禁 | 命令 | 结果 |
 |---|---|---|
@@ -144,7 +148,9 @@ schema 变化，不是网络故障）。
 | rss | `parse` + `content`（`repair` 测的是存量行谓词，不 import adapter） | 有 |
 | twitter | `emptyTimeline` + `twitterTimeline.injected` | **无**（payload 由 `tweetEntry()` 手工构造） |
 | youtube | `youtube.handle.test.ts` | 无（有意不补 RSS 映射） |
-| weibo / pixiv / fantia | **无** | 无 |
+| weibo | **无** | 无 |
+| pixiv | `pixiv.media.test.ts`（4 例，**2026-09-14**） | **有**（`tests/fixtures/pixiv/illust-147520202.json`，逐字取自 `/ajax/illust/{id}`） |
+| fantia | `fantia.content.test.ts`（12 例）+ `fantia.repair.test.ts`（8 例）+ `fantia.repair.e2e.test.ts`（2 例，**2026-09-14**） | **有**（`tests/fixtures/fantia/`：club、post、俱乐部整页 6 条的真实详情，逐字取自真实接口） |
 
 **最高优先是 Twitter 的真实 payload**：它的现有 fixture 是手工构造的，而该 helper 的历史版本
 **把 bug 编码了进去**（嵌套多一层，正好匹配解析器当时读的位置，见规则 15/21）——
@@ -177,20 +183,23 @@ schema 变化，不是网络故障）。
 **有意不补的**（记录以避免被当成疏漏）：`youtube.ts` 的 RSS 映射、`douyin` 的注入时序细节
 （只能真机观察）。见 [DEVELOPMENT.md](DEVELOPMENT.md) §10。
 
-**`#19` 为什么这次没做，以及它到底卡在哪**（不是「没时间」，是一个真实的顺序约束）：
+**`#19` 的 pixiv / fantia 已于 2026-09-14 完成，且此前「先抽解析段才能测」的判断是错的**：
 
-本仓的既定做法是**先抓逐字真实载荷做 fixture，再提纯解析段，最后断言同一份 fixture 结果不变**
-（`342ce6c` → `e4c8b56` → `bc0ffc3` 这条链）。理由是规则 15/21：**手写 fixture 只能证明
-「解析器与自己一致」**，而 Twitter 那次的 fixture 正好把 bug 编码了进去。
+当时的判断是：解析内联在 `fetchLatest` 里，必须先抽解析段才能测，而「先抽后测、没有真实载荷
+兜底」是最该避免的顺序——于是把它记成「不能靠努力解决」。
 
-weibo / pixiv / fantia 现在还**不具备**这个前提：三者的解析**内联在 `fetchLatest` 里**，
-与 `bgFetch` 调用、分页、enrichment 纠缠在一起（不像 bilibili / rss 已有独立解析段）。
-要测就必须先**抽解析段**，那是对**零测试的在线代码**做重构——正是最该避免的顺序。
-**先抽后测、且没有真实载荷兜底，无法证明重构没改变行为。**
+批次 8 证明**不必先重构**。做法是：抓一份逐字真实载荷做 fixture，**用 `vi.mock` 替换
+`src/infrastructure/chrome/http` 的 `bgFetch`**，然后**直接调 `fetchLatest`**——解析段依然内联，
+但它读的就是真实响应，断言的是「同一份 fixture 产出什么」。载荷用 `curl` 加一个 `Referer`
+即可取到（pixiv 的 `/ajax/illust/{id}` 是公开端点），不需要导出流程也不需要真机会话。
 
-所以顺序是：**拿到一份真实载荷 → 提纯解析段 → 断言结果不变 → 才补测试**。
-在那之前，「解析测试」这件事**不能靠努力解决**。捕获真实载荷需要用户在实际使用中导出
-（或一次真机会话），不是本地能生成的。
+这暴露了原判断的漏洞：把「可测」与「可重构」绑在了一起。**内联解析不等于不可测**，
+只要能把网络那一层换成 fixture。
+
+**仍需要先抽解析段的情形**：要断言的是**纯函数级**行为（如「这个字符串怎么被解析」）时。
+pixiv/fantia 这批断言的是「真实响应 → `Post` 的字段」，正好不需要。
+
+**weibo 仍未做**（队列 #19 剩下的那半）。
 
 ### 4. 规则 8 的直连台账仍有 7 处
 
@@ -472,8 +481,10 @@ UI 面约 26 个组件/视图，`assets/main.css` 仅 36 行设计令牌。用�
 
 #### 交接基线（接手前先核对）
 
-- **代码基线**：`master`，工作区干净，与 `origin/master` 同步。接手第一件事：`git status -sb`
+- **代码基线**：`master`，与 `origin/master` 同步。接手第一件事：`git status -sb`
   与 `git log -1 --oneline`（此处**不写提交哈希**——它每次提交都变，写死即过期）。
+  **注意**：批次 8（2026-09-14）**尚未提交**——工作区有 4 个改动文件 + 4 个新测试文件
+  + 1 个新探针，`git status --short` 会看到它们。先决定提交还是继续。
 - **门禁全绿**：`npm run typecheck`、`npm run lint`、`npm test`、`npm run test:coverage`、
   `npm run build`、`npm run e2e`。**具体测试数不写死**（运行即得）。
 - **读序**：`AGENTS.md`（33 条规则 + Non-goals，**必读**）→ `docs/ARCHITECTURE.md`（当前事实
@@ -524,7 +535,7 @@ Twitter 标签页路径真的跑通了。
 | **16** | **MessageMap 类型协议**（长期） | 工程质量 | 完整版仍未做；**其可判定的一半已完成 2026-09-13**——`tests/messageRouter.test.ts` 钉住策略表↔分支双向一致 + fail-closed |
 | **17** | ~~**Platform 声明性事实单一来源**~~ **已按本节标准收口 2026-09-13** | 工程质量 | 两份清单双向编译器兜底；补了 `PLATFORM_HOSTS` 覆盖断言；**不引入 `PlatformDefinition`** |
 | **18** | **Twitter 真实 payload fixture** | 证据 | 手工 fixture 曾把 bug 编码进去 |
-| **19** | **weibo / pixiv / fantia 解析测试** — **阻塞于真实载荷**（见下） | 证据 | 三个适配器的解析**内联在 `fetchLatest` 里**，与请求纠缠 |
+| **19** | ~~**weibo / pixiv / fantia 解析测试**~~ **pixiv + fantia 已完成 2026-09-14（批次 8）** | 证据 | 两者现用真实 fixture 直测（4 + 7 例）；**weibo 仍缺**——解析仍内联在 `fetchLatest` 里 |
 | **20** | ~~**`autoSync` / `platformAuth` 单元测试**~~ **已完成 2026-09-13** | 证据 | `platformAuth` 9 例；`autoSync` 用法已在 `autoSync.capability.test.ts` 覆盖 |
 | **21** | ~~**规则 8 台账收敛**~~ **已一致（2026-09-13）** | 工程质量 | AGENTS 与实测**均为 7 处**；剩余直连属既定欠债，不是数字漂移 |
 | **22** | ~~**`AGENTS.md` 规则 9/28/30 压到 ≤8 行**~~ **已按实测改判 2026-09-13** | 工程质量 | 前提不成立（详见下）；改为**修规则 9 的误归类**，49 → 38 行 |
@@ -533,6 +544,8 @@ Twitter 标签页路径真的跑通了。
 | **25** | **平台适配器接口里的 Twitter 私有方法** | 工程质量 | `parseGraphQLResult?` / `fetchAjaxFallback?` |
 | **26** | ~~**小红书深挖只能取到最近一屏**~~ **已完成 2026-09-14** | 能力错配 | 页面驱动回溯（collector + contract + `FETCH_XHS_NOTES`）；**滚动是否真能加载第 31 条仍未实测**，见 `XIAOHONGSHU_RESEARCH` §9 |
 
+| **27** | **删除「小红书图裂修复」**（`healBrokenPostMedia` + 设置页入口） | 工程质量 | 用户 2026-09-14 明确表态：「那个修小红书图裂的是超级老的功能了，后续已经可以考虑删了」。它做的事只有 `toSecureMediaUrl` 与头像 https 化，且**是全表 `toArray()` 扫描**；`runMediaHealingOnce` 已把它移出 reload hot path（#5）。删它要连**设置页按钮 + `useMediaMaintenance.handleHealBrokenMedia` + 规则 8 台账里的 `postRepository` 直连**一起动 |
+
 **批次建议**（每批独立可交付、可验证）：
 
 - **批次 1（状态正确性）**：#2 SyncCoordinator + #3 RSS identity + #7 取消信号。
@@ -540,9 +553,129 @@ Twitter 标签页路径真的跑通了。
 - **批次 2（规模）**：#5 hot-path 修复 + #9 聚合诚实——**两项均已完成**。
 - **批次 3（能力模型）**：#6 capability（**未做**）+ #8 proxy 上限（**已完成**）。
 - **批次 4（工程质量）**：#11、#24、#14、#16 的可判定半、#23 **均已完成**（2026-09-13）。
-- **批次 5（证据）**：#20 已完成；**#18/#19 阻塞于真实载荷**（见 §3 的说明）。
+- **批次 5（证据）**：#20 已完成；**#18 仍阻塞**；**#19 的 pixiv/fantia 已完成（批次 8）**，
+  只剩 weibo 未做。
 - **批次 6（能力错配）**：**已完成**（#6，2026-09-13）。
 - **长期**：#10 分页重构、#16 MessageMap、#17 平台单一来源、#13 缓存 identity。
+
+---
+
+#### 已完成（批次 9：fantia 正文仍显示原始 delta，2026-09-14）
+
+用户第二次报「fantia 正文依旧不是纯文字」（附卡片截图 + 开发者日志）。**第一次诊断错了**，
+按日志重判后根因不同。两次报的是**同一张卡片**，但它不是批次 8 修的那条
+（批次 8 修 4228374；截图是 4236630）。
+
+**日志给出的事实**（`local://paste-2.md`，03:30:37–40）：
+
+```
+fantia/迷夜ゆめ 开始同步（常规） | 上限 10 条，水位线 2026/9/13 11:29:37
+bgFetch: fantia.jp → HTTP 200 | 23313 字符        ← 俱乐部列表成功
+bgFetch: fantia.jp → HTTP 403 | 26 字符           ← 详情请求被拒（共 3 次）
+channelSync: fantia/迷夜ゆめ 同步完成 | 新增 0 条，平台返回 6 条，hasMore=false
+```
+
+**真根因（三条叠加，全部有实测或日志支撑）**
+
+| # | 事实 | 后果 |
+|---|---|---|
+| 1 | 存量行里存的是**原始 delta**（截图逐字：`{"ops":[{"insert":"本編→"},{"attributes":{"link":"…"},"insert":"…"},{"insert":"\n"}]}`） | 卡片渲染原始 JSON。这行是 `fantiaCommentText` 存在**之前**的构建写的 |
+| 2 | 所有 6 条都**在水位线之下**（`新增 0 条，平台返回 6 条`） | 不走新行写入，只走**修复**分支 |
+| 3 | 而修复规则当时要求 `content === title`——**delta 不等于标题** | 规则永不匹配，该行**每次同步都存活**。这才是用户「同步过了还是这样」的机制 |
+| 4 | 详情请求 **403**（会话相关，匿名 200、登录态 403） | 正文与图集都拿不到更新；而这一失败**只记在 `bgFetch` 的 warn 里**，频道仍报「同步完成」 |
+
+**修法**
+
+1. **修复规则改为认「原始 delta」这个真实形态**（`isFantiaBodySuperseded`）：
+   `fantiaCommentText(stored) !== stored` 即判定——**问的是解码器本身会不会改这个字符串**，
+   与缺陷问的是同一个问题。仍保留 `content === title` 那条。`fresh !== stored` 两侧都要求，
+   所以空的正文永远不会把行改写。
+2. **详情请求失败上报为 `degraded` + `warnings`**（规则 13 的既有机制），
+   措辞点名 403 与「正文与图集沿用列表数据」。此前平台拒绝与「账号本来就没内容」在界面上
+   完全一样。
+3. 批次 9 早前的两项改动保留（详情 `comment` 取回、`thumb_micro` 回退、上限 3→6）。
+
+**为什么让修复能生效**：登录态下**列表本身**就带 delta（匿名列表 `comment: null`，
+登录态 23313 字节 > 匿名 18603），所以 `fantiaCommentText` 在**列表路径**就能解出正文，
+不需要那次 403 的详情请求。正文与图集因此**互不阻塞**。
+
+**验证**
+
+- **10 例**于 `tests/fantia.repair.test.ts`（含用户那行的**逐字** delta）+
+  **2 例** `tests/fantia.repair.e2e.test.ts`，其中最关键的一条断言：
+  `fantiaCommentText(存量的 delta) === 新解析的正文`——**这正是「替换是安全的」的全部理由**，
+  若两者不等，修复就是拿一个错正文换另一个。
+- **变异全杀**：去掉 delta 判定臂 → 红；把它放宽成 `body.startsWith('{')` → 红；
+  详情失败不计数 → 「degraded」用例红。
+- 全量 907 例通过；`typecheck` / `lint` 0 问题。
+
+**已知未做 / 需要注意**
+
+- **403 是平台行为，本地无法消除**：匿名访问详情端点 200，登录态 403。
+  代价是**图集**（列表只给一张缩略图）；正文不再受影响。
+- **未在用户会话复验**。用户刷新扩展后，4236630 的正文应显示
+  `本編→https://fantia.jp/posts/3210183`；若仍显示原始 JSON，则说明列表路径也没解到，
+  需要再取一次 `新增 0 条` 后的日志。
+
+---
+
+#### 已完成（批次 8：三个适配器缺陷 + 媒体卡片几何，2026-09-14）
+
+用户报：pixiv 卡片「时间全是刚刚」「图片取不到」，fantia 正文渲染出 `{"ops":…` 原始 JSON，
+小红书图裂，以及 pixiv 部分卡片**只显示一部分图片**。全部按**真实载荷**定位，未靠推断。
+
+**根因与修复**
+
+| 平台 | 根因（实测） | 修复 |
+|---|---|---|
+| pixiv | `/ajax/user/{uid}/profile/all` **只返回 id**。适配器用 ID 线性外推时间（作品 147520202 实际 2026-07-22，公式算成 2026-09-13，再被 `Math.min(Date.now())` 夹成「现在」）；预览写的是 `decorate.php` | 改从 `/ajax/illust/{id}` 读 `createDate`/`uploadDate` 与 `urls.regular/original`；排序移到补全**之后** |
+| pixiv | 补全**每轮上限 3 个**，10 条里 7 条永远拿不到真图 | 上限删掉，改为按**请求**配速（`PIXIV_ENRICH_INTERVAL_MS`）——被计量的是请求，不是作品 |
+| fantia | `comment` 可能是 **Quill delta**（`{"ops":[…]}`），原样写进 `Post.content` | 新增 `fantiaCommentText()` 解码为纯文本 |
+| fantia | 正文与图集的键名**都不存在**：读 `post_content`（实际 `post_contents`）、判 `category === 'photo'`（实际 `photo_gallery`）、找 `photos[].url`（实际 `photo_gallery` 块里的 `post_content_photos_micro` 字符串数组） | 三处键名按真实响应改正 |
+| 小红书 | `__INITIAL_STATE__` 是 **JS 对象字面量而非 JSON**，含 `new Map([])`；旧清洗只处理 `undefined`，整段解析抛异常 → 详情页拿不到 `imageList` → 多图笔记只留封面 | `toJsonObjectLiteral()` 改为**字符串感知扫描**，处理 `new Map/Set/WeakMap/WeakSet/Date`、`NaN`、`±Infinity` |
+
+**`decorate.php` 的更正（重要，我上一轮写错了）**：它 **不是** HTML 页面，实测
+`Content-Type: image/png`、640 588 字节、magic `89 50 4e 47`——**它是能渲染的**。错在别处：
+它是**固定尺寸的装饰外框**，不随作品比例变化。所以该缺陷表现为「图不对」而非「图裂」，
+这也解释了为什么它长期没被当成故障。代码注释已按实测改写。
+
+**pixiv「只显示一部分图片」——与数据库无关**
+
+先读了用户 Chrome 里的 IndexedDB（`chrome-extension_mjeipbjijdjbldfdljijkaofbkbffabc`）：
+**全部 40 条 pixiv 记录的 URL 都是真的 `i.pximg.net`、日期全对**（7/14、7/06、6/29、6/21、
+6/18、6/12，与截图逐条吻合）。所以**不需要修数据**，症状在渲染层。
+
+真因在 `PostCard.vue` 的单图容器：`max-h-[460px]` 把高度封在 460，`object-cover` 再裁。
+在真实渲染引擎里量到（`e2e/media-card-geometry.mjs`）：900×1200 的作品在 **433px 列**下得到
+**433×460** 的框——比例被从 0.75 扭成 0.94，于是裁掉两边。**只有比例低于列宽的竖图受影响**
+（801×1200、900×1200），横图（比例 ≥ 1）从来没事——这正是用户点名特定几张的原因。
+
+改为 `h-auto` + `max-h-[560px]` + `object-contain`。改后同一次实测：`433×560`、
+`object-fit: contain`、**0 张裁切**。
+
+**第二处空白**：卡片在磁盘探测返回前不渲染 `<img>`（只显示脉冲占位图标）。探测会遍历
+`CACHED_IMAGE_EXTENSIONS` 逐个读文件，慢了就一直空白，而且**看起来像"加载中"不像故障**。
+加 `MEDIA_PROBE_DEADLINE_MS = 700`：到点先显示网络图，探测结果回来再升级为本地 blob。
+40 个真实 URL 并发实测：**0 张失败**，中位 2410ms、最慢 2996ms（所以 URL 层没问题）。
+
+**证据与验证**
+
+- **20 例新测试**（pixiv 4 / fantia 7 / 小红书 9），fixture **逐字取自真实接口**
+  （`tests/fixtures/pixiv/`、`tests/fixtures/fantia/`）——这三个适配器此前**一个测试都没有**。
+- **变异 6/6 全杀**。含一条元教训：第一轮变异脚本报「6/6 SURVIVED」，实为 Windows 下
+  `subprocess` 读不到 vitest 输出的**假绿**（规则 26 的原话），改用 shell 重跑后全部 KILLED；
+  且中途有一个变异**未还原**，已核查并修复。
+- 端到端确认详情页路径：`state.note.noteDetailMap[id].note.imageList` 现在可读（修复前为 `null`）。
+- **新探针 `e2e/media-card-geometry.mjs`**（独立 profile，规则 25/28）：播种真实比例的作品，
+  量 holding box / `object-fit` / 是否裁切，有裁切或未加载则退出码 1。
+
+**已知未做**
+
+- **未在用户的真实会话里复验**。当前证据是：数据库逐条核对 + 独立实例实测 + 40 个 URL 全通。
+  用户需要刷新扩展后实际看一眼（`.output/chrome-mv3` 已是最新构建）。
+- 「空白」的第二机制（探测慢）**未在用户环境复现**，只做了机制分析与上限修复；上面 40 URL
+  实测说明网络层不背这个锅。
+- 未提交。
 
 ---
 
@@ -888,6 +1021,10 @@ await db.postSuppressions.clear();   // 无条件
   **`--window-position=-2400,-2400` 不够**——窗口仍会出现在任务栏，要**最小化**（规则 28）。
 - jsdom 不做布局：几何问题用规则 30 的单文件 HTML 打包在真实排版引擎里量。
 - 脚本化改写必须断言命中数，否则「匹配不到」会产出假绿（规则 26）。
+- **Windows 上 Python `subprocess` 读不到 vitest 的输出**（2026-09-14 踩到）：在 `eval` 里
+  无论 `capture_output=True` 还是重定向到文件，`stdout` 都是**空串**，而 `rc` 还可能是 0。
+  变异测试因此报出**全绿假象**——「N/N SURVIVED」+ 空输出就是它，不是真的存活。
+  验证方式：同一命令在 `bash` 工具里跑得到 `Tests N passed`。变异一律用 bash 跑。
 - 本仓库 `core.autocrlf=true`：签入为 LF，工作区可能是 CRLF，多行锚点会匹配不到。
 - **代理派活**：穷尽式核查用 `reviewer` / `task`，**不是** `scout`；多代理写同一文件必须先
   经 `hub` 协调边界（规则 31，含 2026-09-12 的复发案例）。
