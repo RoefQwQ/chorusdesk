@@ -276,10 +276,16 @@ Referer 同样读它，见 AGENTS 规则 2；占位名前缀也已改为从 `url
 - **capability 边界**：与 Twitter 路径同属「借真实页面绕过反爬」的方案，
   风控升级或页面架构变化都可能使其失效。
 
-### 8. 同步入口之间没有协调（状态正确性）— 已完成 2026-09-13
+### 8. 同步入口之间没有协调（状态正确性）— 同 context 已完成 2026-09-13；跨 context 已接受
 
-**当年的最严重一条**（它会写错数据且用户看不见）。修法即队列 #2 的 `syncCoordinator`，
-原文留存：
+**同 context 已收口**：`src/sync/syncCoordinator.ts`（第二个调用**加入**第一个并拿到同一结果，
+`platformLastFinished` 改为跨入口共享）。
+
+**但它的范围是「一个 JS context」，不是整个扩展**——2026-09-14 的封版审计正确地指出，
+文档此前写成「已完全解决」是过头了。Dashboard 在页面 context 调 `updateChannel`、
+alarm 在 SW context 调，各持一份 `inFlight` 且互不可见，所以「手动刷新 + alarm 同时触发」
+仍可双路采集同一频道。**这是已接受的风险，不是已解决的问题**：修它需要跨 context 原子 lease
+（见 `PRODUCT_DECISIONS.md`），而 `read → empty → write` 不是锁。原文留存：
 
 `updateChannel` 不在任何并发锁下运行（`grep inFlight|lock|mutex src/sync/` 为空），
 `status: 'updating'` 只是写入的字段、不是互斥。而能进入它的入口有五个：
@@ -292,9 +298,8 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 - `platformLastFinished` 是 batch 局部变量（`batchSync.ts:83/167`）→
   **跨入口并发时规则 19 的平台节流下限整体失效**（「检测到限流还继续打」）。
 
-它不是「偶发」，是结构上必然、只差一次时序巧合。现由 `src/sync/syncCoordinator.ts` 收口：
-同频道 single-flight（第二个调用**加入**第一个并拿到同一结果）+ `platformLastFinished`
-改为跨入口共享（含失败路径），见 §10 的完成记录。
+**第三条已实际修复**（节流改为跨入口共享）；前两条在**同 context 内**已不可能，
+**跨 context 仍可能**——即上面那条已接受的风险。
 
 ### 9. 身份边界没桥接（数据完整性）
 
@@ -532,7 +537,7 @@ Twitter 标签页路径真的跑通了。
 | # | 事项 | 类别 | 证据 |
 |---|---|---|---|
 | **1** | ~~**`restore-all` 语义越界**~~ **已完成 2026-09-12** | 状态正确性 | 见下 |
-| **2** | ~~**SyncCoordinator**：同频道 single-flight + 跨入口平台节流~~ **已完成 2026-09-13** | 状态正确性 | `src/sync/syncCoordinator.ts` |
+| **2** | **SyncCoordinator**：同频道 single-flight + 跨入口平台节流 —— **已完成 2026-09-13，但范围有界（见右）** | 状态正确性 | `src/sync/syncCoordinator.ts`。**同 context 已完成**；**跨 context 是已接受风险**（2026-09-14 判定）：Dashboard 在页面 context 调 `updateChannel`、alarm 在 SW context 调，各持一份 `inFlight`，互不可见。后果是状态竞争（`nextCursor`/`status`/`lastSuccessAt` 由后完成者覆盖），不是重复请求。修它需要跨 context 原子 lease（ownerId/expiresAt/owner 校验释放/崩溃恢复）——`read → empty → write` **不是锁**，所以**不修**。详见 `syncCoordinator.ts` 头注释与 `PRODUCT_DECISIONS.md` |
 | **3** | ~~**RSS identity scope**：`guid` 只在 feed 内唯一，却当全局主键~~ **已完成 2026-09-13** | 数据完整性 | `e86325a` |
 | **4** | ~~**单条/批量恢复共享同一策略**~~ **已完成** | 数据完整性 | 见 1 |
 | **5** | ~~**`healBrokenPostMedia` 移出 reload hot path**~~ **已完成 2026-09-13** | 规模 | `d9bcd4e`；`runMediaHealingOnce` |

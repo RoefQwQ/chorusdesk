@@ -110,6 +110,25 @@
 
 **不要提议**：把上述任一项作为「收尾的一部分」重新提出。
 
+### 已接受的风险：跨 context 的同步竞争（2026-09-14 判定）
+
+**决定**：**不修**。`syncCoordinator` 的同频道 single-flight 只在**一个 JS context 内**成立。
+Dashboard 在页面 context 调 `updateChannel`，auto-sync alarm 在 Service Worker context 调，
+两者各持一份 `inFlight`，互不可见——手动刷新与 alarm 同时触发时，同一频道可被两路采集。
+
+**为什么接受**：命中需要「手动刷新恰逢 alarm 触发」；后果是**状态竞争**
+（`nextCursor` / `status` / `lastSuccessAt` 由后完成者写回，深挖推进过的游标可能被常规同步覆盖），
+不是「多请求一次」。概率低、可见性低。
+
+**为什么不是「随手加个 storage lease」**：`read → empty → write` **不是锁**——两个 context
+都会读到空，然后都以为拿到了。真要修，至少要同时具备：跨 context 的**原子 claim**、
+`ownerId`、`expiresAt`、**owner 校验释放**（否则过期 holder 会删掉新 holder 的锁）、
+崩溃/SW 回收后的恢复。用一个更复杂、更难复现的锁 bug 去换一个低概率竞争，是负收益。
+
+**因此本项的状态是「已知并接受」，不是「已解决」。** 任何文档、注释或提交信息都不得写成已解决；
+`syncCoordinator.ts` 的头注释、`PROJECT_PROGRESS` 队列 #2 与 `tests/syncCoordinator.test.ts`
+的注释均已按此措辞改写。若将来真要修，先按上述清单证明原子性，再动代码。
+
 ---
 
 ## 修 bug 的冷启动流程（AI 维护专用）

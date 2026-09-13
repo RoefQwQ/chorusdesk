@@ -21,14 +21,35 @@
  * context, and both can be alive at once. Coordination has to sit at the one
  * function all of them call.
  *
- * **Scope of the lock.** It is in-memory and per-context, which is the correct
- * scope for MV3: two contexts cannot share a JS object, but they also cannot
- * both be running the same channel's fetch without one of them going through
- * this function in *its* context. A cross-context lock would need storage-backed
- * leases with expiry, and the failure it guards (a service worker evicted
- * mid-sync) already loses the in-flight work anyway — the next run re-does it.
- * Platform pacing, which DOES need to outlive a worker, is persisted separately
- * (see `rateLimit.ts`).
+ * **Scope of the lock — and its known limit.** It is in-memory and per-context,
+ * which means it is a single-flight guard for **one JS context**, not a
+ * single-writer guarantee for the extension:
+ *
+ *  - the dashboard calls `updateChannel` directly, in the PAGE context;
+ *  - the auto-sync alarm calls it in the SERVICE WORKER context.
+ *
+ * Two contexts cannot share a JS object, so each has its own `inFlight` map and
+ * neither can see the other's run. A manual refresh and an alarm firing at the
+ * same moment can therefore both acquire the same channel.
+ *
+ * **This is an accepted risk, not a solved problem.** Do not read this file as
+ * having made the race impossible. The consequence when it happens is a state
+ * race rather than a duplicate request: `nextCursor`, `status`, `lastCheckAt`
+ * and `lastSuccessAt` are all written from a Channel snapshot taken before the
+ * fetch, so the run that finishes LAST decides them — and a history dig's
+ * advanced cursor can be overwritten by a normal sync that read the channel
+ * before the dig wrote it. Low probability, and it needs a manual refresh to
+ * coincide with an alarm; that is why it was accepted rather than fixed.
+ *
+ * **What a real fix would need** (deliberately NOT attempted — see
+ * `PRODUCT_DECISIONS.md`'s freeze): atomic claim across contexts, `ownerId`,
+ * `expiresAt`, owner-checked release so a stale holder cannot delete the new
+ * holder's lease, and recovery after a worker eviction. A storage-backed
+ * `read → empty → write` is NOT a lock — two contexts can both read empty —
+ * so shipping that shape would trade a rare race for a rarer, harder bug.
+ *
+ * Platform pacing DOES need to outlive a worker, and is persisted separately
+ * (see `rateLimit.ts`) — that half has no such limit.
  */
 
 /** A run currently in flight for one channel id. */

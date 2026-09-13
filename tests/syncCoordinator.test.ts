@@ -105,7 +105,17 @@ beforeEach(() => {
 
 describe('single-flight per channel', () => {
   it('runs one fetch when two callers ask for the same channel at once', async () => {
-    // The defect this exists for: the alarm and a manual refresh both entering.
+    // **What this proves, and what it does not.** Both callers here import
+    // `updateChannel` from ONE module instance, so they share the same in-memory
+    // `inFlight` map: this is single-flight within a single JS context.
+    //
+    // It does NOT prove the cross-context property — a dashboard page and the
+    // auto-sync alarm each get their own map and cannot see each other's runs.
+    // A test cannot reach that from here (it would need two real extension
+    // contexts), so the limit is documented in `syncCoordinator.ts` and accepted
+    // in `PRODUCT_DECISIONS.md` rather than asserted here. Read this as "the
+    // guard works where it applies", not "the race is impossible".
+    //
     // The fetch is held open until both callers have arrived, so they genuinely
     // overlap rather than happening to serialise.
     const { promise: gate, resolve: open } = Promise.withResolvers<void>();
