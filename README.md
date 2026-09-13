@@ -104,6 +104,12 @@ npm run zip        # 打包成可分发 / 上架用的 zip
 - [架构设计](docs/ARCHITECTURE.md) —— MV3 分层、消息协议、存储结构、数据流
 - [开发手册](docs/DEVELOPMENT.md) —— 改动流程、平台适配器编写规范、验证规范
 
+## 反馈
+
+遇到问题或有建议，欢迎到 [Issues](https://github.com/RoefQwQ/chorusdesk/issues) 提出。
+报告 bug 时附上「设置 → 开发者日志」里的相关记录会更容易定位——那个面板的存在就是为了
+让问题可以被复现，日志不会上传，只是供你复制粘贴。
+
 ## 开源协议
 
 [CC BY-NC-SA 4.0](LICENSE) —— 可自由使用与修改，**禁止商用**，衍生作品需以相同协议开源并署名。完整条款见 [LICENSE](LICENSE)。

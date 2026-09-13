@@ -246,6 +246,31 @@ RSS 源由用户自己填写，域名无法预知，所以只能运行时申请�
 - **门禁锁死一致性**：`e2e/release-gate.mjs` 的 `build.artifact` 断言
   `manifest.version === package.json.version`（**精确字符串相等**），作用是不让旧的 `.output/`
   被当成新构建放行。
+- **发布说明是仓库里的文件**：`docs/releases/vX.Y.Z.md`，由 `release.yml` 用 `--notes-file`
+  写进 Release 正文。工作流在**构建之前**校验它存在且非空话（少于 200 个非空白字符即失败），
+  所以漏写会在十秒内报错，而不是发完一个空页面才发现。
+
+### 5.1.1 发版步骤（照做）
+
+```bash
+# 1. 写发布说明。必须与版本号同名，且是真话不是占位符。
+cp docs/releases/v1.0.0.md docs/releases/v1.1.0.md   # 然后逐条改写
+
+# 2. 先提交它。`npm version` 在有未提交改动时会直接拒绝执行（实测），
+#    所以 notes 不能等到版本提交里一起带。
+git add docs/releases/v1.1.0.md && git commit -m "docs: release notes for v1.1.0"
+
+# 3. 升版本：改 package.json、提交、打 tag，一步完成。
+npm version minor -m "Chorus v%s"
+
+# 4. 推送（--follow-tags 把新 tag 一起推上去，工作流由此触发）。
+git push --follow-tags
+```
+
+> `npm version` 造的 tag 消息**只有版本号**（实测：`1.1.0`），所以**不要**依赖 tag 消息
+> 当发布说明——那正是 `docs/releases/` 存在的原因。若忘了写 notes，工作流会在**构建之前**
+> 报「missing docs/releases/vX.Y.Z.md」；补救方式是补上文件、提交，然后重推同一个 tag
+> （`git push --force --follow-tags` 或删远端 tag 重推），此时发布尚未发生，代价只有 10 秒。
 
 ### 5.2 商店带来的硬约束（这是策略必须处理的东西）
 

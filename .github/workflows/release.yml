@@ -4,6 +4,10 @@ name: Release
 # WXT reads the version from package.json (wxt.config.ts deliberately does not
 # override it), so the manifest, the tag and the artifact name all come from that
 # one field — and the "Verify tag" step refuses to publish if they disagree.
+#
+# A release also needs `docs/releases/vX.Y.Z.md` (its GitHub release body). Write
+# it BEFORE `npm version`, which commits the bump: the workflow fails the build if
+# the file for the new version is missing or is a stub. See PUBLISHING.md §5.1.1.
 on:
   push:
     tags: ['v*']
@@ -51,6 +55,38 @@ jobs:
             echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${version}. Run 'npm version ${GITHUB_REF_NAME#v}' and push the resulting tag."
             exit 1
           fi
+
+      # The release body is a FILE IN THE REPO, and this step is what makes its
+      # absence a failure rather than a silent empty page.
+      #
+      # It is not `--generate-notes`: with no earlier tag to diff, the first
+      # release got a body of exactly one line (「Full Changelog」 + a commits URL)
+      # and said nothing about what the build does. It is not `--notes-from-tag`
+      # either, which was the first attempt: `npm version` — the release command
+      # documented at the top of this file — writes a tag message containing just
+      # the version number, so that body would have read 「1.1.0」. Verified by
+      # running `npm version` in a scratch repo.
+      #
+      # A file is reviewable in the same commit as the version bump, carries real
+      # prose, and — unlike either flag — can be checked for existence before the
+      # build runs. Checking here rather than at publish time is deliberate: this
+      # fails in ~10 seconds, where the publish step would fail after the unit
+      # tests, the E2E gate and the packaging.
+      - name: Verify the release notes exist
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::missing $notes — every release ships notes. Copy the previous release's file, rewrite it for this version, and commit it with the version bump."
+            ls docs/releases/ || true
+            exit 1
+          fi
+          chars=$(tr -d '[:space:]' < "$notes" | wc -c)
+          if [ "$chars" -lt 200 ]; then
+            echo "::error::$notes has only ${chars} non-space characters — a release body that says nothing is the defect this check exists to catch."
+            exit 1
+          fi
+          echo "$notes: ${chars} non-space characters"
 
       - name: Build and package
         run: npm run zip
@@ -125,6 +161,16 @@ jobs:
           # errors. Reads stayed fine and the rate limit was untouched, so this is
           # GitHub-side. We cannot prevent it; we only have to survive it.
           #
+          # The body comes from `docs/releases/<tag>.md`, which the step above
+          # has already proved exists and is not a stub. Neither built-in flag
+          # works here: `--generate-notes` produced a one-line body on the first
+          # release (no earlier tag to diff against), and `--notes-from-tag` would
+          # print just the version number, because that is all `npm version` puts
+          # in the tag message.
+          #
+          # An existing release keeps its body: a re-run over an already-published
+          # tag must not rewrite what users may already have read.
+          #
           # So the step is a converging state machine rather than a single call.
           # Each pass makes progress on whatever state the tag is in, and the exit
           # condition is OBSERVED (a published release carrying the asset), never an
@@ -198,7 +244,8 @@ jobs:
               # next pass finds it via `target_id` and continues from there, so a
               # spurious failure costs one pass rather than the whole release.
               gh release create "$tag" "$asset" \
-                --title "Chorus ${tag}" --generate-notes --draft || true
+                --title "Chorus ${tag}" \
+                --notes-file "docs/releases/${tag}.md" --draft || true
             fi
 
             sleep 5

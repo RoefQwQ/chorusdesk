@@ -61,7 +61,8 @@ async function connect(wsUrl) {
     if (m.id && pending.has(m.id)) {
       const { resolve, reject } = pending.get(m.id);
       pending.delete(m.id);
-      m.error ? reject(new Error(m.error.message)) : resolve(m.result);
+      if (m.error) reject(new Error(m.error.message));
+      else resolve(m.result);
     }
   };
   const send = (method, params = {}, sessionId) => {
@@ -181,7 +182,7 @@ function fixture(now) {
           platform,
           channelLabel: pi === 0 ? '主账号' : '小号',
           title: `${c.name} 的示例动态 ${k + 1}`,
-          content: `这是用于文档截图的合成内容，不含任何真实账号信息。\n平台：${platform}　序号：${k + 1}`,
+          content: `这是用于文档截图的合成内容，不含任何真实账号信息。\n平台：${platform} 序号：${k + 1}`,
           mediaList: k === 0
             ? [{ type: 'image', previewUrl: swatchDataUrl(`${platform}${ci}${k}`, px), originalUrl: swatchDataUrl(`${platform}${ci}${k}`, px) }]
             : [],

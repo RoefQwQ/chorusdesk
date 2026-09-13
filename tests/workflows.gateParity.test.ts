@@ -140,3 +140,55 @@ describe('release runs the same gates as CI', () => {
     ).toEqual(gateLines(CI));
   });
 });
+
+/**
+ * A release must have a body, and the body must be reviewable before the tag
+ * exists.
+ *
+ * The first release shipped with a one-line body (「Full Changelog」 + a commits
+ * URL) because `--generate-notes` had no earlier tag to diff against. The first
+ * attempt at a fix used `--notes-from-tag` — which reads the tag message, and
+ * `npm version` (the release command in the workflow header) writes only the
+ * version number there, so the body would have read 「1.1.0」. Both were only
+ * visible by looking at a published release page.
+ *
+ * The body is now a file, checked before the build. These tests keep the two
+ * halves honest: the file must exist for the version about to be released, and
+ * the workflow must actually read it — otherwise the check passes while the
+ * release page stays empty.
+ */
+describe('every release has a body', () => {
+  const workflow = read(RELEASE);
+
+  it('the shipping version has release notes that say something', () => {
+    const { version } = JSON.parse(read('package.json')) as { version: string };
+    const path = `docs/releases/v${version}.md`;
+    let text: string;
+    try {
+      text = read(path);
+    } catch {
+      throw new Error(
+        `${path} is missing. A release for ${version} would publish an empty page — write the notes, ` +
+          'commit them, THEN run the version bump (PUBLISHING.md §5.1.1).',
+      );
+    }
+    // Not a length limit for its own sake: it is the floor below which a file
+    // exists but carries no information, which is the failure being prevented.
+    expect(
+      text.replace(/\s/g, '').length,
+      `${path} exists but says nothing — a stub passes an existence check and still ships a blank page`,
+    ).toBeGreaterThan(200);
+  });
+
+  it('the workflow publishes that file, not a stub of its own', () => {
+    // The existence check above is only worth having if the publish step consumes
+    // the same directory. Asserting the wiring here is the guard on the guard: a
+    // step that verifies `docs/releases/` while `gh release create` still asks
+    // GitHub to invent a body would pass every other check in this file.
+    expect(
+      /--notes-file\s+"?docs\/releases\//.test(workflow),
+      `${RELEASE} does not pass docs/releases/<tag>.md to \`gh release create\` — the body would come ` +
+        'from a flag again, and this file\'s existence check would be decorative',
+    ).toBe(true);
+  });
+});
