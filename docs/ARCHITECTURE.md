@@ -57,7 +57,6 @@ chorusdesk/
 │  │  └─ pathResolver.ts            # 目录分段/文件名净化/扩展名推断
 │  └─ utils/                        # 无业务状态工具
 │     ├─ devLog.ts                  # 开发者日志环形缓冲（chrome.storage.session）
-│     ├─ http.ts                    # bgFetch（BG_FETCH 消息封装）
 │     ├─ media.ts                   # toSecureMediaUrl/proxyImage/失败记忆
 │     ├─ order.ts                   # 手动排序比较器与重排（sortOrder）
 │     └─ urlParser.ts               # parseProfileUrl
@@ -169,7 +168,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 | weibo | `weibo_<mblogId/bid>` |
 | douyin | `douyin_<awemeId>` |
 | youtube | `youtube_<videoId>` |
-| rss | `rss_<base64(guid) 前 32 位去特殊字符>` |
+| rss | `rss_<base36 哈希前 32 位>`，哈希输入是 **`channelId + '\0' + guid`**（`guid` 只在单个 feed 内唯一，身份必须带 feed 作用域） |
 
 ### 4.2 平台层 `src/platform/registry.ts` 与 `src/adapters/`
 
@@ -307,7 +306,8 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
   - `updateChannel(channel, limit = 10, force = false, options?: FetchOptions): Promise<FetchResult>`：单频道同步核心（完整流程见 §5.2）。
   - `isStorageFailure(err)`：判断异常是否为**本地** IndexedDB 失败（Dexie 会把 `DOMException` 包在普通 Error 里，看 `name`/`message`）。`channelSync` 与 `batchSync` 共用，把这类失败归类为 `storage` 而不是 `network`——分类错不只是文案错，错误码会驱动平台冷却。
 - **`FetchResult.degraded` 的消费**：`channelSync` 在写「同步完成」info 之后，若 `result.degraded` 记一条 `warn`（含 `warnings` 文案）。这条日志是「个别数据源挂了」唯一的可见面。
-- `cursorState.ts`：**独占 `'__END__'` 游标终态语义**——哨兵常量（`END_OF_HISTORY_CURSOR`）、哪些平台是单发采集因而其标记只是猜测（`SINGLE_SHOT_ACQUISITION`）、两个消费点各自要问的谓词（`statesEndOfHistory` / `shouldRecordHistoryEnd` / `isEndOfHistoryCursor` / `hasStaleTerminalCursor` / `terminalCursorIsStated`）与用户文案。`channelSync` 与 `historySync` 只消费，不得各自再写字面量。成立理由：该规则曾有三份实现，今天改「完成」的含义必须改三处（见 AGENTS 规则 10 与 `tests/douyin.endcursor.test.ts`）。
+- `cursorState.ts`：**独占 `'__END__'` 游标终态语义**——哨兵常量（`END_OF_HISTORY_CURSOR`）、两个消费点各自要问的谓词（`statesEndOfHistory` / `shouldRecordHistoryEnd` / `isEndOfHistoryCursor` / `hasStaleTerminalCursor` / `terminalCursorIsStated`）与用户文案（`END_OF_HISTORY_MESSAGE`）。`channelSync` 与 `historySync` 只消费，不得各自再写字面量。成立理由：该规则曾有三份实现，今天改「完成」的含义必须改三处（见 AGENTS 规则 10 与 `tests/douyin.endcursor.test.ts`）。
+  > 「哪些平台是单发采集、其标记只是猜测」**已不在此文件**：由适配器自己的 `PlatformAdapter.paginates` 声明，`terminalCursorIsStated` 转发给 `hasPlatformStatedEnd`（见 §4.2 与 `tests/platformCapabilities.test.ts`）。此处原有一个 `SINGLE_SHOT_ACQUISITION` 数组，已随该改动删除——不要照旧文去找它。
 - `rateLimit.ts`：平台节流下限（`platformMinInterval`，adapter 声明优先）+ 持久化冷却（`readCooldowns`/`noteRateLimit`/`clearRateLimit`/`remainingCooldown`/`formatCooldown`）。冷却存在 `settings` 表，因为 MV3 worker 会在两次同步之间死掉。
   > `clearStaleUpdatingStatus()` 不在 `src/sync`：它是一行 channel 写入、不涉及 adapter，住在 `src/infrastructure/db/channelRepository.ts`（经 `src/application/channelService.ts` 暴露）。从前住在 `channelSync` 时，每个调用方（含 popup）都被拖进整个 adapter registry。
 - `batchSync.ts`
@@ -365,7 +365,8 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
   - `cleanupOldPosts(days = 60)`：删除早于 cutoff 且**未收藏**的动态（`days === 0` 清所有未收藏）。**不建立抑制**——这是存储维护，不是「我不要这条内容」。
   - `deletePostAndTombstone(post)`：单事务——从 `posts` 删除，写 `postSuppressions`（抑制）与 `recycleSnapshots`（完整快照深拷贝）。
   - `restoreDeletedPost(id)`：单事务——快照写回 `posts` 并清除**抑制与快照**；父频道已不存在时丢弃该孤儿快照并返回 `null`。
-  - `restoreAllDeletedPostIds()`：单事务——全部快照写回，清空全部抑制与快照。
+  - `restoreAllDeletedPostIds()`：单事务——把**回收站快照**写回 `posts`，只解除**这些 id 的**抑制，并清掉这些快照；返回 `{ restored, dropped }`（孤儿快照计数**上报**而非静默写回）。**不动回收站之外的抑制**——全部解除是下面那个独立动作（这是 `restore-all` 语义越界的修复，见 `DELETION_MODEL.md`）。
+  - `releaseAllSuppressions()` / `countPermanentlyDeleted()`：解除**所有**抑制是一个独立命名的动作，确认框要写明「其中 N 条已经彻底删除过，解除后可能重新出现」。
   - `permanentlyDeletePost(id)`：**只删快照**，抑制保留（这正是「彻底删除后不会再出现」的实现）。
   - `clearDeletedPostRecords()`：**只清快照**，抑制全部保留（「清空回收站」）。
   - `getDeletedPostCount()` / `getDeletedPostRecords()`：回收站计数/列表（按 `deletedAt` 倒序）。
@@ -376,8 +377,8 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
 ### 4.5 Chrome 基础设施 `src/infrastructure/chrome/`
 
 - `http.ts`：**所有 adapter 取数的网络端口**。`bgFetch(url, options)` 在 Service Worker 内直接调 `performBgFetch`（规则 6：SW 不能给自己 `sendMessage`），在扩展页内发 `BG_FETCH` 消息；仅在非扩展环境走直连 `fetch`（本地冒烟）。`options.signal` 会被透传：**页面侧无法把 `AbortSignal` 塞进消息**，所以取消是**第二条消息** `BG_FETCH_ABORT`（带请求 id），worker 侧按 id 找到在途 `AbortController` 并 abort。没有它时，调用方超时只是「不再等待」，底层的 `fetch` 仍在跑——用户一重试就是两个并发请求打同一个平台。
-- `messages/bgFetch.ts`：`performBgFetch(rawUrl, headerOverrides?, signal?)` 强制 http(s)、无内嵌凭据；凭据按 `PLATFORM_HOSTS`（规则 3）；**响应体在读取时就截断**（`readCapped`，250k 字符，超限即停止读取而不是读完再截）——RSS 源是用户任意指定的域，不设上限等于让一个恶意/异常源支配 worker 与消息通道。
-- `autoSync.ts`：`setupAutoSync()` 按 `settings.enableAutoSync` 创建（30 分钟周期）/清除 Alarm `'creator-feed-auto-sync'`，随后 `updateUnreadBadge()`；`handleAutoSyncAlarm(alarm)` 校验名称后 `syncAllChannels()`（**串行**逐 channel `updateChannel(channel, itemsPerFetch, false, { onlyOriginal: hideReposts })`，无交错）；`updateUnreadBadge()` 统计 `posts.where('isRead').equals(0)`，封顶 999。
+- `messages/bgFetch.ts`：`performBgFetch(rawUrl, headerOverrides?, signal?)` 强制 http(s)、无内嵌凭据；凭据按 `PLATFORM_HOSTS`（规则 3）；**响应体在读取时就截断**（`readCapped`，`MAX_RESPONSE_CHARS = 1_000_000` 字符，超限即停止读取而不是读完再截）——RSS 源是用户任意指定的域，不设上限等于让一个恶意/异常源支配 worker 与消息通道。上限曾为 250k，比下游被设计要保留的量（每篇 HTML 60k × 10 篇）还小，实测截断了用户的真实 feed；**且截断必须被上报**：`readCapped` 返回 `{ text, truncated }`，经 `BgFetchResult` 一路传到 adapter，由它说「被上限截断」而不是诬赖源「不是有效 XML」。
+- `autoSync.ts`：`setupAutoSync()` 按 `settings.enableAutoSync` 创建（30 分钟周期）/清除 Alarm `'creator-feed-auto-sync'`，随后 `updateUnreadBadge()`；`handleAutoSyncAlarm(alarm)` 校验名称后 `syncAllChannels()`——先按 `canRunInServiceWorker` **筛掉**页面采集类平台（douyin/twitter）并**记日志点名**，再交 `batchUpdateChannelsInterleaved(runnable, itemsPerFetch, { onlyOriginal, minPlatformIntervalMs })`，**与 Dashboard 的「全部刷新」是同一套交错实现**（见 §5.3）；`updateUnreadBadge()` 统计 `posts.where('isRead').equals(0)`，封顶 999。
 - `declarativeNetRequest.ts`：`setupDeclarativeNetRules()`，幂等（先 remove 再 add）重建 6 条动态规则：
   - `1001` sinaimg 改 Referer=`https://weibo.com/`；`1002` pximg 改 Referer=pixiv；`1003` sinaimg http→https 升级；`1004/1005/1006` 小红书 xhscdn.com / xiaohongshu.com / xhscdn.net 改 Referer+Origin。
   - 这些规则让 `<img>` 直连（不经代理）时也能绕过防盗链；代理路径见 §5.5。
@@ -423,8 +424,10 @@ getAdapter(channel.platform)（无适配器则报「不支持的平台」，不�
  → db.channels.update(id, { status: 'updating', errorMessage: undefined })
  → 水位：普通同步（无 cursor/isHistory/restoreDeleted/forceRefresh）时
    取该频道 posts 中 publishedAt 最大者作为 sinceTimestamp（复合索引 [channelId+publishedAt]）
- → mergedOptions = { ...options, sinceTimestamp, signal: options?.signal ?? 内部 AbortController.signal }
-   （45s 超时同时 abort 该 controller —— 超时是「真正取消」，不是「不再等待」）
+ → mergedOptions = { ...options, sinceTimestamp, signal: composeAbortSignals(options?.signal, abortController.signal) }
+   （45s 超时同时 abort 该 controller —— 超时是「真正取消」，不是「不再等待」。
+     组合而非二选一：此前是 `options?.signal ?? abortController.signal`，调用方一传 signal
+     就丢掉 45s 期限这个唯一的取消手段）
  → Promise.race([adapter.fetchLatest(...), 45s 超时])
  ├─ result.error 且无 post → channel 置 error + 友好文案（429 → 限流提示），返回
  │    写库失败归 storage（不是 network）：错误码驱动冷却，分类错了会冷却一个没被联系过的平台
@@ -452,7 +455,7 @@ getAdapter(channel.platform)（无适配器则报「不支持的平台」，不�
 ### 5.3 批量/自动/历史同步
 
 - Dashboard“全部刷新”：`batchUpdateChannelsInterleaved(channels, itemsPerFetch, { onlyOriginal: hideReposts, minPlatformIntervalMs, onProgress, shouldStop })`。
-- 自动同步：Alarm 每 30 分钟触发 `handleAutoSyncAlarm` → 设置关闭则清 Alarm，开启则 `syncAllChannels()`（串行）→ 刷角标。Dashboard 设置开关即时 `saveSettings` + `UPDATE_AUTO_SYNC` 消息让 background 重建 Alarm。
+- 自动同步：Alarm 每 30 分钟触发 `handleAutoSyncAlarm` → 设置关闭则清 Alarm，开启则 `syncAllChannels()`（**先筛掉 `backgroundSync: false` 的平台，再走交错批量**，与 Dashboard「全部刷新」同一实现）→ 刷角标。Dashboard 设置开关即时 `saveSettings` + `UPDATE_AUTO_SYNC` 消息让 background 重建 Alarm。
 - 深挖历史：Dashboard 弹窗对选中 channel 调 `deepSyncChannel`/`fetchChannelHistory`（可中止 `shouldStop`），进度经 `onProgress` 展示。
 
 ### 5.4 跨域请求
@@ -500,6 +503,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 | `BG_FETCH` | `src/infrastructure/chrome/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ requestId?, url, options: { headers } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
 | `BG_FETCH_ABORT` | 同上（`bgFetch` 的 `signal` 触发） | `messages/bgFetch.ts` `handleBgFetchAbort` | `{ requestId }` | `{ aborted: boolean }`（同步应答，`false` = 没有在途请求） | 否 |
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
+| `SYNC_CHANNEL` | `entrypoints/popup/composables/useQuickFollow.ts`（关注后的首轮抓取） | `messages/syncChannel.ts` `handleSyncChannel` | `{ channelId, limit }` | `{ success, ... }` | 是（返回 `true`） |
 | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` | `messages/twitterTimeline.ts` `handleTwitterTimeline` | `{ username, limit, onlyOriginal, cursor }` | `{ success:true, tweetData, userData, bottomCursor }`；失败 `{ success:false, error }` | 是（返回 `true`） |
 | `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` | `messages/douyinSnapshot.ts` `handleDouyinSnapshot` | `{ secUid, limit, deep }`（`secUid` 需匹配 `^[A-Za-z0-9_-]{6,200}$`；`deep=true` 时先滚动作品网格再采集） | `{ success:true, snapshot }`；失败 `{ success:false, code, error }`，`code` 为 `auth`/`network`/`parse`/`unsupported`/`rate_limit` | 是（返回 `true`） |
 
@@ -565,4 +569,4 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 4. `src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts` 三个迁移期兼容桶**已于 2026-09-11 删除**（删除前全仓 grep 确认零引用，非类型引用亦无）；新代码直接依赖真实模块。
 5. 消息 `OPEN_DASHBOARD` 保留 handler 但仓库内无发送方（Popup 直接开标签页）；删除/改造需先决定是否统一走消息。
 6. `Popup/App.vue` 仍为单体（composables 已抽离 `usePageDetection`/`useQuickFollow`/`usePopupNavigation`）；Popup 尚无 `views/` 拆分计划落地。
-7. 自动同步为串行单频道执行（无交错/无进度回传 UI），与 Dashboard 手动“全部刷新”的交错路径是两套实现；如需统一属功能变更，不在本次文档范围内。
+7. 自动同步此前是串行单频道执行，**已于 2026-09-13 统一到 `batchUpdateChannelsInterleaved`**（与 Dashboard 手动「全部刷新」同一实现，见 §5.3）——它自己那套循环已删除。已从「两套实现」变为一套，因此不再有「统一它们」这项待办。

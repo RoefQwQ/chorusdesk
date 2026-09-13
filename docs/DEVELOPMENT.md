@@ -64,7 +64,7 @@
    - **不要在 adapter 里写登录探测**（`checkAuthStatus`）：该模式已于 2026-09-12 删除三处实现——它们零调用，而 Cookie 本来由 `credentials: 'include'` + host_permissions 自动携带，探测既没被调用也改变不了结果。登录状态灯由 `platformAuth.ts` 的 Cookie 表统一负责（见第 7 步）。
    - 平台特有的行为参数放**本 adapter 上**，不要塞进 `sync` 层分支：`minRequestIntervalMs`（请求最小间隔，覆盖只能抬高下限）、`archivesMedia: false`（声明不参与本地图片归档）。理由与形状见 `ARCHITECTURE.md` §4.2。
 2. 请求统一走 `src/infrastructure/chrome/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
-3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base64(guid) 32位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。
+3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base36 哈希 32 位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。RSS 的哈希输入是 **`channelId + '\0' + guid`**，不是裸 `guid`——`guid` 只保证 **feed 内**唯一，两个源各发 `<guid>1</guid>` 会塌成同一条（队列 #3）。
 4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册。**`ADAPTER_MAP` 的键类型是 `KnownPlatform`，漏注册会编译报错**（这正是它的作用）；`getAdapter` 对未知平台返回 `undefined`，**没有 rss 回退**——未知平台必须显式报「不支持」，绝不能拿该频道的 URL 当 RSS 源去抓。
    > 更正（2026-09-12）：本步此前写「不要改 `getAdapter` 的 rss 回退语义」。那个回退**早已删除**（见 `AGENTS.md` fix queue 第 8 条、`ARCHITECTURE.md` §4.2），照旧文做会去找一个不存在的分支。
 5. 在 `src/types/index.ts` 做**三处**改动（不是一处）：
@@ -116,7 +116,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
    - type 名称（涉及两端字符串字面量）；
    - 入参解析与校验（handler 内局部接口 + `typeof` 收窄；外部数据用 `unknown` 收窄，不用 `any`）；
    - `sendResponse` 出参结构（handler 文件顶部注释固化契约，一并更新）；
-   - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/twitterTimeline/douyinSnapshot 四个 handler 均如此，新增 handler 照抄）；
+   - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/twitterTimeline/douyinSnapshot/**syncChannel** 五个 handler 均如此，新增 handler 照抄）；
    - 发送方错误处理（`chrome.runtime.lastError`、`res` 为空、`ok/success` 为 false 的文案）。
 3. handler 不直接承担 Vue 状态或数据库业务；复杂业务抽到 `src/sync` 或独立服务再被 handler 调用（参考 autoSync 的 `setupAutoSync/handleAutoSyncAlarm` 分层）。
 4. 同步类消息（如 `UPDATE_AUTO_SYNC`）要能被 Dashboard 设置页即时触发且幂等（先 clear 再 create Alarm 的写法）。
@@ -232,18 +232,15 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 性能改动自检：优先既有索引（`[channelId+publishedAt]`、`isBookmarked` 等），不新增全表扫描式展示查询；UI 不重复拉取同一批数据；批量写用 `bulkPut/bulkDelete`；存在性判断用 `primaryKeys()`；内存里复制大数组前先想清楚是否必要。
 - 新测试只为一个真正不确定的边界而写（例如新平台日期解析、水位/去重交互）；不要为了“有测试”而写。断言可观察契约与真实错误，不钉实现细节。
 - **fixture 必须来自真实报文。** 这条不是风格问题，而是规则 15/21 的翻车点：按“解析器当前读什么”手写的 fixture，只证明解析器与自己一致——Twitter 的 `tweet_results` 双层嵌套 bug 就是这样被固化成“期望行为”，并穿过了 typecheck、lint 与全套测试。
-  - 至少要有一份**逐字抓取**的真实载荷（`tests/fixtures/` 下已有 `douyin/`、`rss/` 两个目录，照此放）。
+  - 至少要有一份**逐字抓取**的真实载荷（`tests/fixtures/` 下已有 `douyin/`、`rss/`、`bilibili/`、`xiaohongshu/` 四个目录，照此放）。
   - fixture **必须包含修复所依赖的字段**。曾有一次修复之所以长期无法被测试发现，是因为 fixture 里恰好缺了那个字段（media entity 的 `url`），于是测试与实现互相点头、与真实报文无关。
   - 注释里断言上游行为（“某字段的含义是…”）而没有真实载荷支撑，就是**披着引用外衣的猜测**；要么附上 fixture，要么删掉断言。
   - 本仓现状：已有逐字真实载荷的平台是 **RSS、抖音、bilibili、小红书**（`tests/fixtures/` 下各自一目录），应作为模板；Twitter 的 fixture 仍是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
 - **有意不补测试的模块要写下来，否则下次会被当成疏漏**：
-  - `youtube.ts`（**121 行**）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
+  - `youtube.ts`（**171 行**，2026-09-13 实测）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
   - **但同一文件里真正脆弱的一段没有被测试**，这条例外不覆盖它：`@handle → channelId` 的解析是**三个正则依次兜底**（`feeds/videos.xml?channel_id=` / `<link rel=canonical>` / 内联 `"channelId":"UC…"`），跑在 YouTube 页面 HTML 上。三个全 miss 时 `channelId` 保持 `@handle` 原样，接着就用它去请求 RSS。
-**2026-09-12 已实测，结论是好的那一种**：`feeds/videos.xml?channel_id=@nonexistent_handle_zzz`
-返回 **HTTP 404**（`UCabcdefghijklmnopqrstuv` 同样 404），所以适配器抛出并返回 `network` 错误——
-**不会**变成「成功但 0 条」那种不可信的零（规则 13 合规）。
-`tests/youtube.handle.test.ts`（5 例，jsdom，因为适配器用 `DOMParser`）逐条钉住三个正则分支＋这条 404 行为，
-并记录了一个实测细节：`og:title` 优先于 `<title>`，且**只有** `<title>` 分支会剥掉「 - YouTube」后缀。
+    **2026-09-12 已实测，结论是好的那一种**：`feeds/videos.xml?channel_id=@nonexistent_handle_zzz` 返回 **HTTP 404**（`UCabcdefghijklmnopqrstuv` 同样 404），所以适配器抛出并返回 `network` 错误——**不会**变成「成功但 0 条」那种不可信的零（规则 13 合规）。
+    `tests/youtube.handle.test.ts`（6 例，jsdom，因为适配器用 `DOMParser`）逐条钉住三个正则分支＋这条 404 行为，并记录了一个实测细节：`og:title` 优先于 `<title>`，且**只有** `<title>` 分支会剥掉「 - YouTube」后缀。
   - `withny.ts` 曾在此名单内，**2026-09-12 随平台整体移除**。
 - **曾经的缺口已补上（2026-09-12）**：`bilibili.ts` 与 `xiaohongshu.ts` 原先分支密集、零测试。两者**都先抓了逐字真实载荷做 fixture，再提纯解析段，最后断言同一份 fixture 解析结果不变**（顺序见提交 `342ce6c` → `e4c8b56` → `bc0ffc3`、`06f30c7` → `272a989` → `d8b6c1`）。
   - 现有回归网：`tests/bilibili.parse.test.ts`、`tests/xiaohongshu.parse.test.ts`、`tests/xiaohongshu.enrich.test.ts`，载荷在 `tests/fixtures/bilibili/`、`tests/fixtures/xiaohongshu/`。
