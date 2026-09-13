@@ -304,9 +304,9 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 
 ### 12. 工程质量项（不直接致错，抬高出错概率）
 
-- **E2E 一个 click 卡死一整串**：`backup.export` 失败 → backup 4 步 + alarm 4 步全 skip。
-  **根因已于 2026-09-13 修复**（`dismissDialogs` 竞态，规则 34：失败信息自称「环境问题」是错的）；
-  **拆分仍未做**，所以放大效应还在：一次 click 失败仍会 skip 后面 8 步。
+- ~~**E2E 一个 click 卡死一整串**~~ **已完成 2026-09-13**：竞态根因已修（规则 34），
+  链路依赖也已拆开——`backup.export` 失败现在只 skip 3 步（真正依赖它的备份链），
+  5 个 alarm 检查照常运行（实测：强制 export 失败 → `14 passed, 1 failed, 3 skipped`）。
 - **`PROXY_IMAGE` 无大小/MIME 上限**（`arrayBuffer()` 后直接 base64），
   而它现在允许任意 http(s) 主机（为 RSS 图片）——这是合理的产品行为，但没有 byte ceiling。
 - ~~**`toSecureMediaUrl` 仍用 `includes()`** 判小红书域名。~~ **已完成 2026-09-13**：
@@ -494,7 +494,7 @@ Twitter 标签页路径真的跑通了。
 | **8** | ~~**`PROXY_IMAGE` 加 byte/MIME 上限**~~ **已完成 2026-09-13** | 数据完整性 | `MAX_IMAGE_BYTES = 8MB` |
 | **9** | ~~**后端聚合诚实**：autoSync 把结果丢了~~ **已完成 2026-09-13** | 能力错配 | autoSync 报 `failed/total` |
 | **10** | **Feed 数据分页**（IndexedDB query 取代全量 `toArray`） | 规模 | 全库进 Vue 内存，只显示 36 条 |
-| **11** | ~~**E2E 拆独立 scenario**~~ **根因已修 2026-09-13**（见「已知陷阱」）；拆分仍未做 | 工程质量 | `dismissDialogs` 竞态；本地 3/3 失败 → 5/5 通过 |
+| **11** | ~~**E2E 拆独立 scenario**~~ **已完成 2026-09-13** | 工程质量 | 抽出 `dashboard.settings-tab`；export 失败导致的 skip 从 8 降到 3 |
 | **12** | ~~**`FetchError` 五阶段细分**~~ **已完成 2026-09-13** | 数据完整性 | `httpStatusError` 唯一入口；429 不再被当成网络故障 |
 | **13** | **媒体缓存 identity**：目录用 creatorName、文件用 postId 前 16 位 | 数据完整性 | 改名即失联；主键被截短**（无老用户，已降级为「不急」）** |
 | **14** | ~~**DNR 规则表驱动 + 测试**~~ **已完成 2026-09-13** | 工程质量 | 表驱动 + 10 例；`removeRuleIds` 与规则表派生自同一处 |

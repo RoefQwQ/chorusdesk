@@ -1104,13 +1104,25 @@ try {
     return out;
   });
 
-  const seeded = await step('backup.seed-fixture', ['dashboard.mounts', 'backup.arm-downloads'], async () => {
-    // Stay on the settings tab from here on: the feed marks rendered posts as
-    // read, which would change the very rows this round trip compares.
+  // Open the Settings tab, which BOTH scenarios below need. It is its own step
+  // because it was previously buried in `backup.seed-fixture`, and that made the
+  // alarm checks depend on the backup round trip: a `backup.export` failure
+  // skipped four alarm checks that share nothing with it but this navigation
+  // (measured: one lost click turned 1 failure into 8 skipped checks — the
+  // amplifier queue item #11 named).
+  //
+  // Staying on Settings is deliberate for the backup scenario: the feed marks
+  // rendered posts as read, which would change the very rows the round trip
+  // compares.
+  await step('dashboard.settings-tab', ['dashboard.mounts'], async () => {
     await clickLocated(dashboard, LOCATE.settingsTab, '设置 tab', cdp);
-    await dashboard.wait('the backup card to render', () =>
+    await dashboard.wait('the settings view to render', () =>
       dashboard.eval(`[...document.querySelectorAll('button')].some((b) => (b.textContent||'').includes('下载 JSON 备份'))`),
     );
+    detail('settings tab open');
+  });
+
+  const seeded = await step('backup.seed-fixture', ['dashboard.settings-tab', 'backup.arm-downloads'], async () => {
     const fixturePath = path.join(profileRoot, 'fixture-backup.json');
     const data = fixture();
     fs.writeFileSync(fixturePath, JSON.stringify(data, null, 2));
@@ -1266,7 +1278,7 @@ try {
 
   const alarmIn = (list) => (Array.isArray(list) ? list.find((a) => a.name === ALARM_NAME) : undefined);
 
-  const enabled = await step('alarm.enable-auto-sync', ['backup.reimport-restores'], async () => {
+  const enabled = await step('alarm.enable-auto-sync', ['dashboard.settings-tab'], async () => {
     await clickLocated(dashboard, LOCATE.autoSyncSwitch, '后台自动更新 switch', cdp);
     // Read the persisted setting first: it separates "the toggle did not land"
     // from "the toggle landed and the worker still did not create the alarm".
