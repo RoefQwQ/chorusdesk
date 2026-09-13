@@ -72,6 +72,46 @@ export function usePageDetection() {
   }
 
   /**
+   * Authoritative Pixiv fallback: the public profile API directly by UID.
+   *
+   * The in-page script cannot get this right from the DOM, and the meta-tag
+   * fallback is worse than useless here: measured on 2026-09-13 against a real
+   * account (id 11, which HAS an avatar), `og:image` is
+   * `https://embed.pixiv.net/user_profile.php?id=11&k=…` — a dynamic embed page,
+   * not an image file. It is never the avatar, with or without one set.
+   *
+   * This endpoint answers anonymously and carries the real one (`imageBig`,
+   * 170px). Same shape as the Bilibili User Card above: the account id is already
+   * known from the URL, so querying by it beats guessing at markup.
+   */
+  async function fetchPixivProfile(accountId: string): Promise<string | undefined> {
+    try {
+      const res = await bgFetch(
+        `https://www.pixiv.net/ajax/user/${encodeURIComponent(accountId)}?full=1`,
+      );
+      if (!res.ok || !res.data) return undefined;
+      const json = JSON.parse(res.data);
+      if (json?.error) return undefined;
+      const body = json?.body;
+      if (!body) return undefined;
+      if (typeof body.name === 'string' && body.name.trim()) {
+        detectedAuthorMeta.value.name = body.name.trim();
+      }
+      // `imageBig` is the 170px profile image; `_50`/`no_profile` are fallbacks.
+      for (const candidate of [body.imageBig, body.image]) {
+        if (typeof candidate === 'string' && candidate && !candidate.includes('no_profile')) {
+          detectedAuthorMeta.value.avatar = toSecureMediaUrl(candidate);
+          break;
+        }
+      }
+      return detectedAuthorMeta.value.name;
+    } catch (e) {
+      console.warn('[Popup] Pixiv profile API fetch skipped:', e);
+    }
+    return undefined;
+  }
+
+  /**
    * Douyin author meta comes from the shared collector, not from a second copy of
    * the page selectors here.
    *
@@ -226,14 +266,42 @@ export function usePageDetection() {
               }
             }
           }
-          // 4. Xiaohongshu
+          // 4. Fantia
+          // Measured 2026-09-13 from a real fan-club page: the creator's avatar is
+          // `img.img-circle` whose `src` contains `fanclub/icon_image/<id>/`. The
+          // page also renders 86x86 `img-circle` avatars for a "related creators"
+          // strip (and `plan/thumb_default.png` placeholders), so matching the
+          // class alone picks a stranger — the id in the src is what identifies
+          // the owner. Without this branch the meta fallback below returned the
+          // OGC cover (`c.fantia.jp/uploads/fanclub/ogp_image/…jpg`), i.e. the
+          // banner, which is what the bug report showed.
+          else if (host.includes('fantia.jp')) {
+            const fanclubId = (window.location.pathname.match(/\/fanclubs?\/(\d+)/) || [])[1] || '';
+            const avatars = Array.from(
+              document.querySelectorAll<HTMLImageElement>('img.img-circle[src], img.replace-if-no-image[src]'),
+            );
+            const owner = fanclubId
+              ? avatars.find((img) => img.src.includes(`fanclub/icon_image/${fanclubId}/`))
+              : undefined;
+            const chosen = owner || avatars.find((img) => img.alt?.trim());
+            if (chosen) {
+              avatar = chosen.currentSrc || chosen.src || '';
+              // The avatar's alt is the fan-club/creator title on this page.
+              if (chosen.alt?.trim()) name = chosen.alt.trim();
+            }
+            if (!name) {
+              const heading = document.querySelector('.fanclub-name, h1')?.textContent?.trim();
+              if (heading) name = heading;
+            }
+          }
+          // 5. Xiaohongshu
           else if (host.includes('xiaohongshu.com')) {
             const xhsName = document.querySelector('.user-name, .user-nickname, .info-part .name')?.textContent?.trim();
             if (xhsName) name = xhsName;
             const xhsAvatar = (document.querySelector('.avatar-wrapper img, .user-avatar img') as HTMLImageElement)?.src;
             if (xhsAvatar) avatar = xhsAvatar;
           }
-          // 5. Weibo
+          // 6. Weibo
           else if (host.includes('weibo.com') || host.includes('weibo.cn')) {
             const wbName = document.querySelector('.profile_name, .username')?.textContent?.trim();
             if (wbName) name = wbName;
@@ -269,6 +337,11 @@ export function usePageDetection() {
       if (parsed.value?.platform === 'bilibili' && parsed.value.accountId) {
         await fetchBilibiliCard(parsed.value.accountId);
       }
+      // Authoritative fallback for Pixiv: the profile API, for the reason in
+      // `fetchPixivProfile` — the page's og:image is an embed page, never the avatar.
+      if (parsed.value?.platform === 'pixiv' && parsed.value.accountId) {
+        await fetchPixivProfile(parsed.value.accountId);
+      }
     } catch (err) {
       console.warn('Scripting DOM extraction skipped or not allowed on this tab:', err);
     }
@@ -285,6 +358,7 @@ export function usePageDetection() {
     resolveUrl,
     getActiveTab,
     fetchBilibiliCard,
+    fetchPixivProfile,
     extractActiveTabAuthorMeta,
   };
 }
