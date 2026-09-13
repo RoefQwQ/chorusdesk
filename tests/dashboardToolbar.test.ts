@@ -91,13 +91,45 @@ beforeEach(() => {
   app.mount(host);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Let `App.vue`'s `onMounted` finish before tearing anything down.
+  //
+  // That hook is `async`: it awaits `clearStaleUpdatingStatus`, `reloadData` and
+  // `loadSettings` before it calls `initDarkMode()`, which reads `localStorage`.
+  // Unmounting straight away abandoned that continuation, and it resumed on a
+  // later tick — AFTER `vi.unstubAllGlobals()` had removed the stub — so it threw
+  // `localStorage.getItem is not a function` six times per run, once per test.
+  //
+  // Vitest reported those as unhandled errors alongside a fully green suite,
+  // which is why they read as harness noise for so long. They were real: a
+  // component whose setup continues after unmount is exactly the shape that bites
+  // in production too, and the noise hid that this file was exercising it.
+  //
+  // Draining the microtask queue is what makes the ordering deterministic;
+  // awaiting `nextTick` alone left the awaits between `onMounted`'s first line and
+  // `initDarkMode` still pending.
+  await drainPendingWork();
   app?.unmount();
   host?.remove();
   app = null;
   host = null;
   vi.unstubAllGlobals();
 });
+
+/**
+ * Run pending microtasks and timers until `App.vue`'s mount hook has settled.
+ *
+ * Bounded: `onMounted` awaits three async calls, so a fixed number of turns is
+ * enough, and a bound keeps a future infinite loop from hanging the file rather
+ * than failing it. `setTimeout(0)` is used rather than fake timers because the
+ * hook's own awaits are real promises resolved by the stubs.
+ */
+async function drainPendingWork(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
 
 describe('dashboard — floating reading toolbar', () => {
   it('is present on the feed', async () => {

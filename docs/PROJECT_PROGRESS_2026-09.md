@@ -623,3 +623,39 @@ Twitter 标签页路径真的跑通了。
 - 本仓库 `core.autocrlf=true`：签入为 LF，工作区可能是 CRLF，多行锚点会匹配不到。
 - **代理派活**：穷尽式核查用 `reviewer` / `task`，**不是** `scout`；多代理写同一文件必须先
   经 `hub` 协调边界（规则 31，含 2026-09-12 的复发案例）。
+- **`npm test` 打印 `Errors 6` 而零失败 —— 已定位并修复（2026-09-14）**。
+  **不是 jsdom 噪音**（我曾这么说过，那是猜测，已撤回：`Errors` 只统计
+  uncaught exception / unhandled rejection，与 console 文本无关）。真实错误是：
+
+  ```
+  TypeError: localStorage.getItem is not a function
+   ❯ initDarkMode entrypoints/dashboard/composables/useDarkMode.ts:19:35
+   ❯ entrypoints/dashboard/App.vue:316:3
+   ❯ processImmediate node:internal/timers:472:9
+   ```
+
+  **成因**：`App.vue` 的 `onMounted` 是 `async`——它依次 `await`
+  `clearStaleUpdatingStatus()` / `reloadData()` / `loadSettings()`，**之后**才调
+  `initDarkMode()`（读 `localStorage`）。`tests/dashboardToolbar.test.ts` 的 `afterEach`
+  直接 `unmount()` + `vi.unstubAllGlobals()`，于是那个续体在 **stub 已被移除之后**才恢复，
+  读到的是被拆掉的全局。一次测试一个，每次运行 6 个（该文件 6 例）。
+
+  **为什么长期被当成噪音**：套件全绿、错误与测试结果无关，vitest 只把它列在
+  `Unhandled Errors` 段落里。它其实是真的——**组件在 unmount 之后继续跑 setup**，
+  这正是生产里也会咬人的形状，而噪音把「这个文件正在踩它」这件事盖住了。
+
+  **修法**：`afterEach` 改为 async，先 `drainPendingWork()`（有界地清空微任务与
+  `setTimeout(0)` 轮次，让 mount 钩子跑完）再 unmount + unstub。
+
+  **为什么值得记录**：这个错误**不是每次都出现**，所以「跑一次是绿的」不能证明任何事。
+  实测对照——**修好后 6/6 次干净；把那一行还原后 4 次里出现 1 次**。复现需要整个套件的
+  调度（并发文件）才输得掉那场竞速，单跑该文件 3/3 不复现。
+
+- **（已修，2026-09-14）`channelSync` 的 45s 截止定时器曾经永不取消。**
+  `timeoutPromise` 内联构造、句柄不保存，所以「抓取赢下竞速」这条**最常见**的路径
+  仍会留下一个活着的 45s 定时器——每次调用一个（每个频道每次同步一个）。
+  19 个测试文件驱动 `updateChannel`，套件因此每次调用都带一个已武装的定时器。
+  它**不是**上面那个 unhandled rejection 的来源：`Promise.race` 会给败者挂 handler。
+  修法：句柄提升到 `try` 外、在 `finally` 里 `clearTimeout`（三条退出路径都覆盖），
+  由 `tests/channelSync.deadline.test.ts` 计数已挂起定时器钉住——**旧代码上两例都红**
+  （`expected [ 45000 ] to deeply equal []`），新代码上绿。

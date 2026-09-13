@@ -367,6 +367,10 @@ async function runChannelUpdate(
     errorMessage: undefined,
   });
 
+  // Declared outside the `try` so `finally` can cancel it: the timer must be
+  // cleared on EVERY exit, including the error and timeout paths.
+  let deadlineTimer: number | undefined;
+
   try {
     // The 45s budget must CANCEL the work, not merely stop waiting for it
     // (AUDIT P1-2). Before this the timeout resolved while the underlying fetch
@@ -378,12 +382,20 @@ async function runChannelUpdate(
     // for it to load. Injected collection (Twitter/Douyin) is not cancellable
     // mid-injection — `chrome.scripting` has no abort — so those adapters check
     // the signal between steps; the tab work is bounded by its own budget.
+    //
+    // The handle is kept so the timer can be CANCELLED once the race is decided.
+    // It used to be constructed inline and left armed: the common path (the fetch
+    // wins) still left a live 45s timer behind on every single call, which is one
+    // per channel per sync. `Promise.race` does attach a handler to the loser, so
+    // this was never an unhandled rejection — the cost is a pending timer that
+    // holds the process open and the closure alive. 19 test files drive
+    // `updateChannel`, so the suite carried one armed timer per call.
     const abortController = new AbortController();
     const timeoutPromise = new Promise<FetchResult>((_, reject) => {
-      setTimeout(() => {
+      deadlineTimer = setTimeout(() => {
         abortController.abort();
         reject(new FetchTimeoutError('同步请求超时（已超过 45 秒未响应，请检查平台登录状态）'));
-      }, 45_000);
+      }, 45_000) as unknown as number;
     });
 
     // For normal (non-paginated) syncs, find the newest post already in DB to use as a watermark.
@@ -901,6 +913,15 @@ async function runChannelUpdate(
     );
     return { posts: [], error: structured };
   } finally {
+    // Cancel the deadline timer. Every path reaches here — success, fetch error,
+    // and timeout alike — so this is the one place that covers them all. Without
+    // it the timer stayed armed after the race was already decided, which is the
+    // common case: the fetch wins, and a live 45s timer is left behind holding
+    // its closure (and, in a test process, the event loop) open.
+    //
+    // No undefined guard: `clearTimeout` is a no-op for a value with no live
+    // timer, so the branch could not change behaviour.
+    clearTimeout(deadlineTimer);
     // Recorded on EVERY path, including failure: a request that failed still hit
     // the platform, so the spacing that follows must account for it (rule 19).
     // Shared across entry points, so a concurrent batch cannot start from "this
