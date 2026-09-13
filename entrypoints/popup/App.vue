@@ -38,6 +38,7 @@ const {
   initCatalog,
   onUrlResolved,
   handleSave,
+  firstSyncError,
 } = follow;
 const { openDashboard } = usePopupNavigation();
 
@@ -128,6 +129,7 @@ onMounted(async () => {
           v-if="existingChannel"
           :existing-channel="existingChannel"
           :existing-creator="existingCreator"
+          :first-sync-error="firstSyncError"
         />
 
         <!-- Add Options -->

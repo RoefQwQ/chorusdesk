@@ -62,18 +62,7 @@ describe('popup — no second dashboard action in any body state', () => {
     // it did not do (it opens the dashboard, not that creator's feed). Checked here
     // rather than through the popup's own render: the popup only reaches this state
     // with a real detected page and a matching stored channel.
-    const { default: AlreadyFollowedCard } = await import(
-      '../entrypoints/popup/components/AlreadyFollowedCard.vue'
-    );
-    const html = await renderToString(
-      createSSRApp({
-        render: () =>
-          h(AlreadyFollowedCard as never, {
-            existingChannel: { id: 'bilibili:1', displayName: 'x' },
-            existingCreator: { name: '测试创作者' },
-          }),
-      }),
-    );
+    const html = await renderAlreadyFollowed();
 
     expect(buttonsIn(html)).toHaveLength(0);
     // Still says what it is for.
@@ -81,3 +70,50 @@ describe('popup — no second dashboard action in any body state', () => {
     expect(html).toContain('测试创作者');
   });
 });
+
+/**
+ * The follow succeeded but its first fetch did not — the capability chain's last
+ * mile.
+ *
+ * `backgroundSync: false` platforms (douyin, twitter) cannot be synced from the
+ * service worker, and the popup delegates the first fetch there. The worker
+ * reports that honestly; the popup used to drop the answer into `console.warn`,
+ * so the observable result was 「已关注」 followed by an empty feed and no reason
+ * anywhere the user could see.
+ */
+describe('popup — a refused first sync is told to the user', () => {
+  it('shows the reason and the next step when the platform cannot sync in the background', async () => {
+    const html = await renderAlreadyFollowed('推特需要在扩展页面中同步，后台无法采集。');
+
+    expect(html).toContain('首次同步未完成');
+    expect(html).toContain('推特需要在扩展页面中同步');
+    // The reason alone leaves the user with nothing to do, and nothing retries.
+    expect(html).toContain('打开面板');
+  });
+
+  it('says nothing when the first sync succeeded', async () => {
+    // The ordinary case must stay clean: a warning that fires when everything
+    // worked reads as a problem when there is none (AGENTS rule 23).
+    for (const value of [null, undefined, '']) {
+      const html = await renderAlreadyFollowed(value);
+      expect(html).not.toContain('首次同步未完成');
+    }
+  });
+});
+
+/** Render `AlreadyFollowedCard` with the given first-sync outcome. */
+async function renderAlreadyFollowed(firstSyncError?: string | null): Promise<string> {
+  const { default: AlreadyFollowedCard } = await import(
+    '../entrypoints/popup/components/AlreadyFollowedCard.vue'
+  );
+  return renderToString(
+    createSSRApp({
+      render: () =>
+        h(AlreadyFollowedCard as never, {
+          existingChannel: { id: 'bilibili:1', displayName: 'x' },
+          existingCreator: { name: '测试创作者' },
+          firstSyncError,
+        }),
+    }),
+  );
+}

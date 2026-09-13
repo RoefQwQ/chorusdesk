@@ -28,6 +28,20 @@ export interface QuickFollowDependencies {
  * Owns only follow-form state; URL recognition lives in usePageDetection.
  */
 export function useQuickFollow(deps: QuickFollowDependencies) {
+  /**
+   * Why the post-follow first fetch did not run, when it did not.
+   *
+   * The fetch is delegated to the service worker (see `handleSave`), which
+   * reports an honest `{ success: false, error }` — including for a platform
+   * that cannot run there at all (`backgroundSync: false`, i.e. douyin and
+   * twitter). That answer used to reach only `console.warn`, so following a
+   * Twitter creator showed 「已关注」 and then nothing: the user had no way to
+   * learn that the first sync needs the dashboard, and every later symptom
+   * (an empty feed) looked like a bug in the extension.
+   *
+   * `null` = no problem to report (still running, or it succeeded).
+   */
+  const firstSyncError = ref<string | null>(null);
   const creators = ref<Creator[]>([]);
   const channels = ref<Channel[]>([]);
   const existingChannel = ref<Channel | null>(null);
@@ -198,13 +212,26 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
       // nothing would retry. `sendMessage` keeps the worker alive until it
       // answers, so the fetch survives the popup closing. It also keeps the
       // platform adapters out of this bundle (queue item B20).
+      //
+      // `firstSyncError` carries the refusal back to the UI. The worker already
+      // answers honestly — including for a platform that cannot sync from a
+      // worker at all (`backgroundSync: false`: douyin, twitter) — so dropping
+      // the answer was the entire defect: the capability was declared, honoured
+      // by the scheduler, and then never mentioned to the user.
+      firstSyncError.value = null;
       void chrome.runtime
         .sendMessage({ type: 'SYNC_CHANNEL', channelId: newChannel.id, limit: 5 })
         .then((res: { success?: boolean; error?: string } | undefined) => {
-          if (res && res.success === false) console.warn('[Chorus] 首次抓取失败:', res.error);
+          if (res && res.success === false) {
+            firstSyncError.value = res.error || '首次抓取未能完成';
+            console.warn('[Chorus] 首次抓取失败:', res.error);
+          }
           return notifyBadgeRefresh();
         })
-        .catch((e) => console.error('[Chorus] 首次抓取失败:', e));
+        .catch((e) => {
+          firstSyncError.value = '首次抓取未能完成';
+          console.error('[Chorus] 首次抓取失败:', e);
+        });
 
       existingChannel.value = newChannel;
       existingCreator.value = (await db.creators.get(targetCreatorId)) || null;
@@ -238,5 +265,6 @@ export function useQuickFollow(deps: QuickFollowDependencies) {
     selectCreator,
     switchToNewCreatorWithQuery,
     handleSave,
+    firstSyncError,
   };
 }

@@ -206,3 +206,94 @@ RSS 适配器要抓取用户自己填写的任意源地址，若把「可达性�
 - 不进入 IndexedDB 业务库，不参与 JSON 备份导出；
 - 只记录主机名、HTTP 状态码、条目数量与错误消息，不记录 Cookie、Token、请求头或响应体；
 - 上限 150 条环形缓冲，不会无限增长。
+
+---
+
+## 5. 某个平台坏了怎么修
+
+> **这一节是给「Twitter 今天突然抓不到了」用的，不是给「新增支持 Instagram」用的。**
+> 新增平台的步骤在 [DEVELOPMENT.md](DEVELOPMENT.md) §3。
+>
+> 目标是一页以内。**不要**再写第二本《平台维护规范》。
+
+### 5.1 先定位在哪一层
+
+一个平台抓不到，**必然**落在下表四层之一。先跑测试、再抓真实响应，别直接读代码：
+
+| 层 | 症状 | 先看 |
+|---|---|---|
+| **请求 / 采集** | 日志里有 HTTP 4xx/5xx，或注入路径「未返回结果」 | `src/adapters/<p>.ts` 的 URL/headers/参数 |
+| **解析** | 请求 200，但条数为 0 或字段为空 | 该平台的 fixture 测试 |
+| **契约校验** | 请求 200 且有数据，但条目被丢弃 | `src/adapters/<p>/contract.ts`（仅页面驱动平台） |
+| **能力声明** | 同步被跳过、后台不跑、报「不支持」 | `PlatformAdapter` 上的 `backgroundSync` / `paginates` / `archivesMedia` / `digScrollsUserPage` |
+
+### 5.2 步骤
+
+```text
+1. 跑该平台自己的测试：npx vitest run tests/<platform>*.test.ts
+      红了 → 解析层，fixture 就是基线，直接 diff 出哪一步变了
+      绿了 → 继续
+2. 抓一次当前真实响应（curl + 正确的 Referer/X-Requested-With；
+      页面驱动平台则在真实页面里取 DOM/SSR，见 §3.1）
+3. 与 fixture diff：
+      endpoint/参数/header 变了  → 改 acquire（<p>.ts）
+      字段/结构变了              → 改 parser（<p>.ts 或 <p>/contract.ts）
+      整个采集方式变了（API→页面）→ 改 adapter + collector + message handler + capability
+4. 只改该平台拥有的文件（见 §5.3 的表）
+5. 用新响应更新/新增 fixture（真实载荷的最小代表样本，脱敏见 §5.4）
+6. 重跑平台测试 + 通用契约测试：
+      npx vitest run tests/<platform>*.test.ts tests/channelSync*.test.ts tests/architecture.typeContract.test.ts
+7. 实机同步一次该频道（开发者日志确认「同步完成」与「平台返回 N 条」）
+8. 全量门禁：npm run typecheck && npm run lint && npm test && npm run build
+```
+
+### 5.3 谁拥有什么（实测，2026-09-14）
+
+解析/请求的改动**应当**只落在前两列。第三列是**唯一**必须动通用文件的场景。
+
+| 平台 | adapter | 子模块 | fixture | 通用文件里的该平台代码 |
+|---|---|---|---|---|
+| bilibili | `bilibili.ts` | `bilibili/spaceDynamic.ts` | ✅ | `channelSync.ts:689` **id 去重**（`dynId` 与 `bvid` 同 URL）；`usePageDetection.ts:337` 作者信息 API |
+| twitter | `twitter.ts` | — | ❌（手工 fixture） | `channelSync.ts:261` 存量行「裸 t.co 链接」修复 |
+| youtube | `youtube.ts` | — | ❌ | `platformAuth.ts:24` cookie 表 |
+| pixiv | `pixiv.ts` | — | ✅ | `usePageDetection.ts:342` 作者信息 API |
+| fantia | `fantia.ts` | — | ✅ | `channelSync.ts:268` 存量行「原始 delta」修复 |
+| xiaohongshu | `xiaohongshu.ts` | `collector.ts` `contract.ts` `profileState.ts` | ✅ | `channelSync.ts:265` 存量行缺 token 链接修复；`usePostSyncArchive.ts:71` 签名 URL 归档优先级 |
+| weibo | `weibo.ts` | — | ❌ | — |
+| douyin | `douyin.ts` | `douyin/collector.ts` `douyin/contract.ts` | ✅ | `usePageDetection.ts:159` 专用采集器分流；`usePostSyncArchive.ts:71` |
+| rss | `rss.ts` | — | ✅ | `useSyncActions.ts:44,84,237` 按站点授权；`useFeedFilters`（纯展示） |
+
+**页面驱动的三个平台**（douyin / xiaohongshu 回溯 / twitter 标签页）还各自拥有一个 message handler：
+`messages/douyinSnapshot.ts`、`messages/xiaohongshuNotes.ts`、`messages/twitterTimeline.ts`。
+改采集方式时它和 adapter 一起动（这三个也是 `channelSync` 之外唯一 `import chrome.*` 的适配器路径）。
+实时探针：`e2e/douyin-probe.mjs`、`e2e/xhs-scroll-probe.mjs`。
+
+### 5.4 判断「这次改动是不是越界了」
+
+**唯一授权检查**（比读代码快得多）：
+
+> 只要 `FetchResult` / `Post` 契约没变，**修一个平台就不该碰**
+> `database.ts`、`backupRepository.ts`、`postRepository.ts`、`channelSync.ts`（存量行修复除外）、
+> `FeedView.vue`、`postService.ts`。
+
+如果一次「Twitter 解析坏了」的修改里出现了 `database.ts` 或 `backupRepository.ts`——
+**停下来问为什么**，而不是先看它改得对不对。这是本仓判断 Agent 是否乱扩散的第一信号。
+
+**三个已知的合法例外**（它们不是越界，是设计使然）：
+
+1. **存量行修复**（`channelSync.shouldRepairStoredContent`）——已写入的坏数据不会自己变好，
+   而"哪些行该重写"只有同步层知道（规则 16）。
+2. **作者信息获取**（`usePageDetection`）——B 站 / Pixiv 走各自的公开 API，
+   抖音走专用采集器；popup 拿作者名时用的不是 adapter。
+3. **能力声明**（`PlatformAdapter` 上的四个布尔字段）——采集方式变了，
+   声明必须跟着变，而它被 `channelSync` / `autoSync` / `imageCache` 消费。
+
+### 5.5 fixture 的脱敏与体量
+
+新抓的 fixture 要**保存解析契约所需的真实结构**，不是把整份响应塞进仓库：
+
+- 保留：解析器实际读到的字段、类型、嵌套层级、真实的空值形态；
+- 移除/替换：cookie、token、账号 ID、用户名、内部 session 字段、追踪字段、
+  无关的巨大 feature/config tree；
+- **体量**：目标是最小代表样本。一份 500KB–2MB 的原样 payload 会让以后每次改测试都拖着它，
+  且没人会读。现有 fixture 都是 KB 级（`tests/fixtures/` 下最大的也在几十 KB）。
