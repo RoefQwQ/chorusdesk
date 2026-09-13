@@ -48,3 +48,26 @@ Thumbs.db
 .vscode/
 .idea/
 bun.lock
+
+# Internal working material — local only, deliberately NOT published.
+#
+# These are the AI/human maintenance notes for this project: the rulebook, the
+# incident history, the audits, the backlog and the product decisions. Roughly
+# 500KB of "how this repo is worked on" rather than "what this repo is".
+#
+# They stay on disk for every local session and every future one; what changes is
+# that a clone of the public repo no longer carries them. Users verifying the
+# extension (PRIVACY.md, PLATFORMS.md, the source) are unaffected — those are the
+# documents that answer "does this thing steal my cookies", and they remain public.
+#
+# Kept OUT of this list on purpose, because tests read them:
+#   docs/ARCHITECTURE.md   (tests/architecture.typeContract.test.ts)
+#   docs/PUBLISHING.md     (tests/hosts.singleSource.test.ts)
+AGENTS.md
+docs/AGENTS_CASES.md
+docs/AUDIT_2026-09-12.md
+docs/REVIEW_2026-09.md
+docs/PHASE_REPORT_2026-09.md
+docs/PROJECT_PROGRESS_2026-09.md
+docs/PRODUCT_DECISIONS.md
+docs/archive/
