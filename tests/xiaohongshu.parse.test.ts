@@ -212,6 +212,49 @@ describe('xiaohongshu — parsing a captured profile page', () => {
 });
 
 /**
+ * A dig that runs out of the notes on this page must not claim the account ended.
+ *
+ * The profile page's SSR carries one screen (~30 notes) and this adapter cannot
+ * ask for the next page from the service worker — `user_posted` needs an `X-S`
+ * signature only the page's own JS can produce. So "I ran out of parsed notes" is
+ * a fact about THIS FETCH, not about the account, and saying otherwise writes
+ * `__END__` and permanently blocks the channel (rule 10's asymmetry).
+ *
+ * The page contradicts the old behaviour outright: measured 2026-09-13, the SSR
+ * state's `user.noteQueries[0]` reads
+ * `{ num: 30, hasMore: true, cursor: "69fdde80…" }` on the very same response.
+ */
+describe('xiaohongshu — a dig that runs out of page must not claim the account ended', () => {
+  it('reports an error, not hasMore:false, at the end of the SSR notes', async () => {
+    served.push({ match: '/user/profile/', body: pageWith(profileInitialState) });
+
+    // Offset past the three fixture notes: nothing left to slice.
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { cursor: '99', isHistory: true });
+
+    // `hasMore:false` standing alone is what `statesEndOfHistory` reads as the
+    // platform declaring the end.
+    expect(res.hasMore).not.toBe(false);
+    expect(res.error?.code).toBe('unsupported');
+    // Rule 13: an empty result has to name why, not look like a clean zero.
+    expect(res.error?.message).toContain('30');
+  });
+
+  it('still pages normally while notes remain, cursor and all', async () => {
+    // `hasMore:false` is only fatal when it stands alone. Here the page still has
+    // notes past the offset, so the healthy path returns posts plus a cursor —
+    // asserted so the guard above cannot swallow this case too.
+    served.push({ match: '/user/profile/', body: pageWith(profileInitialState) });
+
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 1, { cursor: '0', isHistory: true });
+
+    expect(res.error).toBeUndefined();
+    expect(res.posts).toHaveLength(1);
+    expect(res.nextCursor).toBe('1');
+    expect(res.hasMore).toBe(true);
+  });
+});
+
+/**
  * The `asRecord(a) || asRecord(b)` idiom, which is dead code.
  *
  * `asRecord()` returns `{}` for a miss and `{}` is truthy, so the right-hand side

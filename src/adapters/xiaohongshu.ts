@@ -19,6 +19,20 @@ import {
 
 export const xiaohongshuAdapter: PlatformAdapter = {
   platform: 'xiaohongshu',
+  /**
+   * The profile page cannot state "there is nothing older": its SSR payload
+   * carries one screen of notes plus `noteQueries[].hasMore`, and reaching older
+   * ones needs the page's signed `user_posted` call, which this adapter cannot
+   * make from the service worker.
+   *
+   * Declaring this is what lets an already-poisoned channel recover. `__END__`
+   * written by an earlier build was trusted — `hasStaleTerminalCursor` clears a
+   * terminal cursor only for platforms that do NOT claim to paginate — so a
+   * channel dug to the end of its first screen stayed permanently blocked
+   * (AGENTS rule 10). This declaration is also what the `restricted_only` archive
+   * strategy and the honesty fix above depend on being accurate.
+   */
+  paginates: false,
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
     try {
@@ -133,12 +147,30 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         };
       }
 
-      // Support cursor-based pagination for history digging (offset)
+      // A local offset over the notes parsed from THIS page. It is not a platform
+      // cursor: it exists so a dig can page through the ~30 notes one response
+      // carries instead of returning all of them at once.
       const isHistoryDig = Boolean(options?.cursor !== undefined || options?.isHistory);
       const isForce = Boolean(options?.forceRefresh);
       const offset = isHistoryDig ? Math.max(Number(options?.cursor) || 0, 0) : 0;
 
-      // If history digging has already reached or exceeded the end of SSR notes list
+      // The profile page carries only its first screen (~30 notes) in the SSR
+      // state, and this adapter has no way to ask for the next page from the
+      // service worker — the endpoint that would (`user_posted`) requires an `X-S`
+      // signature only the page's own JS can produce. So "I ran out of the notes I
+      // parsed" is a statement about THIS FETCH, not about the account.
+      //
+      // It used to return `hasMore: false` here, which `statesEndOfHistory` reads
+      // as the platform declaring the end — writing `__END__` and permanently
+      // blocking the channel (rule 10: wrongly claiming complete is unrecoverable).
+      // The page contradicts it outright: measured 2026-09-13, the SSR state's
+      // `user.noteQueries[0]` says `{ num: 30, hasMore: true, cursor: "69fdde80…" }`
+      // on the same response. The platform says there IS more; we are the ones who
+      // cannot reach it, and we must not put that in the platform's mouth.
+      //
+      // Reported as an error instead of a silent empty success (rule 13): a dig
+      // that returns nothing must say why, and this is a real limit the user can
+      // act on (open the note's page in a browser, or wait for in-page acquisition).
       if (isHistoryDig && !isForce && offset >= allPosts.length) {
         return {
           posts: [],
@@ -146,7 +178,11 @@ export const xiaohongshuAdapter: PlatformAdapter = {
             name: authorName,
             avatar: authorAvatar,
           },
-          hasMore: false,
+          error: fetchError(
+            'unsupported',
+            '小红书主页只提供最近的一屏作品（约 30 条），更早的内容需要页面端才能取到，'
+            + '当前同步路径无法继续回溯。已获取的内容不会丢失，深挖稍后可重试。',
+          ),
         };
       }
 
@@ -159,6 +195,9 @@ export const xiaohongshuAdapter: PlatformAdapter = {
       await enrichImageNoteMedia(channel, targetPosts, signal);
 
       const nextOffset = offset + targetPosts.length;
+      // `hasMore` only while there are still unparsed notes IN THIS PAGE. When the
+      // offset reaches the end, the branch above has already answered — so this is
+      // `false` only alongside a real cursor, never as an end-of-history claim.
       const hasMore = !isForce && nextOffset < allPosts.length;
       return {
         posts: targetPosts,

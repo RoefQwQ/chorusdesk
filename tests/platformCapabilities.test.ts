@@ -101,10 +101,18 @@ describe('capability declarations', () => {
     // The fact this replaced was duplicated in `cursorState.ts`, and the copy had
     // already drifted: youtube and rss cannot state an end either, yet they were
     // absent from that list and their `__END__` was trusted.
-    for (const platform of ['douyin', 'youtube', 'rss', 'fantia'] as KnownPlatform[]) {
+    //
+    // `xiaohongshu` was on the WRONG side of this line for the same reason, and it
+    // is the more expensive case: its profile page carries one screen of notes and
+    // it declares `hasMore:false` when that screen runs out, which wrote `__END__`
+    // and permanently blocked the channel — while the page's own SSR state said
+    // `noteQueries[0].hasMore === true` on the very same response (measured
+    // 2026-09-13). Moved here once that was measured, together with the adapter
+    // fix that stops claiming an end it cannot know.
+    for (const platform of ['douyin', 'youtube', 'rss', 'fantia', 'xiaohongshu'] as KnownPlatform[]) {
       expect(terminalCursorIsStated(platform), platform).toBe(false);
     }
-    for (const platform of ['bilibili', 'twitter', 'weibo', 'pixiv', 'xiaohongshu'] as KnownPlatform[]) {
+    for (const platform of ['bilibili', 'twitter', 'weibo', 'pixiv'] as KnownPlatform[]) {
       expect(terminalCursorIsStated(platform), platform).toBe(true);
     }
   });
