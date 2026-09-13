@@ -47,6 +47,7 @@ import { useSyncActions } from './composables/useSyncActions';
 import { useBackupManager } from './composables/useBackupManager';
 import { useMediaMaintenance } from './composables/useMediaMaintenance';
 import { usePlatformPrefetch } from './composables/usePlatformPrefetch';
+import { usePostSyncArchive } from './composables/usePostSyncArchive';
 import { notifyBadgeRefresh } from '../../src/utils/badge';
 
 // ==================== DATA & CROSS-PAGE STATE ====================
@@ -71,6 +72,17 @@ const {
 // Hover-prefetch for the platform sidebar (queue B5): warms a platform's first
 // screen of images on hover, bounded to one pass per platform per session.
 const { prefetchPlatform } = usePlatformPrefetch(posts);
+
+// Post-sync archiving: with a directory bound, quietly save what a sync just
+// brought in. Runs after every dashboard refresh (see `useSyncActions`), because
+// for a platform with expiring URLs the sync is the only moment the image is
+// still reachable. Silent by design; the Developer Log gets one line.
+const { archiveSyncedPosts } = usePostSyncArchive({
+  getPosts: () => posts.value,
+  getCreators: () => creators.value,
+  getChannels: () => channels.value,
+  getStrategy: () => settings.value.imageCacheStrategy,
+});
 
 // Hidden-creator visibility preferences (feed sidebar / directory).
 const creatorVisibility = useCreatorVisibility({ getChannels: () => channels.value });
@@ -123,6 +135,7 @@ const syncActions = useSyncActions({
   getRequestDelayMs: () => settings.value.requestDelayMs,
   getHideReposts: () => hideReposts.value,
   reloadData: () => reloadData(),
+  archiveSyncedPosts,
 });
 const {
   isRefreshingAll,

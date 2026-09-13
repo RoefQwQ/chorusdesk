@@ -16,6 +16,15 @@ export interface SyncActionsDependencies {
   getRequestDelayMs: () => number;
   getHideReposts: () => boolean;
   reloadData: () => Promise<void>;
+  /**
+   * Quietly archive the media of posts the sync just brought in.
+   *
+   * Called once per completed sync, AFTER `reloadData()` so the snapshot it reads
+   * is the post-sync one. Injected rather than implemented here because it needs
+   * the bound-directory state and the File System Access API — see
+   * `usePostSyncArchive`. Optional so existing callers/tests need not provide it.
+   */
+  archiveSyncedPosts?: () => Promise<void>;
 }
 
 export interface RefreshProgress {
@@ -109,6 +118,9 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       if (failed > 0) devLog.warn('sync', line, '失败频道的行内会显示具体原因');
       else devLog.info('sync', line);
       await deps.reloadData();
+      // After the reload, so the pass sees the posts this run added. Silent and
+      // best-effort: the sync's own outcome is already reported above.
+      await deps.archiveSyncedPosts?.();
     } catch (err) {
       // This catch used to do nothing but `console.error`, which the Developer Log
       // panel cannot read. A per-channel failure already has a visible signal (the
@@ -142,6 +154,7 @@ export function useSyncActions(deps: SyncActionsDependencies) {
     try {
       const results = await updateCreator(creatorId, deps.getItemsPerFetch(), { onlyOriginal: deps.getHideReposts() });
       await deps.reloadData();
+      await deps.archiveSyncedPosts?.();
       const safeResults = Array.isArray(results) ? results : [];
       const totalPosts = safeResults.reduce((acc, r) => acc + (r.posts?.length || 0), 0);
       const rawFetched = safeResults.reduce((acc, r) => acc + (r.totalFetched || 0), 0);
@@ -209,6 +222,9 @@ export function useSyncActions(deps: SyncActionsDependencies) {
       // on screen until the page was refreshed by hand — and a *new* failure
       // was equally invisible.
       await deps.reloadData();
+      // Same reasoning as the reload: the posts this channel just produced exist
+      // in the DB either way, so the archive pass runs on the failure path too.
+      await deps.archiveSyncedPosts?.();
     }
   }
 
