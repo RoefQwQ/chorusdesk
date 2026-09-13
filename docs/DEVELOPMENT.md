@@ -64,7 +64,7 @@
    - **不要在 adapter 里写登录探测**（`checkAuthStatus`）：该模式已于 2026-09-12 删除三处实现——它们零调用，而 Cookie 本来由 `credentials: 'include'` + host_permissions 自动携带，探测既没被调用也改变不了结果。登录状态灯由 `platformAuth.ts` 的 Cookie 表统一负责（见第 7 步）。
    - 平台特有的行为参数放**本 adapter 上**，不要塞进 `sync` 层分支：`minRequestIntervalMs`（请求最小间隔，覆盖只能抬高下限）、`archivesMedia: false`（声明不参与本地图片归档）。理由与形状见 `ARCHITECTURE.md` §4.2。
 2. 请求统一走 `src/infrastructure/chrome/http.ts` 的 `bgFetch()`（Background 代理，绕 CORS）；凡 CDN 图/媒体 URL 一律先过 `toSecureMediaUrl()`；热链严格平台按 §8.2 处理。
-3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base36 哈希 32 位>` 等），**勿随机数**（youtube 的随机回退仅为异常兜底）。RSS 的哈希输入是 **`channelId + '\0' + guid`**，不是裸 `guid`——`guid` 只保证 **feed 内**唯一，两个源各发 `<guid>1</guid>` 会塌成同一条（队列 #3）。
+3. 动态 id 前缀规则：`<platform>_<平台原生 id>`（参考 `bilibili_video_<bvid>`、`xiaohongshu_<noteId>`、`rss_<base36 哈希 32 位>` 等），**勿随机数**：随机 id 会让每次同步都把同一条内容当成新的重新导入（`rss.ts` 的 `Math.random` 就是这么被换掉的）。拿不到稳定 id 时用**内容的稳定哈希**，不要用随机值兜底。RSS 的哈希输入是 **`channelId + '\0' + guid`**，不是裸 `guid`——`guid` 只保证 **feed 内**唯一，两个源各发 `<guid>1</guid>` 会塌成同一条（队列 #3）。
 4. 在 `src/platform/registry.ts` 的 `ADAPTER_MAP` 注册。**`ADAPTER_MAP` 的键类型是 `KnownPlatform`，漏注册会编译报错**（这正是它的作用）；`getAdapter` 对未知平台返回 `undefined`，**没有 rss 回退**——未知平台必须显式报「不支持」，绝不能拿该频道的 URL 当 RSS 源去抓。
    > 更正（2026-09-12）：本步此前写「不要改 `getAdapter` 的 rss 回退语义」。那个回退**早已删除**（见 `AGENTS.md` fix queue 第 8 条、`ARCHITECTURE.md` §4.2），照旧文做会去找一个不存在的分支。
 5. 在 `src/types/index.ts` 做**三处**改动（不是一处）：
@@ -72,7 +72,7 @@
    - `KNOWN_PLATFORMS` 运行时常量加成员（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）；
    - `PLATFORM_REGISTRY` 加元数据（name/domain/color/`authType`/`urlPlaceholder`…）。
    三者缺一不可：`ADAPTER_MAP: Record<KnownPlatform, …>` 会因联合成员没有适配器而报错，而 `KNOWN_PLATFORMS` 是给运行时可枚举用的那份。
-6. 在 `src/utils/urlParser.ts` 增加 URL → `{ platform, accountId, cleanUrl }` 分支（注意域名顺序：`weibo.cn` 在 `weibo.com` 前等，避免子串误判；XHS 短链 `xhslink.com`、YouTube `youtu.be` 这类别名要并进同平台分支）。
+6. 在 `src/utils/urlParser.ts` 增加 URL → `{ platform, accountId, cleanUrl }` 分支。**主机判定走 `hostMatches` / `isHostOrSubdomainOf`（精确匹配），不是 `includes()`**——子串判定会把 `bilibili.com.attacker.example` 认成 B 站（`AGENTS.md` 规则 1）。**判定的先后顺序因此与本步无关**：旧文写的「`weibo.cn` 放在 `weibo.com` 前避免子串误判」是规则 1 之前那套实现的遗留，现在两者由同一个 `||` 并列判断，调换顺序不改变结果。XHS 短链 `xhslink.com`、YouTube `youtu.be` 这类别名并进同平台分支即可。
    - **同时把该平台生成的占位名前缀加进同文件的 `GENERATED_NAME_PREFIXES`**。这是**必做项**：`channelSync` 的占位名识别从这份清单派生（`legacyPlaceholderName` / `legacyCreatorPlaceholderName` 用 `.some()` 判成员，没有第二份手写清单），`tests/urlParser.test.ts` 会双向断言「清单 ↔ 解析器实际产出」一致——漏加会让占位名永远不被真实昵称覆盖，且守卫测试会失败。
    > 更正（2026-09-12）：此前不存在这一步，也没有守卫；`AGENTS.md` 规则 9 记的正是漏加前缀导致 8 个平台的昵称写不进去那次事故。派生 + 守卫是本轮（审计 P1-5）的根治。
    > **2026-09-13 起这里就是该步骤的唯一定义处**——它原本也写在 `AGENTS.md` 规则 9 里，而规则 9 讲的是页面驱动采集，与「新增平台」无关。旧行兜底语义（`nameSource` 缺失时退回一次形状判断，命中后盖 `platform`）见 [`ARCHITECTURE.md` §4.1](ARCHITECTURE.md)。
@@ -101,17 +101,31 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 不改库名 `CreatorFeedHubDB`；**不删除/不重排**任何已发布的 version。当前已到 **v6**：v1 四表、v2 posts 复合索引 `[channelId+publishedAt]`、v3 `deletedPostIds`、v4 把 `isRead`/`isBookmarked` 由 boolean 改写为 `0 | 1`、v5 清理存量推文正文尾部的 t.co 链接（后两者均为纯数据迁移，无 schema 变更）、**v6 拆表：`deletedPostIds` → `postSuppressions` + `recycleSnapshots`，旧表置 `null`（整表删除，迁移不可回退）**。完整声明见 `ARCHITECTURE.md` §4.4，设计与不变量见 `DELETION_MODEL.md`。
 - 新 schema 只 `version(7).stores({ ... })` 追加，且 stores 里要包含全部受影响表的**完整**索引声明（Dexie 按版本全量替换索引定义）。
 - 新增字段一律给旧数据默认兜底：对象型默认值在读取端合并（仿 `getSettings` 的 `{ ...DEFAULT_SETTINGS, ...item.value }`）；布尔/可选字段用 `?.` 与 `Boolean()` 收窄。
-- 导入旧 JSON 时允许缺新字段（现有 `handleImportFile` 逐表 `bulkPut`，天然容忍）。
+- 导入旧 JSON 时允许缺新字段。实际落库在 `src/infrastructure/db/backupRepository.ts` 的 `restoreBackup`（逐表 `bulkPut`，天然容忍缺字段；`useBackupManager.handleImportFile` 只是读取文件并调用它的 UI 包装）。**注意 `bulkPut` 本身不做任何校验**——所以校验必须发生在到达它之前（`parseBackup` 的四层校验），不要以为仓储层会兜住。
 - `Post.id`、`Channel.id` 生成规则不可变；迁移旧数据只允许“同 id 改写字段”，不允许改名。
-- 删除动态必须经 `deletePostAndTombstone`（写墓碑+快照），恢复经 `restoreDeletedPost(s)`；**禁止裸 `db.posts.delete`**（同步会复活）。
-- 大表操作优先索引：水位查询用 `where('channelId').equals(...).reverse().sortBy('publishedAt')`；存在性判断用 `primaryKeys()` 而不是 `toArray()`（channelSync 已示范）。
+- 删除动态必须经 `deletePostAndTombstone`（写抑制+快照），恢复经 `restoreDeletedPost(id)`（单条）或 `restoreAllDeletedPostIds()`（整仓）；**禁止裸 `db.posts.delete`**（同步会复活）。命名说明：整仓那个不叫 `restoreDeletedPosts`，因为它返回 `{ restored, dropped }` 并只解除**快照对应的**抑制——「解除全部抑制」是另一个动作 `releaseAllSuppressions()`。
+- 大表操作优先索引：水位查询用**复合索引直取最后一行的** `.where('[channelId+publishedAt]').between([id, Dexie.minKey], [id, Dexie.maxKey]).last()`（`channelSync` 已示范）。**反例**：`where('channelId').equals(...).reverse().sortBy('publishedAt')` 是它替换掉的老写法——`.sortBy` 会把该频道的每一行都载入内存再排序；存在性判断同样用 `primaryKeys()` 而不是 `toArray()`。
 - 涉及文件系统缓存句柄的改动与业务库无关：那是独立的 `FeedHubFSCache` 库（`fsManager.ts` 内维护）。
 
 ## 5. 消息协议变更（Runtime Message）
 
 协议总表见 ARCHITECTURE.md §6。改动步骤：
 
-1. 先全局搜索该 type 的**发送方**与**接收方**（现网发送方：`infrastructure/chrome/http.ts`、`utils/media.ts`、`popup/App.vue`、`dashboard/App.vue`；接收方：`entrypoints/background.ts` 路由 + `src/infrastructure/chrome/messages/*.ts` handler）。
+1. 先全局搜索该 type 的**发送方**与**接收方**。接收方固定是 `entrypoints/background.ts` 路由 + `src/infrastructure/chrome/messages/*.ts` handler；发送方按类型分散（**不是 App.vue**——两个 `App.vue` 都不发任何 runtime 消息，照旧文去找会找不到）：
+
+   | 类型 | 发送方 |
+   |---|---|
+   | `BG_FETCH` / `BG_FETCH_ABORT` | `src/infrastructure/chrome/http.ts`（`bgFetch`，唯一的 adapter 出口） |
+   | `PROXY_IMAGE` | `src/utils/media.ts`（`proxyImage` / `markImageFailed`） |
+   | `SYNC_CHANNEL` | `entrypoints/popup/composables/useQuickFollow.ts` |
+   | `UPDATE_AUTO_SYNC` | `entrypoints/dashboard/composables/useDashboardShell.ts` |
+   | `REFRESH_BADGE` | `src/utils/badge.ts` |
+   | `FETCH_TWITTER_TIMELINE` | `src/adapters/twitter.ts` |
+   | `FETCH_DOUYIN_SNAPSHOT` | `src/adapters/douyin.ts` |
+   | `FETCH_XHS_NOTES` | `src/adapters/xiaohongshu.ts` |
+   | `OPEN_DASHBOARD` | 无（契约保留） |
+
+   完整契约（入参/响应/异步语义）见 [`ARCHITECTURE.md` §6](ARCHITECTURE.md)，那张表是唯一真源。
 2. 同步修改五件套：
    - type 名称（涉及两端字符串字面量）；
    - 入参解析与校验（handler 内局部接口 + `typeof` 收窄；外部数据用 `unknown` 收窄，不用 `any`）；
@@ -119,8 +133,10 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
    - 异步语义：凡 handler 内部是 async 的，必须 `return true` 保持消息通道（bgFetch/proxyImage/twitterTimeline/douyinSnapshot/xiaohongshuNotes/**syncChannel** 六个 handler 均如此，新增 handler 照抄）；
    - 发送方错误处理（`chrome.runtime.lastError`、`res` 为空、`ok/success` 为 false 的文案）。
 3. handler 不直接承担 Vue 状态或数据库业务；复杂业务抽到 `src/sync` 或独立服务再被 handler 调用（参考 autoSync 的 `setupAutoSync/handleAutoSyncAlarm` 分层）。
-4. 同步类消息（如 `UPDATE_AUTO_SYNC`）要能被 Dashboard 设置页即时触发且幂等（先 clear 再 create Alarm 的写法）。
+4. 同步类消息（如 `UPDATE_AUTO_SYNC`）要能被 Dashboard 设置页即时触发且幂等。**幂等的写法是 `alarms.get` 守卫，不是「先 clear 再 create」**：只有缺失或周期变了才 `create`（见 `setupAutoSync`）。clear-then-create 会把 `scheduledTime` 重置，即「拨一下开关就重算 30 分钟」——`AGENTS.md` 规则 7 记的正是这个回归，`e2e/release-gate.mjs` 的 `alarm.survives-popup-opens` / `alarm.survives-worker-restart` 两步就在断言 `scheduledTime` 不变。
 5. 契约变更完成后必须做扩展运行时验证（真实加载扩展跑一遍两端），仅 `tsc` 通过不算数。
+
+**（§5 附带：Dashboard 拆分纪律）** 以下不属于消息协议，而是长期挂在 §5 末尾的行动纪律——它原本是一个独立小节，标题丢失后留在这里。
 
 现状：App.vue 是跨页面组合层，四个 Tab 已分别由真实 View 承载；仍有部分应用动作与弹窗待继续下沉。拆分工作按以下纪律推进：
 
@@ -189,8 +205,8 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 | 单频道成功冷却 | 30 s | `sync/channelSync.ts` |
 | 单请求超时 | 45 s | `sync/channelSync.ts` |
 | 历史到底 | `nextCursor='__END__'` | `sync/channelSync.ts` |
-| 批量同平台最小间隔 | 800 ms 默认 | `sync/batchSync.ts`（`minPlatformIntervalMs`） |
-| updateCreator 间隔 | 600 ms | `sync/batchSync.ts` |
+| 批量同平台最小间隔 | 800 ms 默认 | `sync/rateLimit.ts`（`DEFAULT_MIN_INTERVAL_MS`）；被测的是**请求** |
+| updateCreator 间隔 | 同上：`platformMinInterval(platform)` | `sync/batchSync.ts`（`updateCreator` 路径）。**曾是一个固定的 600 ms**，低于每个平台的下限；已改为与批量路径共用平台下限 |
 | 深挖每轮 / 轮间 | 20 条 / 900 ms | `sync/historySync.ts` |
 | 深挖空轮上限 | 4 | `sync/historySync.ts` |
 | 自动同步周期 | 30 min Alarm | `infrastructure/chrome/autoSync.ts` |
@@ -232,10 +248,10 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 - 性能改动自检：优先既有索引（`[channelId+publishedAt]`、`isBookmarked` 等），不新增全表扫描式展示查询；UI 不重复拉取同一批数据；批量写用 `bulkPut/bulkDelete`；存在性判断用 `primaryKeys()`；内存里复制大数组前先想清楚是否必要。
 - 新测试只为一个真正不确定的边界而写（例如新平台日期解析、水位/去重交互）；不要为了“有测试”而写。断言可观察契约与真实错误，不钉实现细节。
 - **fixture 必须来自真实报文。** 这条不是风格问题，而是规则 15/21 的翻车点：按“解析器当前读什么”手写的 fixture，只证明解析器与自己一致——Twitter 的 `tweet_results` 双层嵌套 bug 就是这样被固化成“期望行为”，并穿过了 typecheck、lint 与全套测试。
-  - 至少要有一份**逐字抓取**的真实载荷（`tests/fixtures/` 下已有 `douyin/`、`rss/`、`bilibili/`、`xiaohongshu/` 四个目录，照此放）。
+  - 至少要有一份**逐字抓取**的真实载荷（`tests/fixtures/` 下已有 `bilibili/`、`douyin/`、`fantia/`、`pixiv/`、`rss/`、`xiaohongshu/` 六个目录，照此放）。
   - fixture **必须包含修复所依赖的字段**。曾有一次修复之所以长期无法被测试发现，是因为 fixture 里恰好缺了那个字段（media entity 的 `url`），于是测试与实现互相点头、与真实报文无关。
   - 注释里断言上游行为（“某字段的含义是…”）而没有真实载荷支撑，就是**披着引用外衣的猜测**；要么附上 fixture，要么删掉断言。
-  - 本仓现状：已有逐字真实载荷的平台是 **RSS、抖音、bilibili、小红书**（`tests/fixtures/` 下各自一目录），应作为模板；Twitter 的 fixture 仍是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
+  - 本仓现状：已有逐字真实载荷的平台是 **bilibili、抖音、fantia、pixiv、RSS、小红书**（`tests/fixtures/` 下各自一目录；fantia / pixiv 于 2026-09-14 补齐），应作为模板；Twitter 的 fixture 仍是 `tweetEntry()` 手工构造的，其文件头自己记录了它曾把 bug 编码成期望值。下次拿到真实载荷时，抓一份逐字副本与现有构造式 fixture 并存。
 - **有意不补测试的模块要写下来，否则下次会被当成疏漏**：
   - `youtube.ts`（**171 行**，2026-09-13 实测）：**RS​S 解析部分有意不补**。它是官方 `feeds/videos.xml` 上的一个平直 `filter().map()`，每个字段都带 `||` 默认值（`title`/`published`/`desc` 均为空串兜底，`publishedAt` 用 `Number.isFinite` 兜底），**没有“解析一半”的中间状态**——而后者正是其他平台测试存在的理由（Twitter 的嵌套层级、微博的字段别名、抖音的网格形状都属于这一类）。测试一个不可能退化到另一种形状的映射，只会钉住实现细节。
   - **但同一文件里真正脆弱的一段没有被测试**，这条例外不覆盖它：`@handle → channelId` 的解析是**三个正则依次兜底**（`feeds/videos.xml?channel_id=` / `<link rel=canonical>` / 内联 `"channelId":"UC…"`），跑在 YouTube 页面 HTML 上。三个全 miss 时 `channelId` 保持 `@handle` 原样，接着就用它去请求 RSS。
@@ -260,7 +276,7 @@ Platform Adapter 只负责请求与归一化：**不 import `src/db`/`src/infras
 [ ] 没有声称未完成的 Dashboard View 重构已完成（文档/PR 描述如实）
 [ ] npm run build 通过；相关核心流程已手动回归
 [ ] git diff --check 通过
-[ ] git status --short --ignored 未包含数据库、凭证与构建产物（.output/、.e2e-profile/ 等已忽略）
+[ ] git status --short --ignored 未包含数据库、凭证与构建产物（`.output/`、`dist/` 已忽略；`.e2e-profile/` **不在 `.gitignore` 里**——探针自建自删临时 profile，没有脚本会留下它，所以不要照旧文去那里找）
 ```
 
 ```bash

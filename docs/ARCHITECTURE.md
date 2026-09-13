@@ -6,7 +6,7 @@
 ## 1. 总览
 
 - 形态：Chromium 扩展（Manifest V3），基于 [WXT](https://wxt.dev)（`wxt ^0.21.4`）+ Vue 3（`vue ^3.5.42`）+ Tailwind CSS 4 + Dexie（`dexie ^4.4.5`）。
-- 定位：本地优先的多平台创作者动态聚合。无自建后端，业务数据落在浏览器 IndexedDB，设置与业务数据同库（Dexie 的 `settings` 表，键 `app_settings`）；`chrome.storage.local` 仅用于清理已卸载平台的遗留键。
+- 定位：本地优先的多平台创作者动态聚合。无自建后端，业务数据落在浏览器 IndexedDB，设置与业务数据同库（Dexie 的 `settings` 表，键 `app_settings`）；`chrome.storage.local` 只用在两处**非业务**目的——清理已卸载平台的遗留键，以及把开发者日志的详细模式开关镜像过 worker 重启（见 §7）。
 - 构建入口：`entrypoints/`（WXT 约定）；产物目录 `.output/chrome-mv3/`。
 - 开发/构建命令见 `package.json`：`npm run dev` / `npm run build` / `npm run zip`。
 - 权限（`wxt.config.ts`，唯一来源）：`storage`、`cookies`、`activeTab`、`scripting`、`declarativeNetRequestWithHostAccess`、`alarms`；`host_permissions` 由 `PLATFORM_HOSTS` 经 `platformHostMatchPatterns()` **派生**，RSS 站点走 `optional_host_permissions`（安装时不授予任何站点）。**没有 `tabs`**（2026-09 移除）：平台标签页的 `url`/`title` 由 host 权限覆盖，Popup 当前页由 `activeTab` 覆盖（AGENTS.md 规则 7）。
@@ -27,29 +27,43 @@ chorusdesk/
 │  │  ├─ registry.ts                # ADAPTER_MAP（键为 KnownPlatform）+ getAdapter（无静默回退）
 │  ├─ adapters/                     # 各平台实现
 │  │  ├─ types.ts                   # FetchOptions/FetchResult/PlatformAdapter 契约
+│  │  ├─ buildPost.ts               # Post 骨架工厂（13 个内联副本收敛至此）
 │  │  ├─ bilibili.ts twitter.ts pixiv.ts fantia.ts
 │  │  ├─ xiaohongshu.ts weibo.ts youtube.ts rss.ts
+│  │  ├─ bilibili/spaceDynamic.ts   # B 站动态空间接口的解析段
 │  │  ├─ douyin.ts                  # 抖音 adapter（快照 → Post 映射）
 │  │  ├─ douyin/contract.ts         # 抖音快照校验/归一化（唯一了解页面结构的地方）
 │  │  ├─ douyin/collector.ts        # 注入抖音页面的只读 DOM 采集脚本
+│  │  ├─ xiaohongshu.ts             # 小红书 adapter（常规 SSR + 页面驱动回溯）
+│  │  ├─ xiaohongshu/collector.ts   # 注入小红书画面的采集器（规则 9 的同一层）
+│  │  ├─ xiaohongshu/contract.ts    # 不可信快照校验（id 形状/时间有限/媒体 http(s)）
+│  │  └─ xiaohongshu/profileState.ts# `__INITIAL_STATE__` 的提取（JS 字面量而非 JSON）
+│  ├─ application/                  # 应用层门面：UI 经它写库，不直接碰仓储
+│  │  ├─ creatorService.ts channelService.ts postService.ts
+│  │  ├─ backupService.ts backupFileService.ts
+│  │  └─ index.ts                   # barrel（测试按它引用，见 DEVELOPMENT §10）
 │  ├─ sync/                         # 同步应用层（真实实现）
-│  │  ├─ channelSync.ts             # 单频道同步 updateChannel / clearStaleUpdatingStatus
+│  │  ├─ channelSync.ts             # 单频道同步 updateChannel
 │  │  ├─ batchSync.ts               # 平台轮转交错批量同步
 │  │  ├─ historySync.ts             # 历史翻页 fetchChannelHistory / deepSyncChannel
+│  │  ├─ syncCoordinator.ts         # 同频道 single-flight + 跨入口平台节流（waitForPlatformTurn）
 │  │  ├─ cursorState.ts             # '__END__' 哨兵语义的唯一实现（谁消费、哪种平台是猜测）
 │  │  ├─ rateLimit.ts               # 平台节流下限 + 跨 worker 持久化的冷却（strike 翻倍、封顶）
-│  │  └─ index.ts                   # 兼容导出
+│  │  └─ index.ts                   # 同步层 barrel（Dashboard 按它引用）
 │  ├─ infrastructure/
 │  │  ├─ db/                        # Dexie 数据库 + 仓储（真实实现）
 │  │  │  ├─ database.ts             # FeedDatabase + 版本 1-6 schema
 │  │  │  ├─ settingsRepository.ts   # DEFAULT_SETTINGS / getSettings / saveSettings
-│  │  │  ├─ statsService.ts         # getDatabaseStats
-│  │  │  └─ postRepository.ts       # 动态生命周期：删除/回收站/清理/媒体自愈
+│  │  │  ├─ postRepository.ts       # 动态生命周期：删除/回收站/清理/媒体自愈
+│  │  │  ├─ creatorRepository.ts channelRepository.ts backupRepository.ts
+│  │  │  └─ statsService.ts         # getDatabaseStats
 │  │  └─ chrome/
+│  │     ├─ http.ts                 # bgFetch：所有 adapter 取数的网络端口
 │  │     ├─ autoSync.ts             # Alarm 自动同步 + 未读角标
+│  │     ├─ platformAuth.ts         # 登录状态灯（Cookie 表）
 │  │     ├─ declarativeNetRequest.ts# 防盗链规则 1001-1006（需 host 权限）
 │  │     ├─ optionalHostAccess.ts   # RSS 源站的按站点运行时授权
-│  │     └─ messages/               # 消息 handler（BG_FETCH/PROXY_IMAGE/...）
+│  │     └─ messages/               # 消息 handler（BG_FETCH/PROXY_IMAGE/...，共 8 个文件）
 │  │        └─ hosts.ts             # PLATFORM_HOSTS：平台域名唯一来源
 │  ├─ services/imageCache/          # File System Access 本地图片缓存
 │  │  ├─ index.ts                   # imageCacheService 编排（含 isPostFullyCached 增量探测）
@@ -58,8 +72,17 @@ chorusdesk/
 │  └─ utils/                        # 无业务状态工具
 │     ├─ devLog.ts                  # 开发者日志环形缓冲（chrome.storage.session）
 │     ├─ media.ts                   # toSecureMediaUrl/proxyImage/失败记忆
+│     ├─ mediaProbeLog.ts           # 卡片磁盘探测的按批汇总（规则 20）
+│     ├─ sanitizeHtml.ts            # 第三方 HTML 的清洗（元素/属性白名单 + 协议校验）
+│     ├─ postText.ts                # 标题去重/正文呈现/独立媒体判定
+│     ├─ json.ts                    # asRecord/firstFilled（规则 15）
+│     ├─ tco.ts                     # X 正文 t.co 链接的移除（适配器规则 + 存量行规则）
 │     ├─ order.ts                   # 手动排序比较器与重排（sortOrder）
-│     └─ urlParser.ts               # parseProfileUrl
+│     ├─ runtime.ts                 # IS_SERVICE_WORKER 等上下文判定
+│     ├─ badge.ts                   # 角标刷新（REFRESH_BADGE 消息的唯一发送方）
+│     ├─ errorMessage.ts            # unknown → 可读错误文案
+│     ├─ timestamp.ts               # toEpochMs/toEpochMsOr（秒与毫秒的唯一猜测处）
+│     └─ urlParser.ts               # parseProfileUrl + GENERATED_NAME_PREFIXES
 ├─ assets/main.css
 ├─ public/icons/
 ├─ wxt.config.ts
@@ -103,10 +126,16 @@ chorusdesk/
 
 `defineBackground` 中按顺序完成：
 
-1. `setupDeclarativeNetRules()`（`src/infrastructure/chrome/declarativeNetRequest.ts`）：幂等重建动态规则。
-2. `setupAutoSync()`（`src/infrastructure/chrome/autoSync.ts`）：按设置重建/清除 Alarm，并刷新角标。
-3. 事件注册：
-   - `chrome.runtime.onInstalled` → 重复 1、2（并清理已卸载平台遗留的孤儿凭证，如已移除的 `rplay_auth_token`）；
+1. **启动时**（每次 SW 唤醒都会跑，所以必须廉价且幂等）：
+   - `setupAutoSync()`（`src/infrastructure/chrome/autoSync.ts`）：按设置重建/清除 Alarm，并刷新角标。
+     它靠 `alarms.get` 守卫，且必须在浏览器重启抹掉 alarm 后把它修回来；
+   - `sweepOrphanDouyinTempTab()`：回收上一次运行中途死掉、`tabs.remove` 没能执行的抖音临时页。
+2. **`chrome.runtime.onInstalled`** → `setupDeclarativeNetRules()`（幂等重建 DNR 动态规则）
+   + `setupAutoSync()`，并清理已卸载平台遗留的孤儿凭证（如已移除的 `rplay_auth_token`）。
+   - **DNR 只在这里建，不在启动时跑**：动态规则跨浏览器重启持久存在，而每次 SW 唤醒都
+     remove+add 是白做功，还会在那个窗口里**短暂地让防盗链规则失效**（`background.ts` 内注释
+     记录了这一点）。把它挪回启动路径就是重新引入那个缺陷。
+3. **事件注册**：
    - `chrome.alarms.onAlarm` → `handleAutoSyncAlarm(alarm)`；
    - `chrome.runtime.onMessage` → 消息路由（§6）。
 
@@ -114,15 +143,20 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 ### 3.2 `entrypoints/popup/`
 
-- `main.ts` 挂载 `App.vue`；`index.html` 固定 `width: 380px`。
-- `App.vue`（单文件，未拆分）承担“快速关注”流程：识别当前页创作者 → 新建/绑定 → 首轮同步（详见 §5.1）。
+- `main.ts` 挂载 `App.vue`；`index.html` 用 `<body class="w-[380px] …">`（Tailwind 类）固定弹窗宽度。
+- `App.vue` 承担“快速关注”流程的编排：识别当前页创作者 → 新建/绑定 → 首轮同步（详见 §5.1）。
+  它**不是单文件**——模板的四个状态分支已抽到 `components/`（`TargetInfoCard.vue`、
+  `AlreadyFollowedCard.vue`、`QuickFollowForm.vue`、`ManualAddCard.vue`，均只渲染、动作上抛），
+  逻辑在 `composables/`（`usePageDetection` / `useQuickFollow` / `usePopupNavigation`）。
+  往 `App.vue` 里堆模板不是当前约定；新增分支照这四个组件的位置放。
 
 ### 3.3 `entrypoints/dashboard/`（页面组件已接入，组合层仍在收敛）
 
 - `main.ts` 挂载 `App.vue`；`index.html` 含 `<meta name="referrer" content="no-referrer">`。
 - `App.vue` 负责顶部导航、跨页面状态组合、全局弹窗与仍未下沉的应用动作。
 - `views/FeedView.vue`、`CreatorsView.vue`、`BookmarksView.vue`、`SettingsView.vue` 均为真实页面承载组件，通过显式 context 与 emits 接收数据、上抛动作；原四个大模板区块已从 App.vue 删除。
-- `CreatorsView` 已完成四刀下沉（2026-09-11，P4）：`composables/useCreatorDirectoryFilters.ts` 持有筛选/排序/派生列表（依赖以 getter 注入，保持对 props 的响应式追踪）；`components/creator/` 下 `CreatorDirectoryToolbar.vue`（工具条）、`CreatorListView.vue`（紧凑表格）、`CreatorGridView.vue`（网格）、`CreatorDetailedView.vue`（详细卡片）四个组件**只渲染、不持有状态**，值与动作经单一 context 契约进出；三套视图共用的契约（`CreatorDirectoryActions` / `CreatorDirectoryPresentation` / `CreatorDirectoryInteraction` / 两个 ViewContext）定义在 `types/creatorDirectory.ts`，网格与详细卡片共用 `CreatorCardViewContext`。视图本身收敛为目录控制器（617 行）。各组件根节点形状刻意与拆分前一致（工具条为三个 fragment、列表为单个 div），以保持 `<section class="space-y-4">` 的兄弟间距与原有 DOM 不变——逐字节渲染对比见 `e2e/creators-render.mjs`。
+- `CreatorsView` 已完成四刀下沉（2026-09-11，P4）：`composables/useCreatorDirectoryFilters.ts` 持有筛选/排序/派生列表（依赖以 getter 注入，保持对 props 的响应式追踪）；`components/creator/` 下七个组件**只渲染、不持有状态**——`CreatorDirectoryToolbar.vue`（工具条）、`CreatorListView.vue`（紧凑表格）、`CreatorGridView.vue`（网格）、`CreatorDetailedView.vue`（详细卡片）四个承载主体，`ChannelRow.vue`、`CreatorCardHeader.vue`、`PlatformBadge.vue` 为它们共用的行/卡头/平台徽章；值与动作经单一 context 契约进出。三套视图共用的契约（`CreatorDirectoryActions` / `CreatorDirectoryPresentation` / `CreatorDirectoryInteraction` / 两个 ViewContext）定义在 `types/creatorDirectory.ts`，网格与详细卡片共用 `CreatorCardViewContext`。各组件根节点形状刻意与拆分前一致（工具条为三个 fragment、列表为单个 div），以保持 `<section class="space-y-4">` 的兄弟间距与原有 DOM 不变——逐字节渲染对比见 `e2e/creators-render.mjs`。
+  > 视图的**行数刻意不写在这里**：它曾是「617 行」，而这类数字每次拆分都会过期。要看当前规模就直接 `wc -l`。
 - 已抽离部件：`composables/useDarkMode.ts`、`useDeletedPosts.ts`、`useDashboardData.ts`，以及 `components/PostCard.vue`、`MediaLightbox.vue`、`ImageCacheSettings.vue` 等；`composables/` 按功能分组，不在此逐一列举（列举与计数会随每次拆分失效）。
 - 当前未完成：App.vue 仍直接协调部分数据库/同步、Chrome Storage、备份导入导出和全局弹窗；真实 Chromium 点击回归仍需执行。不得据此宣称入口层已完全变薄。
 
@@ -135,7 +169,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
 
 - `KnownPlatform` / `Platform`：**封闭集与可存储值分开**。`KnownPlatform` 是本扩展**实际提供适配器**的 9 个平台（`bilibili | youtube | twitter | pixiv | fantia | xiaohongshu | weibo | douyin | rss`），`Platform = KnownPlatform | (string & {})` 额外容纳历史/已移除平台的键（如 Withny 的行仍在库里，`getAdapter` 对它返回 `undefined`）。分开的原因：`(string & {})` 让 `switch`/`Record` 永远无法证明穷尽，所以**关于本扩展行为的决策用 `KnownPlatform`**（`ADAPTER_MAP` 即以它为键，漏一个成员即编译报错），**存储与容错用 `Platform`**。
 - `isKnownPlatform(platform)`：类型守卫，把 `Platform` 收窄为 `KnownPlatform`；`getAdapter` 用它而非 `as` 断言——守卫即断言，写在代码里而不是注释里。
-- `KNOWN_PLATFORMS`：`KnownPlatform` 的运行时可枚举镜像（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）。**顺序无语义**——唯一消费方是 `isKnownPlatform` 的成员判断与守卫测试的双射断言；UI 的平台展示顺序来自 `PLATFORM_REGISTRY` 的键序，不要引用这里的顺序。
+- `KNOWN_PLATFORMS`：`KnownPlatform` 的运行时可枚举镜像（`as const satisfies readonly KnownPlatform[]`，与联合互为约束）。**顺序无语义**——它刻意**不是** `PLATFORM_REGISTRY` 的键序（实测两者不同：`youtube`/`twitter` 互换了位置），消费方只有 `isKnownPlatform` 的成员判断与 `tests/platformRegistry.test.ts` 的守卫。UI 的平台展示顺序来自 `PLATFORM_REGISTRY` 的键序，不要引用这里的顺序。（`src/types/index.ts` 原注释写着「in registry display order」，那是错的，已按实测更正。）
 - `PlatformMeta` + `PLATFORM_REGISTRY`：平台元数据（名称/域名/颜色/URL 占位/`authType: 'cookie' | 'localstorage' | 'none'` 与说明）。**这是 UI 展示平台名与认证类型的唯一来源**，新增平台必须在此登记（另见 `DEVELOPMENT.md` §3 的完整接入清单：三处类型改动缺一不可）。
 - `NameSource = 'generated' | 'platform' | 'user'`：`Creator.name` / `Channel.displayName` 的**来源**。同步层只允许覆盖**自己生成的**名字（`generated`）；用户改过的（`user`）与已由平台给出的（`platform`）不动。字段**缺失**＝`nameSource` 引入前写入的旧行，此时同步层退回一次字符串形状判断，命中后写入并盖上 `platform`，此后不再走那条路径。这取代了此前两份手写的前缀清单（见 `src/utils/urlParser.ts` 的 `GENERATED_NAME_PREFIXES`；新增平台时该步骤在 [`DEVELOPMENT.md` §6](DEVELOPMENT.md)，事故经过在 `AGENTS_CASES.md` 的 Rule 9）。
 - `AccountRole = 'main' | 'sub' | 'alt' | 'custom'` 与它的四个映射，**必须一起改**：
@@ -145,7 +179,7 @@ background.ts **只保留路由与生命周期注册**，消息实现全部下�
   新增一个角色要同时动这四处；漏掉 `ORDER` 会让新角色永远排在最后并被判为最低优先。
 - 实体：
   - `Creator { id, name, nameSource?, avatar, primaryAvatarUrl?, tags[], note?, sortOrder?, createdAt, updatedAt }`（`id` 为 uuid）。
-  - `Channel { id, creatorId, platform, accountId, displayName, nameSource?, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。
+  - `Channel { id, creatorId, platform, accountId, displayName, nameSource?, label?, accountRole?: 'main'|'sub'|'alt'|'custom', profileUrl, avatarUrl?, lastCheckAt?, lastSuccessAt?, status: 'idle'|'updating'|'success'|'error', errorMessage?, nextCursor?, resolvedAccountId? }`。`id` 形如 `"bilibili:123456"` / `"twitter:artist_sub"`。`resolvedAccountId` 由适配器上报（`FetchResult.authorMeta.resolvedAccountId`）后持久化：当平台把别名解析成真实 id（如 YouTube 的 `@handle → UC…`），后续请求才有稳定标识可用。
   - `Post { id, creatorId, channelId, platform, channelLabel?, title?, content, contentHtml?, mediaList: MediaItem[], originalUrl, publishedAt, fetchedAt, isRead, isBookmarked?, isRepost?, authorMeta? }`。
     - `content` 是纯文本正文，所有平台都有，用于卡片预览、搜索与过滤。
     - `contentHtml` 是**已净化**的文章 HTML，目前仅 RSS 设置：其正文是文章而非配文，
@@ -195,11 +229,16 @@ export interface FetchOptions {
 
 export interface FetchResult {
   posts: Post[];
-  authorMeta?: { name?: string; avatar?: string };
+  authorMeta?: { name?: string; avatar?: string; resolvedAccountId?: string };
   nextCursor?: string;         // 下一页游标
   hasMore?: boolean;           // false 表示到底
   error?: FetchError;          // 结构化失败：{ code, message }，不是字符串
   totalFetched?: number;       // 归一化前原始条数
+  /**
+   * 本次采集把哪些已存在的行**换了 id**（`{ from, to }`）。适配器是唯一同时知道两个 id
+   * 的地方，因此由它上报；`channelSync` 据此把存量行连同抑制记录一起搬走（规则 16）。
+   */
+  renamedIds?: Array<{ from: string; to: string }>;
   /**
    * 有内容但**至少一个数据源失败**——结果真实但不完整。
    * 与 `error` 刻意分开：degraded 仍落库（部分数据好过没有），`error` 且无内容才不落库。
@@ -228,6 +267,12 @@ export interface PlatformAdapter {
   minRequestIntervalMs?: number;
   /** 平台知识：该平台媒体是否值得写入用户磁盘。缺省 = 是。 */
   archivesMedia?: boolean;
+  /** `fetchLatest` 能否在扩展 Service Worker 内完成。缺省 = 能。 */
+  backgroundSync?: boolean;
+  /** 是否走平台签发的真实游标。缺省 = 是。 */
+  paginates?: boolean;
+  /** 历史回溯是否会驱动用户已登录的页面（因而有风控风险）。缺省 = 否。 */
+  digScrollsUserPage?: boolean;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
   fetchHistory?(channel, uid, limit, options, authorName?, authorAvatar?): Promise<FetchResult>;
   fetchAjaxFallback?(channel, limit, page, options?): Promise<FetchResult>;
@@ -255,14 +300,17 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
 非 `HttpStatusError` 的抛出意味着响应没解析成功，归 `parse`（缺字段是 schema 变化，不是网络故障）。
 
 **平台能力声明**（2026-09-13，队列 #6）：能力**由适配器自己声明**，`registry.ts` 只负责
-`getAdapter` 查表，不做第二份真源（规则 2/35）。三个字段都已经有真实消费点才加，不是先建框架：
+`getAdapter` 查表，不做第二份真源（规则 2/35）。四个字段都已经有真实消费点才加，不是先建框架：
 
 | 字段 | 缺省 | 语义 | 声明为 `false` 的平台 |
 |---|---|---|---|
 | `backgroundSync` | 是 | `fetchLatest` 能否在扩展 Service Worker 内完成 | `douyin`、`twitter`（页面/消息往返，worker 收不到自己的 `sendMessage`，规则 6） |
-| `paginates` | 是 | 适配器是否走平台签发的真实游标 | `douyin`、`youtube`、`fantia`、`rss` |
+| `paginates` | 是 | 适配器是否走平台签发的真实游标 | `douyin`、`youtube`、`fantia`、`rss`、`xiaohongshu` |
 | `archivesMedia` | 是 | 媒体是否值得写入用户磁盘 | `rss` |
 | `digScrollsUserPage` | 否 | **历史回溯**是否驱动用户自己的已登录页面（因而可能触发平台风控） | 只有 `xiaohongshu` 声明为 `true` |
+
+`paginates` 的 `xiaohongshu` 是随页面驱动的回溯加入的：它的常规同步读 SSR（一屏，约 30 条），
+回溯走注入滚动，两条路都不携带平台签发的游标，所以它同样不能声明「没有更早的了」。
 
 `digScrollsUserPage` 的缺省是**否**，与前三个相反，因为它门的是**要不要给用户看提醒**：
 提醒应当由一个平台真正声明过的事实触发，而不是默认弹出。它只决定回溯**开始前**确认框的措辞
@@ -321,10 +369,10 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
   > `clearStaleUpdatingStatus()` 不在 `src/sync`：它是一行 channel 写入、不涉及 adapter，住在 `src/infrastructure/db/channelRepository.ts`（经 `src/application/channelService.ts` 暴露）。从前住在 `channelSync` 时，每个调用方（含 popup）都被拖进整个 adapter registry。
 - `batchSync.ts`
   - `interleaveChannelsByPlatform(channels)`：按平台分桶后轮转交错（`[B1,B2,T1,Y1] → [B1,T1,Y1,B2,...]`），降低同域连击。
-  - `batchUpdateChannelsInterleaved(channelList, limit, options?)`：`options.minPlatformIntervalMs`（默认 800）同平台最小间隔；`onProgress(current,total,channel,result)`；`shouldStop()`；返回 `{ totalChannels, successful, newPostsCount }`。
-  - `updateCreator(creatorId, limit, options?)`：刷新某 Creator 全部账号（平台间交错，账号间 600ms 间隔）。
+  - `batchUpdateChannelsInterleaved(channelList, limit, options?)`：`options.minPlatformIntervalMs` 作为**覆盖**与平台下限取 `Math.max`（下限由 `rateLimit.platformMinInterval` 提供，默认 800 ms，覆盖只能抬高）；`onProgress(current,total,channel,result)`；`shouldStop()`；返回 `{ totalChannels, successful, newPostsCount, degraded }`（`degraded` 为「至少一个频道返回了不完整结果」）。
+  - `updateCreator(creatorId, limit, options?)`：刷新某 Creator 全部账号（平台间交错，账号间**走同一个平台下限**，`waitForPlatformTurn(platform, platformMinInterval(platform))`）——**不再是一个固定的 600 ms**：那个值低于每个平台的下限（抖音最甚），已随该修复改为与批量路径共用下限。
 - `historySync.ts`
-  - `fetchChannelHistory(channel, limit = 10, onlyOriginal = false)`：游标已为 `'__END__'` 时直接返回“已到最底部”；否则以 `{ cursor: channel.nextCursor, isHistory: true }` 调 `updateChannel`。
+  - `fetchChannelHistory(channel, limit = 10, onlyOriginal = false, maxNewPosts?)`：游标已为 `'__END__'` 时直接返回“已到最底部”；否则以 `{ cursor: channel.nextCursor, isHistory: true }` 调 `updateChannel`。`maxNewPosts` 是本次**允许落库的新动态**额度（重复 id 的 upsert 自愈不消耗），由 `deepSyncChannel` 按剩余预算传入。
   - `deepSyncChannel(channel, options)`：循环挖掘直到 `__END__`/`maxPosts`/`untilTimestamp`/连续 4 轮空结果；每轮拉 20 条、轮间 900ms 间隔；支持 `onProgress` 与 `shouldStop`；`forceResetCursor` 清空游标重挖。
 
 关键保护常量（改动前先看 §同步保护是否受影响）：
@@ -334,8 +382,8 @@ pixiv / fantia 把状态塞进消息、由外层 catch 统一归 `network`。**4
 | 单频道成功冷却 | 30 秒（`lastSuccessAt`，force/cursor 除外） | `channelSync.ts` |
 | 单次请求超时 | 45 秒（超时同时 abort 在途请求） | `channelSync.ts` |
 | 历史到底标记 | `'__END__'`（`nextCursor`） | `cursorState.ts`（唯一定义；`channelSync`/`historySync` 消费） |
-| 批量同平台最小间隔 | 800 ms（默认） | `batchSync.ts` |
-| 批量账号间间隔（updateCreator） | 600 ms | `batchSync.ts` |
+| 批量同平台最小间隔 | 800 ms（默认下限，`DEFAULT_MIN_INTERVAL_MS`） | `rateLimit.ts`（`platformMinInterval`）；被测的是**请求**，不是账号 |
+| 批量账号间间隔（updateCreator） | 同上：`platformMinInterval(platform)` | `batchSync.ts`（**曾为固定 600 ms**，低于每个平台下限） |
 | 深挖每轮条数 / 轮间间隔 | 20 条 / 900 ms | `historySync.ts` |
 | 深挖连续空轮上限 | 4 | `historySync.ts` |
 | 自动同步周期 | 30 分钟（Alarm `creator-feed-auto-sync`） | `infrastructure/chrome/autoSync.ts` |
@@ -380,6 +428,7 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
   - `clearDeletedPostRecords()`：**只清快照**，抑制全部保留（「清空回收站」）。
   - `getDeletedPostCount()` / `getDeletedPostRecords()`：回收站计数/列表（按 `deletedAt` 倒序）。
   - `getSuppressedPostIds(ids)` / `clearSuppressions(ids)`：同步层的抑制查询/解除（按 `postId`，非 channelId）。
+  - `adoptRenamedPostIds(pairs)`：把已存在行从旧 id **搬**到新 id（连同伴随的抑制记录），用于适配器改了 id 方案时（RSS 的 `guid` 纳入 feed 作用域，队列 #3）。`Post.id` 是全库主键且抑制也按它索引，所以必须「搬家」而不是「再写一行」——否则同一内容出现两次，且旧 id 上的彻底删除不再生效。
   - `countSuppressionsForChannels(ids)` / `countSuppressionsForCreator(id)`：取关提示的计数来源。
   - `healBrokenPostMedia()`：把小红书（等）动态媒体 URL 经 `toSecureMediaUrl` 重写自愈，返回修复条数。
 
@@ -421,7 +470,12 @@ version(6): 拆表——deletedPostIds 一行两职（同步黑名单 + 回收�
  → parseProfileUrl(currentUrl) 识别 platform/accountId/cleanUrl
  → 用户选择：新建 Creator（db.creators.add）或绑定已有 Creator
  → db.channels.put({ id: `${platform}:${accountId}`, ... })（幂等覆盖）
- → updateChannel(newChannel, 5) 触发首次同步（fire-and-forget）
+ → chrome.runtime.sendMessage({ type: 'SYNC_CHANNEL', channelId, limit: 5 }) 触发首次同步
+   —— **不发后不理，也不在 popup 里直接调 adapter**：popup 被任意点击关闭，由它持有的
+   fetch 会随之死掉，频道就只剩一行没有动态的记录且无人重试。交给 service worker 才能
+   在 popup 关闭后跑完（`sendMessage` 让 worker 存活到应答），顺带把平台适配器挡在 popup
+   bundle 之外。详见 `useQuickFollow.handleSave` 内的注释与 §6 的 `SYNC_CHANNEL` 行。
+ → notifyBadgeRefresh()（角标立即反映新频道）
  → “打开 Dashboard”用 chrome.tabs.create({ url: getURL('/dashboard.html') })
 ```
 
@@ -509,6 +563,7 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 |---|---|---|---|---|---|
 | `UPDATE_AUTO_SYNC` | Dashboard 设置开关 | background 内联 | — | `{ success: true }` | 否 |
 | `OPEN_DASHBOARD` | **当前仓库无调用方**（Popup 直接 `chrome.tabs.create` 开 `dashboard.html`）；作为契约保留 | background 内联 | — | `{ success: true }` | 否 |
+| `REFRESH_BADGE` | `src/utils/badge.ts` `refreshUnreadBadge()` | background 内联（`updateUnreadBadge()`） | — | `{ success: true }` | 否 |
 | `BG_FETCH` | `src/infrastructure/chrome/http.ts` `bgFetch()` | `messages/bgFetch.ts` `handleBgFetch` | `{ requestId?, url, options: { headers } }` | `{ ok, status, statusText, data }`；失败 `{ ok:false, status:0, data:'', error }` | 是（返回 `true`） |
 | `BG_FETCH_ABORT` | 同上（`bgFetch` 的 `signal` 触发） | `messages/bgFetch.ts` `handleBgFetchAbort` | `{ requestId }` | `{ aborted: boolean }`（同步应答，`false` = 没有在途请求） | 否 |
 | `PROXY_IMAGE` | `src/utils/media.ts` `proxyImage()` | `messages/proxyImage.ts` `handleProxyImage` | `{ url }` | `{ ok:true, dataUrl }`；失败 `{ ok:false, error[, status] }` | 是（返回 `true`） |
@@ -525,9 +580,11 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 |---|---|---|---|
 | IndexedDB | 库 `CreatorFeedHubDB`（v6，6 表：`creators`/`channels`/`posts`/`settings`/`postSuppressions`/`recycleSnapshots`） | 业务数据 | `src/infrastructure/db/*` |
 | IndexedDB | 库 `FeedHubFSCache`，store `handles`，key `root_cache_dir` | 图片缓存根目录句柄 | `src/services/imageCache/fsManager.ts` |
-| `chrome.storage.session` | `devLog.entries` / `devLog.verbose` | 开发者日志环形缓冲（150 条）与详细模式开关 | `src/utils/devLog.ts` |
+| `chrome.storage.session` | `devLog.entries` | 开发者日志环形缓冲（150 条） | `src/utils/devLog.ts` |
+| `chrome.storage.session` + `chrome.storage.local` | `devLog.verbose` | 详细模式开关。**两个区都写**：`session` 是常规读路径，`local` 只是把它镜像过 worker 重启——否则「详细模式开着」这件事会随 SW 回收而静默丢失，而它丢掉的正是继续记录 debug 的能力 | `src/utils/devLog.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_theme` | 明暗主题 | `useDarkMode.ts` |
 | `localStorage`（dashboard 页） | `creator_feed_hidden_creators` / `creator_feed_hidden_platforms` | 隐藏创作者/平台偏好 | `useCreatorVisibility.ts` |
+| `localStorage`（dashboard 页） | `creator_feed_creators_view_mode` | 创作者页视图（`grid` / `list` / `detailed`） | `views/CreatorsView.vue` |
 | `localStorage`（dashboard 页） | `cfh_feed_platform_list_rows` / `cfh_feed_creator_list_rows` | 两个侧栏各自的行数（4–8），由把手拖动或方向键写入 | `views/FeedView.vue` → `components/LoopScroll.vue` 的 `storage-key` |
 | JSON 备份 | `{ version:'1.1', exportedAt, creators, channels, settings, posts, suppressions }` | 导出/导入 | `useBackupManager.ts` → `src/application/backupService.ts` + `backupFileService.ts` |
 
@@ -554,11 +611,15 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 - 跨上下文并发写入采用「先读后合并」，最坏情况丢一行诊断，不引入跨上下文锁。
 
 埋点位置（scope 名即面板中的筛选值）。基础设施类：`sw`（worker 启动）、`router`（消息接入与拒绝）、
-`alarm`（定时触发）、`bgFetch`（主机与 HTTP 状态）、`channelSync`、`autoSync`（自动同步结果与角标）、
-`hostAccess`（RSS 站点授权结果）、`imageCache`（离线归档统计）、`media`（页面侧图片代理失败与磁盘探测汇总）。
-平台类：`bilibili`、`douyin`、`twitter`、`xiaohongshu`——平台特有的诊断（如注入失败、风控重定向分类）走这里。
+`alarm`（定时触发）、`bgFetch`（主机与 HTTP 状态）、`proxyImage`（代理回退）、`channelSync`、
+`autoSync`（自动同步结果与角标）、`sync`（页面侧同步动作）、`hostAccess`（RSS 站点授权结果）、
+`imageCache`（离线归档统计）、`media`（页面侧图片代理失败与磁盘探测汇总）、`prefetch`（平台预取）。
+平台类：`bilibili`、`douyin`、`twitter`、`xiaohongshu`、`rss`、`youtube`——平台特有的诊断
+（如注入失败、风控重定向分类）走这里。
 
-> 计数刻意不写死：scope 会随埋点增减，列举会立刻过期。以 `grep -rn "devLog\.\(info\|warn\|error\|debug\)(" src entrypoints` 的结果为准。
+> **上面这份是示例，不是清单。** 它已经过期过一次（漏了 `proxyImage`/`sync`/`prefetch`/`rss`/`youtube`），
+> 所以不要按它判断某个 scope 是否存在——以
+> `grep -rn "devLog\.\(info\|warn\|error\|debug\)(" src entrypoints` 的结果为准。
 
 ## 8. 数据库兼容策略（原则）
 
@@ -578,5 +639,5 @@ credentials 策略（AGENTS.md 规则 3）：仅 `PLATFORM_HOSTS` 允许名单�
 3. App.vue 仍保留部分跨页面应用动作、全局弹窗、Chrome Storage 与数据库协调；这属于后续入口收敛边界，不代表 View 是空壳或重复实现。
 4. `src/adapters/index.ts`、`src/db/index.ts`、`src/platform/index.ts` 三个迁移期兼容桶**已于 2026-09-11 删除**（删除前全仓 grep 确认零引用，非类型引用亦无）；新代码直接依赖真实模块。
 5. 消息 `OPEN_DASHBOARD` 保留 handler 但仓库内无发送方（Popup 直接开标签页）；删除/改造需先决定是否统一走消息。
-6. `Popup/App.vue` 仍为单体（composables 已抽离 `usePageDetection`/`useQuickFollow`/`usePopupNavigation`）；Popup 尚无 `views/` 拆分计划落地。
+6. `Popup/App.vue` 已完成逻辑与模板两层抽离（composables `usePageDetection`/`useQuickFollow`/`usePopupNavigation`，components `TargetInfoCard`/`AlreadyFollowedCard`/`QuickFollowForm`/`ManualAddCard`），但仍**没有** Dashboard 那样的 `views/` 概念——弹窗只有一个页面，不计划按此拆分。§3.2 有当前形状。
 7. 自动同步此前是串行单频道执行，**已于 2026-09-13 统一到 `batchUpdateChannelsInterleaved`**（与 Dashboard 手动「全部刷新」同一实现，见 §5.3）——它自己那套循环已删除。已从「两套实现」变为一套，因此不再有「统一它们」这项待办。

@@ -27,7 +27,16 @@ export function isKnownPlatform(platform: string): platform is KnownPlatform {
   return (KNOWN_PLATFORMS as readonly string[]).includes(platform);
 }
 
-/** Runtime mirror of `KnownPlatform`, in registry display order. */
+/**
+ * Runtime mirror of `KnownPlatform`.
+ *
+ * **The order carries no meaning** — do not read it as a display order. It is
+ * deliberately NOT `PLATFORM_REGISTRY`'s key order (youtube and twitter are
+ * swapped), because the only consumers are `isKnownPlatform`'s membership test
+ * and the guards in `tests/platformRegistry.test.ts`. Anything that renders
+ * platforms uses `PLATFORM_REGISTRY`'s key order instead. The earlier comment
+ * here claimed the opposite and was simply false; see ARCHITECTURE.md §4.1.
+ */
 export const KNOWN_PLATFORMS = [
   'bilibili',
   'youtube',

@@ -310,7 +310,7 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 | 轴 | 缺省 | 声明为 `false` | 消费点 |
 |---|---|---|---|
 | `backgroundSync` | 是 | `douyin`、`twitter` | `channelSync` dispatch 前拒绝；`autoSync` 批量前筛掉并记日志 |
-| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `cursorState.terminalCursorIsStated` 的新来源；`historySync` 的单发中断 |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss`、`xiaohongshu` | `cursorState.terminalCursorIsStated` 的新来源；`historySync` 的单发中断 |
 | `archivesMedia` | 是 | `rss` | `imageCache` / 设置页（改走同一个 helper） |
 | `digScrollsUserPage`（2026-09-14 加） | **否** | —（只有 `xiaohongshu` 声明为 `true`） | `useDeepSync` 的回溯前确认框措辞 |
 
@@ -809,7 +809,7 @@ CASES 自述为「**拆分前的完整原文，冻结**……作用是作证据�
 | 轴 | 缺省 | `false` | 消费点 |
 |---|---|---|---|
 | `backgroundSync` | 是 | `douyin`、`twitter` | dispatch 前拒绝 / autoSync 批量前筛掉 |
-| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss` | `terminalCursorIsStated` / 单发中断 |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss`、`xiaohongshu` | `terminalCursorIsStated` / 单发中断 |
 | `archivesMedia` | 是 | `rss` | imageCache / 设置页 |
 | `digScrollsUserPage` | **否** | —（`xiaohongshu` 为 `true`） | 回溯前确认框（2026-09-14 加） |
 
