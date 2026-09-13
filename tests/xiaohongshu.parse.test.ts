@@ -219,45 +219,175 @@ describe('xiaohongshu — parsing a captured profile page', () => {
 });
 
 /**
- * A dig that runs out of the notes on this page must not claim the account ended.
+ * A history dig runs in a PAGE, and must not claim an end it cannot know.
  *
- * The profile page's SSR carries one screen (~30 notes) and this adapter cannot
- * ask for the next page from the service worker — `user_posted` needs an `X-S`
- * signature only the page's own JS can produce. So "I ran out of parsed notes" is
- * a fact about THIS FETCH, not about the account, and saying otherwise writes
- * `__END__` and permanently blocks the channel (rule 10's asymmetry).
+ * The profile document carries one screen (~30 notes) and the endpoint that pages
+ * it (`user_posted`) needs an `X-S` signature only the page's own JS produces, so
+ * older notes are reachable only by driving an open profile page —
+ * `FETCH_XHS_NOTES`, the Douyin shape (rule 9). What that page reports back is
+ * untrusted until `contract.ts` validates it.
  *
- * The page contradicts the old behaviour outright: measured 2026-09-13, the SSR
- * state's `user.noteQueries[0]` reads
- * `{ num: 30, hasMore: true, cursor: "69fdde80…" }` on the very same response.
+ * The property worth pinning here is the asymmetry of rule 10: `hasMore:false` is
+ * what `channelSync` writes as `__END__`, permanently blocking the dig, so it may
+ * only be claimed on positive evidence — never from "scrolling stopped helping",
+ * because the header's stated total counts notes the author has hidden and a
+ * shortfall is therefore permanently true for such a profile.
  */
-describe('xiaohongshu — a dig that runs out of page must not claim the account ended', () => {
-  it('reports an error, not hasMore:false, at the end of the SSR notes', async () => {
-    served.push({ match: '/user/profile/', body: pageWith(profileInitialState) });
+describe('xiaohongshu — a page-driven dig', () => {
+  const noteIds = ['6a0000020000000025037c02', '6a0000010000000025037c01'];
 
-    // Offset past the three fixture notes: nothing left to slice.
-    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { cursor: '99', isHistory: true });
-
-    // `hasMore:false` standing alone is what `statesEndOfHistory` reads as the
-    // platform declaring the end.
-    expect(res.hasMore).not.toBe(false);
-    expect(res.error?.code).toBe('unsupported');
-    // Rule 13: an empty result has to name why, not look like a clean zero.
-    expect(res.error?.message).toContain('30');
+  /** One note as the collector's contract expects it. */
+  const pageNote = (id: string, time = 1_778_384_898_000) => ({
+    id,
+    xsecToken: 'tok',
+    title: `页面笔记${id.slice(-4)}`,
+    type: 'normal',
+    time,
+    likedCount: '7',
+    nickname: '示例博主',
+    avatar: 'https://sns-avatar-qc.xhscdn.com/a.jpg',
+    coverUrl: 'https://sns-img.xhscdn.com/c.jpg',
+    noteUrl: `https://www.xiaohongshu.com/explore/${id}?xsec_token=tok&xsec_source=pc_user`,
   });
 
-  it('still pages normally while notes remain, cursor and all', async () => {
-    // `hasMore:false` is only fatal when it stands alone. Here the page still has
-    // notes past the offset, so the healthy path returns posts plus a cursor —
-    // asserted so the guard above cannot swallow this case too.
+  const snapshotOf = (notes: unknown[], extra: Record<string, unknown> = {}) => ({
+    userId: channel.accountId,
+    authorName: '示例博主',
+    authorAvatar: '',
+    notes,
+    saturated: false,
+    statedTotal: null,
+    requiresLogin: false,
+    ...extra,
+  });
+
+  /** Capture the outgoing message and reply with a canned page snapshot. */
+  function stubPage(response: unknown) {
+    const sent: Record<string, unknown>[] = [];
+    (globalThis as Record<string, unknown>).chrome = {
+      runtime: {
+        lastError: undefined,
+        id: 'test-extension',
+        sendMessage: (msg: Record<string, unknown>, cb: (r: unknown) => void) => {
+          sent.push(msg);
+          cb(response);
+        },
+      },
+    };
+    return sent;
+  }
+
+  it('asks the page to scroll when digging, and not for a plain sync', async () => {
+    const sent = stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])]) });
+    await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+    expect(sent[0]).toMatchObject({ type: 'FETCH_XHS_NOTES', deep: true });
+
+    // An ordinary sync stays on the plain SSR fetch: scrolling is what trips the
+    // platform's automation heuristics, so it must not happen on the routine path.
+    const plain = stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])]) });
     served.push({ match: '/user/profile/', body: pageWith(profileInitialState) });
+    const res = await fetchLatest();
+    expect(plain).toHaveLength(0);
+    expect(res.posts.length).toBeGreaterThan(0);
+    // The SSR path carries one screen and cannot state an ending.
+    expect(res.hasMore).toBeUndefined();
+  });
 
-    const res = await xiaohongshuAdapter.fetchLatest(channel, 1, { cursor: '0', isHistory: true });
+  it('scrolls for a cursor page and a force refresh too', async () => {
+    for (const options of [{ cursor: '0' }, { forceRefresh: true }]) {
+      const sent = stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])]) });
+      await xiaohongshuAdapter.fetchLatest(channel, 10, options);
+      expect(sent[0]).toMatchObject({ deep: true });
+    }
+  });
 
-    expect(res.error).toBeUndefined();
+  it('does not claim an end when the grid simply stopped growing', async () => {
+    // The exact shape that parked real channels: a saturated grid short of the
+    // stated total. `hasMore:false` here would write `__END__` and the user could
+    // never dig the remainder.
+    stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])], { saturated: true, statedTotal: 29 }) });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.hasMore).not.toBe(false);
     expect(res.posts).toHaveLength(1);
-    expect(res.nextCursor).toBe('1');
-    expect(res.hasMore).toBe(true);
+    expect(res.error).toBeUndefined();
+  });
+
+  it('may end the dig when the page reached the total it states', async () => {
+    // Positive evidence: the grid holds at least as many as the header claims, so
+    // nothing is being withheld.
+    stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])], { saturated: true, statedTotal: 1 }) });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.hasMore).toBe(false);
+    expect(res.error).toBeUndefined();
+  });
+
+  it('explains a short dig that found nothing instead of reporting a clean zero', async () => {
+    // Rule 13: an empty result has to name why. The watermark is at the newest
+    // note, so the page's only note is filtered as already-known.
+    stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])], { saturated: true, statedTotal: 29 }) });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, {
+      isHistory: true,
+      sinceTimestamp: 1_778_384_898_000,
+    });
+
+    expect(res.posts).toEqual([]);
+    expect(res.error?.code).toBe('unsupported');
+    expect(res.error?.message).toContain('29');
+    // Must not blame the user for a shortfall hidden notes explain.
+    expect(res.error?.message).toContain('隐藏');
+    expect(res.hasMore).not.toBe(false);
+  });
+
+  it('names the shortfall when the page yielded no notes at all', async () => {
+    stubPage({ success: true, snapshot: snapshotOf([], { statedTotal: 30 }) });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.posts).toEqual([]);
+    expect(res.error?.code).toBe('parse');
+    expect(res.error?.message).toContain('30');
+    expect(res.hasMore).not.toBe(false);
+  });
+
+  it('reports a login wall as auth, not as an empty account', async () => {
+    stubPage({ success: true, snapshot: snapshotOf([], { requiresLogin: true }) });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.error?.code).toBe('auth');
+    expect(res.error?.message).toContain('登录');
+  });
+
+  it('surfaces a refused page collection rather than an empty success', async () => {
+    stubPage({ success: false, code: 'rate_limit', error: '小红书页面出现安全验证' });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.posts).toEqual([]);
+    expect(res.error?.code).toBe('rate_limit');
+  });
+
+  it('treats an unparseable page snapshot as a structure change', async () => {
+    // Not an object at all: the contract rejects it, and the honest code is
+    // `parse` (a shape change), never a successful empty sync.
+    stubPage({ success: true, snapshot: 'not-an-object' });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.error?.code).toBe('parse');
+  });
+
+  it('maps a validated page snapshot onto posts with the stored link intact', async () => {
+    stubPage({ success: true, snapshot: snapshotOf([pageNote(noteIds[0])]) });
+    const res = await xiaohongshuAdapter.fetchLatest(channel, 10, { isHistory: true });
+
+    expect(res.posts).toHaveLength(1);
+    const post = res.posts[0];
+    expect(post.id).toBe(`xiaohongshu_${noteIds[0]}`);
+    expect(post.publishedAt).toBe(1_778_384_898_000);
+    // The click target must carry the page's `xsec_token`: a bare `explore/<id>`
+    // answers `error_code=300031` and lands on `/404`.
+    expect(post.originalUrl).toContain('xsec_token=tok');
+    expect(res.authorMeta?.name).toBe('示例博主');
+    expect(res.totalFetched).toBe(1);
   });
 });
 

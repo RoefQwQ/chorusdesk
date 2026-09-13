@@ -1,6 +1,7 @@
 import type { Channel } from '../types';
 import type { FetchError, FetchResult } from '../adapters/types';
-import { fetchError } from '../adapters/types';
+import { fetchError, hasPlatformStatedEnd } from '../adapters/types';
+import { getAdapter } from '../platform/registry';
 import { db } from '../infrastructure/db/database';
 import {
   END_OF_HISTORY_MESSAGE,
@@ -177,14 +178,19 @@ export async function deepSyncChannel(
       break;
     }
 
-    // A page-driven dig (Douyin) returns its whole scrolled grid in ONE round
-    // and has no pagination cursor: every additional round re-fetches the same
-    // window and can never produce anything new. Without this, a login-gated
-    // grid burned three more no-op rounds before the empty-round counter ended
-    // the loop, reporting "0 条更早作品" with no explanation. Real paginated
-    // platforms (bilibili/twitter) always carry a cursor or hasMore:false, so
-    // this is scoped to the single-shot acquisition model.
-    if (currentCh.platform === 'douyin' && !res.nextCursor && rawFetched > 0) {
+    // A SINGLE-SHOT dig returns its whole collection in ONE round and carries no
+    // pagination cursor, so every further round re-fetches the same window and can
+    // never produce anything new. Without this, a gated feed burned three more
+    // no-op rounds before the empty-round counter ended the loop, reporting
+    // "0 条更早作品" with no explanation.
+    //
+    // Scoped to the acquisition MODEL rather than to a platform name (it was
+    // `=== 'douyin'`, and its own comment already said the scope was "the
+    // single-shot acquisition model"): the fact is exactly `paginates: false`, so
+    // it is read from the adapter's declaration. `xiaohongshu` joined that set
+    // when its dig became page-driven, and a hardcoded name would have made it
+    // re-scroll the same page four times per dig.
+    if (!hasPlatformStatedEnd(getAdapter(currentCh.platform)) && !res.nextCursor && rawFetched > 0) {
       break;
     }
 

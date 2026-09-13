@@ -1,5 +1,5 @@
 import type { Channel, MediaItem, Post } from '../types';
-import type { PlatformAdapter, FetchResult, FetchOptions } from './types';
+import type { PlatformAdapter, FetchResult, FetchOptions, FetchErrorCode } from './types';
 import { fetchError, httpStatusError } from './types';
 import { bgFetch } from '../infrastructure/chrome/http';
 import { MAX_RESPONSE_CHARS } from '../infrastructure/chrome/messages/bgFetch';
@@ -7,6 +7,10 @@ import { toSecureMediaUrl } from '../utils/media';
 import { errorMessage } from '../utils/errorMessage';
 import { asRecord } from '../utils/json';
 import { devLog } from '../utils/devLog';
+import { IS_SERVICE_WORKER } from '../utils/runtime';
+import { buildPost } from './buildPost';
+import { normalizeXhsSnapshot } from './xiaohongshu/contract';
+import type { RawXhsNote } from './xiaohongshu/collector';
 import {
   collectRawNotes,
   extractInitialState,
@@ -33,8 +37,32 @@ export const xiaohongshuAdapter: PlatformAdapter = {
    * strategy and the honesty fix above depend on being accurate.
    */
   paginates: false,
+  /**
+   * A dig scrolls the user's own logged-in profile page, which is what the
+   * platform's anti-bot heuristics watch for. The warning in `useDeepSync` is
+   * driven by this flag rather than by a platform name at the call site.
+   *
+   * Deliberately NOT paired with a raised `minRequestIntervalMs`: that floor is
+   * per PLATFORM, and the risk here is specific to the dig, which opens one page
+   * and then paces itself from inside (the collector sleeps between scroll steps
+   * and `deepSyncChannel` waits 900 ms between rounds). Raising the floor would
+   * slow the ordinary SSR sync — a single cheap fetch — for no safety gain.
+   */
+  digScrollsUserPage: true,
 
   async fetchLatest(channel: Channel, limit: number = 10, options?: FetchOptions): Promise<FetchResult> {
+    // A history dig cannot be served from the service worker: paging past the
+    // first screen needs the page's own signed `user_posted` call, so this runs
+    // in a page through the FETCH_XHS_NOTES handler (the Douyin shape, rule 9).
+    //
+    // It stays a deep-only path. Scrolling is what trips the platform's
+    // automation heuristics — the reference implementation ships it off by default
+    // with a risk warning — so an ordinary sync keeps using the plain SSR fetch
+    // below, which touches nothing the user's own browsing would not.
+    if (isDeepRequest(options)) {
+      return fetchDeepFromPage(channel, limit, options);
+    }
+
     try {
       const signal = options?.signal;
       const userId = channel.accountId.trim();
@@ -147,66 +175,33 @@ export const xiaohongshuAdapter: PlatformAdapter = {
         };
       }
 
-      // A local offset over the notes parsed from THIS page. It is not a platform
-      // cursor: it exists so a dig can page through the ~30 notes one response
-      // carries instead of returning all of them at once.
-      const isHistoryDig = Boolean(options?.cursor !== undefined || options?.isHistory);
-      const isForce = Boolean(options?.forceRefresh);
-      const offset = isHistoryDig ? Math.max(Number(options?.cursor) || 0, 0) : 0;
-
-      // The profile page carries only its first screen (~30 notes) in the SSR
-      // state, and this adapter has no way to ask for the next page from the
-      // service worker — the endpoint that would (`user_posted`) requires an `X-S`
-      // signature only the page's own JS can produce. So "I ran out of the notes I
-      // parsed" is a statement about THIS FETCH, not about the account.
+      // This path serves only an ORDINARY sync now. A dig, a cursor page and a
+      // force-refresh all want notes older than the SSR first screen and are
+      // handled by the page-driven path above, so the local offset machinery that
+      // used to live here is gone rather than left unreachable.
       //
-      // It used to return `hasMore: false` here, which `statesEndOfHistory` reads
-      // as the platform declaring the end — writing `__END__` and permanently
-      // blocking the channel (rule 10: wrongly claiming complete is unrecoverable).
-      // The page contradicts it outright: measured 2026-09-13, the SSR state's
-      // `user.noteQueries[0]` says `{ num: 30, hasMore: true, cursor: "69fdde80…" }`
-      // on the same response. The platform says there IS more; we are the ones who
-      // cannot reach it, and we must not put that in the platform's mouth.
-      //
-      // Reported as an error instead of a silent empty success (rule 13): a dig
-      // that returns nothing must say why, and this is a real limit the user can
-      // act on (open the note's page in a browser, or wait for in-page acquisition).
-      if (isHistoryDig && !isForce && offset >= allPosts.length) {
-        return {
-          posts: [],
-          authorMeta: {
-            name: authorName,
-            avatar: authorAvatar,
-          },
-          error: fetchError(
-            'unsupported',
-            '小红书主页只提供最近的一屏作品（约 30 条），更早的内容需要页面端才能取到，'
-            + '当前同步路径无法继续回溯。已获取的内容不会丢失，深挖稍后可重试。',
-          ),
-        };
-      }
-
-      // When force refreshing, return all parsed posts so old items get updated/healed
-      const targetPosts = isForce ? allPosts : allPosts.slice(offset, offset + limit);
+      // What it used to do, and why it is not missed: it reported
+      // `hasMore: false` when the offset ran past the ~30 parsed notes, which
+      // `statesEndOfHistory` reads as the platform declaring the end. The page
+      // contradicts that outright — measured 2026-09-13, the SSR state's
+      // `user.noteQueries[0]` says `{ num: 30, hasMore: true, cursor: … }` on the
+      // same response (rule 10: wrongly claiming complete is unrecoverable).
+      const targetPosts = allPosts.slice(0, limit);
 
       // Image notes: the profile SSR cards carry only a single cover. Fetch
       // each note's detail page (SSR embeds the full imageList) so picture
       // posts show all their images, not just the first.
       await enrichImageNoteMedia(channel, targetPosts, signal);
 
-      const nextOffset = offset + targetPosts.length;
-      // `hasMore` only while there are still unparsed notes IN THIS PAGE. When the
-      // offset reaches the end, the branch above has already answered — so this is
-      // `false` only alongside a real cursor, never as an end-of-history claim.
-      const hasMore = !isForce && nextOffset < allPosts.length;
       return {
         posts: targetPosts,
         authorMeta: {
           name: authorName,
           avatar: authorAvatar,
         },
-        nextCursor: hasMore ? String(nextOffset) : undefined,
-        hasMore,
+        // Never an end-of-history claim: the SSR document carries one screen, so
+        // "I ran out of parsed notes" is a statement about this fetch, not about
+        // the account. Leaving `hasMore` unset (`undefined`) says exactly that.
         totalFetched: allPosts.length,
       };
     } catch (err: unknown) {
@@ -219,6 +214,208 @@ export const xiaohongshuAdapter: PlatformAdapter = {
   },
 };
 
+
+/**
+ * True when this fetch wants older notes, which only a page can reach.
+ *
+ * A dig, a cursor-driven page and a force-refresh all ask for history; all three
+ * take the injected path.
+ */
+function isDeepRequest(options?: FetchOptions): boolean {
+  return Boolean(options?.isHistory || options?.cursor !== undefined || options?.forceRefresh);
+}
+
+/** Response shape of the FETCH_XHS_NOTES message. */
+interface XhsNotesResponse {
+  success?: boolean;
+  code?: FetchErrorCode;
+  error?: string;
+  snapshot?: unknown;
+}
+
+/**
+ * Acquire a creator's notes by driving an open xiaohongshu profile page.
+ *
+ * The page is the only place this can run: the SSR document carries one screen,
+ * and the endpoint that pages it needs a signature only the page's JS produces.
+ * The handler owns the tab lifecycle; this function owns turning the (untrusted)
+ * snapshot into Posts.
+ */
+async function fetchDeepFromPage(
+  channel: Channel,
+  limit: number,
+  options?: FetchOptions,
+): Promise<FetchResult> {
+  const userId = channel.accountId.trim();
+  if (!userId) {
+    return { posts: [], error: fetchError('unsupported', '小红书频道缺少创作者标识') };
+  }
+
+  // Same reasoning as the Douyin adapter: the SW cannot message its own router,
+  // so a background dig says so rather than reporting a successful empty sync.
+  if (IS_SERVICE_WORKER) {
+    return {
+      posts: [],
+      error: fetchError(
+        'unsupported',
+        '小红书历史回溯需要在打开的页面中采集，后台自动同步无法执行。请在仪表盘手动回溯。',
+      ),
+    };
+  }
+
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+    return { posts: [], error: fetchError('unsupported', '当前环境不支持小红书页面采集') };
+  }
+
+  if (options?.signal?.aborted) {
+    return { posts: [], error: fetchError('timeout', '同步已取消（调用方已中止）') };
+  }
+
+  let response: XhsNotesResponse;
+  try {
+    response = await new Promise<XhsNotesResponse>((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'FETCH_XHS_NOTES', userId, limit, deep: true },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            resolve({ success: false, code: 'network', error: chrome.runtime.lastError.message });
+          } else {
+            resolve((res as XhsNotesResponse) || { success: false });
+          }
+        },
+      );
+    });
+  } catch (err: unknown) {
+    return { posts: [], error: fetchError('network', `小红书采集通信异常: ${errorMessage(err)}`) };
+  }
+
+  if (!response?.success) {
+    return {
+      posts: [],
+      error: fetchError(response?.code ?? 'network', response?.error || '小红书笔记采集失败'),
+    };
+  }
+
+  // Everything from the page is untrusted; the contract is the single place that
+  // knows the page's shape and drops what it cannot vouch for.
+  const snapshot = normalizeXhsSnapshot(response.snapshot);
+  if (!snapshot) {
+    return { posts: [], error: fetchError('parse', '小红书页面数据结构无法解析（可能是页面改版）。') };
+  }
+
+  if (snapshot.requiresLogin) {
+    return {
+      posts: [],
+      error: fetchError('auth', '小红书要求登录，未登录的会话看不到创作者主页。请先在浏览器中登录小红书。'),
+    };
+  }
+
+  const authorMeta = {
+    name: snapshot.authorName || undefined,
+    avatar: snapshot.authorAvatar || undefined,
+  };
+
+  // Zero notes is not "this creator posted nothing" — the collector drove a real
+  // page and found no cards at all, which is a login wall, an empty grid that has
+  // not painted, or a changed state shape. Reporting it as a successful empty sync
+  // would also let a `hasMore: false` park the cursor at `__END__` forever
+  // (rules 10 and 13).
+  if (snapshot.notes.length === 0) {
+    return {
+      posts: [],
+      authorMeta,
+      error: fetchError(
+        'parse',
+        snapshot.statedTotal
+          ? `小红书主页未加载出任何笔记（主页标注 ${snapshot.statedTotal} 篇，该数字包含作者隐藏的作品）。请在浏览器中确认该主页能正常显示笔记后再回溯。`
+          : '小红书页面未加载出任何笔记。若该创作者确有笔记，通常是页面尚未渲染完成——请在浏览器中打开该主页、确认能看到笔记后再回溯。',
+      ),
+      totalFetched: 0,
+    };
+  }
+
+  const posts: Post[] = [];
+  const seenIds = new Set<string>();
+  const since = options?.forceRefresh ? 0 : options?.sinceTimestamp ?? 0;
+  for (const note of snapshot.notes) {
+    const post = toPostFromNote(channel, note);
+    if (!post || seenIds.has(post.id)) continue;
+    seenIds.add(post.id);
+    // The grid is not strictly reverse-chronological, so filter every note rather
+    // than stopping at the first old one.
+    if (since > 0 && post.publishedAt <= since) continue;
+    posts.push(post);
+  }
+  posts.sort((a, b) => b.publishedAt - a.publishedAt);
+
+  // Enrich image notes with their detail page's full `imageList`, exactly as the
+  // SSR path does — the profile card carries only a cover.
+  await enrichImageNoteMedia(channel, posts, options?.signal);
+
+  // `hasMore: false` is the end-of-history signal, and parking the cursor at
+  // `__END__` is unrecoverable — so it is claimed only on POSITIVE evidence that the
+  // page served everything: the grid reached at least the total the header states.
+  //
+  // Saturation is NOT that evidence. A grid that stopped growing may have finished
+  // or may have been cut off, and the stated total counts works the author has
+  // hidden, so a shortfall is permanently true for such a profile and proves nothing
+  // (rule 10). The asymmetry is deliberate: staying resumable costs one re-scroll,
+  // claiming complete loses the history permanently.
+  const matchedStated = snapshot.statedTotal !== null && snapshot.notes.length >= snapshot.statedTotal;
+  const shortOfStated = snapshot.statedTotal !== null && snapshot.notes.length < snapshot.statedTotal;
+
+  if (snapshot.saturated && shortOfStated && posts.length === 0) {
+    // A dig that returns nothing must say why rather than reporting a successful
+    // empty sync (rule 13) — and it must not blame the user for a shortfall that
+    // hidden works explain.
+    return {
+      posts: [],
+      authorMeta,
+      error: fetchError(
+        'unsupported',
+        `页面滚动到 ${snapshot.notes.length} 篇笔记后停止增长（主页标注 ${snapshot.statedTotal} 篇，`
+        + '该数字包含作者隐藏的作品，故少于标注属正常）。若确有更早的笔记，请在该创作者的页面中'
+        + '登录后向下滚动加载再重试。',
+      ),
+      totalFetched: snapshot.notes.length,
+    };
+  }
+
+  return {
+    posts: posts.slice(0, Math.max(limit, 1)),
+    authorMeta,
+    hasMore: !matchedStated,
+    totalFetched: snapshot.notes.length,
+  };
+}
+
+/** Map one validated page note onto a Post. */
+function toPostFromNote(channel: Channel, note: RawXhsNote): Post | null {
+  const title = note.title || '小红书笔记';
+  const isVideo = note.type === 'video';
+  const likedCount = note.likedCount;
+
+  const mediaList: MediaItem[] = [];
+  if (note.coverUrl) {
+    const secureCover = toSecureMediaUrl(note.coverUrl);
+    mediaList.push({
+      type: isVideo ? 'video' : 'image',
+      previewUrl: secureCover,
+      // A video's page is its canonical target; its cover is not playable.
+      originalUrl: isVideo ? note.noteUrl : secureCover,
+    });
+  }
+
+  return buildPost(channel, {
+    id: `xiaohongshu_${note.id}`,
+    title,
+    content: likedCount ? `${title}\n\n❤️ ${likedCount} 次赞同` : title,
+    mediaList,
+    originalUrl: note.noteUrl,
+    publishedAt: note.time,
+    isRepost: false,
+  });
+}
 
 /**
  * Cap on detail-page fetches per sync round. XHS risk control is strict;

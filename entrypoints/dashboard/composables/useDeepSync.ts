@@ -2,6 +2,9 @@ import { ref } from 'vue';
 import type { Creator, Channel } from '../../../src/types';
 import { PLATFORM_REGISTRY } from '../../../src/types';
 import { deepSyncChannel } from '../../../src/sync';
+import { digRisksUserAccount } from '../../../src/adapters/types';
+import { getAdapter } from '../../../src/platform/registry';
+import { dialog } from './useDialog';
 import type { DeepSyncStartRequest } from '../types/modal';
 
 export interface DeepSyncDependencies {
@@ -9,6 +12,17 @@ export interface DeepSyncDependencies {
   getChannels: () => Channel[];
   reloadData: () => Promise<void>;
 }
+
+/**
+ * How many risky accounts in one dig warrant the stronger wording.
+ *
+ * A dig scrolls the user's own logged-in page, and each account is a separate
+ * burst of scroll traffic against a platform whose anti-bot heuristics watch for
+ * exactly that. One account is the ordinary case the confirmation already covers;
+ * three at once is a different shape of risk and is said plainly. This is a
+ * wording threshold, not a gate — nothing is blocked.
+ */
+const RISKY_DIG_ACCOUNT_THRESHOLD = 3;
 
 /**
  * Deep history-sync orchestration for the Dashboard: owns the modal target,
@@ -41,12 +55,41 @@ export function useDeepSync(deps: DeepSyncDependencies) {
   async function startDeepSync(request: DeepSyncStartRequest) {
     const creator = deepSyncTargetCreator.value;
     if (!creator || request.channelIds.length === 0) return;
+
+    const targetChannels = deps.getChannels().filter(ch => request.channelIds.includes(ch.id));
+
+    // Warn BEFORE any acquisition, and only about platforms whose dig actually
+    // drives the user's own page (`digScrollsUserPage`). The cost is paid by the
+    // user's account, so it is their decision to make — the reference
+    // implementation for the one such platform ships this behaviour off by
+    // default, behind a risk warning of its own.
+    const risky = targetChannels.filter(ch => digRisksUserAccount(getAdapter(ch.platform)));
+    if (risky.length > 0) {
+      const names = [...new Set(risky.map(ch => PLATFORM_REGISTRY[ch.platform]?.name || ch.platform))].join('、');
+      const severe = risky.length >= RISKY_DIG_ACCOUNT_THRESHOLD;
+      const confirmed = await dialog.confirm(
+        `【回溯会滚动你的已登录页面】\n\n`
+        + `本次回溯包含 ${names} 的 ${risky.length} 个账号。这些平台的历史动态只能在浏览器里`
+        + `打开并滚动你的已登录页面才能取到，而连续滚动正是平台风控会留意的行为。\n\n`
+        + (severe
+          ? `一次回溯 ${risky.length} 个账号会让风控压力叠加。建议分批进行，` +
+            `或改用较小的时间 / 数量范围。\n\n`
+          : '')
+        + `若平台弹出验证，请先在对应页面完成验证再重试；该平台随后会自动进入冷却。\n\n`
+        + `继续回溯吗？`,
+        { title: severe ? '回溯较大范围前的提醒' : '回溯前的提醒' },
+      );
+      if (!confirmed) {
+        deepSyncLogs.value.unshift('[已取消] 你在提醒中选择了不继续。');
+        return;
+      }
+    }
+
     isDeepSyncRunning.value = true;
     deepSyncAbortRequested.value = false;
     deepSyncLogs.value = [];
     deepSyncTotalNew.value = 0;
 
-    const targetChannels = deps.getChannels().filter(ch => request.channelIds.includes(ch.id));
     const maxPostsPerChannel = request.mode === 'count' ? request.targetCount : 0;
     const untilTimestamp = request.mode === 'time' && request.timeRange > 0
       ? Date.now() - request.timeRange * 24 * 60 * 60 * 1000

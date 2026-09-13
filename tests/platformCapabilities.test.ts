@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import {
   archivesMedia,
   canRunInServiceWorker,
@@ -8,7 +7,7 @@ import {
 } from '../src/adapters/types';
 import { getAdapter } from '../src/platform/registry';
 import { terminalCursorIsStated } from '../src/sync/cursorState';
-import type { KnownPlatform } from '../src/types';
+import type { Channel, KnownPlatform } from '../src/types';
 
 /**
  * The platform capability model (queue #6).
@@ -76,25 +75,79 @@ describe('capability declarations', () => {
     expect(new Set(capable)).toEqual(new Set(BACKGROUND_CAPABLE));
   });
 
-  it('the declaration matches what the adapter actually does', () => {
-    // The guard that makes the declaration more than a comment: each adapter that
-    // says it cannot run in the worker must actually check for it, so the two can
-    // never disagree in the direction that matters (declared capable, actually
-    // refusing — or vice versa).
+  it('the declaration matches what the adapter actually does', async () => {
+    // The guard that makes the declaration more than a comment. It is asserted on
+    // BEHAVIOUR, not on source text: the first version regex-matched
+    // `/IS_SERVICE_WORKER/` against each adapter, which its own sibling test
+    // criticises ("matching the source would also match a comment that merely
+    // mentions the field") — and it became a false positive the moment
+    // `xiaohongshu` needed the check for its page-driven DIG while its ordinary
+    // SSR sync stays background-capable (`backgroundSync` gates the whole
+    // channel, so declaring it false would drop a working platform from
+    // auto-sync — see `PlatformAdapter.backgroundSync`).
+    //
+    // The measurable contract is where the request actually goes. A platform that
+    // can complete in the worker reaches the network through `bgFetch`; the two
+    // page-driven ones cannot and refuse (or open a message round-trip) before
+    // any request is made.
+    const probed: string[] = [];
+    vi.resetModules();
+    vi.doMock('../src/utils/runtime', () => ({ IS_SERVICE_WORKER: true }));
+    vi.doMock('../src/infrastructure/chrome/http', () => ({
+      bgFetch: async () => {
+        // Counted, never resolved usefully: the refusal we are testing happens
+        // before the network, so an adapter that gets here has already proven it
+        // is background-capable.
+        throw new Error('bgFetch probe');
+      },
+      MAX_RESPONSE_CHARS: 1_000_000,
+    }));
+
+    const { getAdapter: freshGetAdapter } = await import('../src/platform/registry');
+    const probeChannel = (platform: KnownPlatform): Channel => ({
+      id: `${platform}:probe`,
+      creatorId: 'creator_probe',
+      platform,
+      accountId:
+        platform === 'rss'
+          ? 'https://example.com/feed.xml'
+          : platform === 'douyin'
+            ? 'MS4wLjABAAAAsyntheticSecUidForTests000000000000'
+            : platform === 'xiaohongshu'
+              ? '63799a52000000001f01ca92'
+              : '12345',
+      displayName: '探针',
+      status: 'idle',
+      profileUrl: 'https://example.com/',
+    });
+
     for (const platform of Object.keys(ADAPTERS) as KnownPlatform[]) {
-      const adapter = getAdapter(platform);
-      const src = readFileSync(
-        new URL(`../src/adapters/${adapterFile(platform)}`, import.meta.url),
-        'utf8',
-      );
-      const refusesInWorker = /IS_SERVICE_WORKER/.test(src);
+      const adapter = freshGetAdapter(platform);
+      if (!adapter) continue;
+      let reachedNetwork = false;
+      try {
+        const res = await adapter.fetchLatest(probeChannel(platform), 10);
+        // A refusal that names the background is the adapter's own statement that
+        // it cannot run here — the observable form of `backgroundSync: false`.
+        reachedNetwork = !/后台|扩展页面|页面中采集/.test(res.error?.message ?? '');
+      } catch (err: unknown) {
+        reachedNetwork = /bgFetch probe/.test(String(err));
+      }
+      probed.push(`${platform}=${reachedNetwork ? 'network' : 'refused'}`);
       expect(
         canRunInServiceWorker(adapter),
-        `${platform}: backgroundSync=${adapter?.backgroundSync} but the adapter ${
-          refusesInWorker ? 'DOES' : 'does NOT'
-        } check IS_SERVICE_WORKER`,
-      ).toBe(!refusesInWorker);
+        `${platform}: declared backgroundSync=${adapter.backgroundSync ?? 'yes'} but the adapter ${
+          reachedNetwork ? 'reaches the network' : 'refuses'
+        } in the worker`,
+      ).toBe(reachedNetwork);
     }
+
+    // The probe must actually have distinguished the two groups, or the loop above
+    // would pass vacuously.
+    expect(probed.filter((p) => p.endsWith('refused')).sort()).toEqual([
+      'douyin=refused',
+      'twitter=refused',
+    ]);
   });
 
   it('terminalCursorIsStated answers from the adapter, not a private list', () => {
@@ -161,11 +214,6 @@ describe('capability declarations', () => {
     expect(optingOut).toEqual(['rss']);
   });
 });
-
-/** Adapter module file name per platform (all are `<platform>.ts`). */
-function adapterFile(platform: string): string {
-  return `${platform}.ts`;
-}
 
 /** The registry's key set, read from the module to avoid restating it. */
 const ADAPTERS: Record<string, PlatformAdapter | undefined> = Object.fromEntries(

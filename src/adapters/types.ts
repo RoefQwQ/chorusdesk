@@ -271,6 +271,24 @@ export interface PlatformAdapter {
    * guess, so a dig clears it and re-runs rather than refusing.
    */
   paginates?: boolean;
+  /**
+   * Whether a HISTORY DIG on this platform drives the user's own logged-in page
+   * and can therefore trip the platform's automation defences.
+   *
+   * Absent = no. This is not about difficulty, it is about WHO PAYS for the
+   * request: a normal sync asks the platform's own endpoints with the user's
+   * session, while a dig scrolls a rendered page in the user's browser, which is
+   * exactly the behaviour the platform's anti-bot heuristics look for. For
+   * `xiaohongshu` the reference implementation (JoeanAmier/XHS-Downloader) ships
+   * its equivalent **off by default, behind a risk warning**, so the user is
+   * entitled to be told before it runs rather than after something goes wrong.
+   *
+   * Consumers use this to pick the wording of the confirmation shown BEFORE the
+   * dig starts (see `useDeepSync`); it never gates the feature itself. Declared
+   * here rather than listed at the call site so a new page-driven platform
+   * inherits the warning by declaring the fact once (rule 2's shape).
+   */
+  digScrollsUserPage?: boolean;
   fetchLatest(channel: Channel, limit?: number, options?: FetchOptions): Promise<FetchResult>;
 
   /** Optional platform-specific historical fetch implementation. */
@@ -317,6 +335,15 @@ export function canRunInServiceWorker(adapter?: PlatformAdapter): boolean {
 /** Whether this adapter walks a real platform cursor — see `paginates`. */
 export function hasPlatformStatedEnd(adapter?: PlatformAdapter): boolean {
   return adapter?.paginates !== false;
+}
+
+/**
+ * Whether a history dig on this platform scrolls the user's own page — see
+ * `digScrollsUserPage`. Absent = no, because the warning it drives should be
+ * shown for a fact a platform actually declared, never by default.
+ */
+export function digRisksUserAccount(adapter?: PlatformAdapter): boolean {
+  return adapter?.digScrollsUserPage === true;
 }
 
 export function archivesMedia(adapter?: PlatformAdapter): boolean {

@@ -3,6 +3,7 @@ import { handleProxyImage } from '../src/infrastructure/chrome/messages/proxyIma
 import { handleBgFetch, handleBgFetchAbort } from '../src/infrastructure/chrome/messages/bgFetch';
 import { handleTwitterTimeline } from '../src/infrastructure/chrome/messages/twitterTimeline';
 import { handleDouyinSnapshot, sweepOrphanDouyinTempTab } from '../src/infrastructure/chrome/messages/douyinSnapshot';
+import { handleXhsNotes } from '../src/infrastructure/chrome/messages/xiaohongshuNotes';
 import { isExtensionPageSender } from '../src/infrastructure/chrome/messages/senderGuard';
 import { handleSyncChannel } from '../src/infrastructure/chrome/messages/syncChannel';
 import { setupDeclarativeNetRules } from '../src/infrastructure/chrome/declarativeNetRequest';
@@ -29,6 +30,7 @@ const SENDER_POLICY: Record<string, 'page'> = {
   PROXY_IMAGE: 'page',
   FETCH_TWITTER_TIMELINE: 'page',
   FETCH_DOUYIN_SNAPSHOT: 'page',
+  FETCH_XHS_NOTES: 'page',
   REFRESH_BADGE: 'page',
   SYNC_CHANNEL: 'page',
 };
@@ -118,6 +120,10 @@ export default defineBackground(() => {
 
     if (type === 'FETCH_DOUYIN_SNAPSHOT') {
       return handleDouyinSnapshot(message, sendResponse);
+    }
+
+    if (type === 'FETCH_XHS_NOTES') {
+      return handleXhsNotes(message, sendResponse);
     }
 
     if (type === 'SYNC_CHANNEL') {
