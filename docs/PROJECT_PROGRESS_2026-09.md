@@ -150,15 +150,20 @@ schema 变化，不是网络故障）。
 **把 bug 编码了进去**（嵌套多一层，正好匹配解析器当时读的位置，见规则 15/21）——
 即现有 fixture 只能证明「解析器与自己一致」。
 
-**另一类缺口：活模块无自动化验证**（既无测试直接 import，也无任何测试经由其它路径触达）：
+**另一类缺口：活模块无自动化验证**（既无测试直接 import，也无任何测试经由其它路径触达）。
+**下表已于 2026-09-13 逐项复核，五行里三行已被后续批次关闭**：
 
-| 模块 | 行数 | 说明 |
+| 模块 | 行数 | 状态 |
 |---|---|---|
-| `src/infrastructure/chrome/declarativeNetRequest.ts` | 186 | 6 条防盗链规则（id 1001–1006），**已由真机确认命中**（四.P7）但无自动化验证 |
-| `src/infrastructure/chrome/autoSync.ts` | 99 | alarm 自动同步；端到端行为由 `e2e/release-gate.mjs` 的 4 个 alarm 步骤覆盖，无单元级判据 |
-| `src/infrastructure/chrome/platformAuth.ts` | 66 | 登录指示灯判据（cookie 名表），**它正是三个 adapter `checkAuthStatus` 被删后剩下的唯一真相源** |
-| `src/infrastructure/chrome/optionalHostAccess.ts` | 51 | RSS 按站点授权；真实弹窗行为只能真机观察，但授权判定本身可直测 |
-| `src/sync/cursorState.ts` | 90 | `__END__` 语义唯一实现——**经消费点间接覆盖**，见下 |
+| `src/infrastructure/chrome/declarativeNetRequest.ts` | 186 | ~~无验证~~ **已完成 2026-09-13**：`tests/declarativeNetRequest.test.ts` 10 例，表驱动 + `initiatorDomains` 逐条断言（队列 #14） |
+| `src/infrastructure/chrome/autoSync.ts` | 99 | ~~无单元判据~~ **已完成 2026-09-13**：`tests/autoSync.capability.test.ts`（筛平台 2 例）+ `channelSync.backgroundCapability.test.ts`（队列 #20） |
+| `src/infrastructure/chrome/platformAuth.ts` | 66 | ~~无验证~~ **已完成 2026-09-13**：`tests/platformAuth.test.ts` 9 例（队列 #20） |
+| `src/infrastructure/chrome/optionalHostAccess.ts` | 51 | **仍无**——`originPattern()` 可直测，`requestHostAccess()` 的弹窗行为只能真机观察（见下） |
+| `src/sync/cursorState.ts` | 90 | 经消费点间接覆盖（**不是缺口**，见下） |
+
+> **唯一剩下的真缺口是 `optionalHostAccess.ts`**：全仓 grep 无任何 import，`originPattern(url)`
+> 是纯函数（把 URL 变成 `*://host/*` 授权模式）却没有测试，而它的输出直接决定向浏览器申请
+> 哪个 origin。`requestHostAccess()` 本身依赖用户手势与真实弹窗，属真机范畴。
 
 > `cursorState.ts` 是**间接覆盖**而非无人守护：它的两个消费点各有回归套件
 > （`douyin.endcursor.test.ts` / `douyin.loophead.test.ts`，4 例），改错会同时打红两套。
@@ -320,8 +325,11 @@ Dashboard 全部刷新 / 创作者 / 单频道、深挖历史、popup 首次抓�
 - ~~**E2E 一个 click 卡死一整串**~~ **已完成 2026-09-13**：竞态根因已修（规则 34），
   链路依赖也已拆开——`backup.export` 失败现在只 skip 3 步（真正依赖它的备份链），
   5 个 alarm 检查照常运行（实测：强制 export 失败 → `14 passed, 1 failed, 3 skipped`）。
-- **`PROXY_IMAGE` 无大小/MIME 上限**（`arrayBuffer()` 后直接 base64），
-  而它现在允许任意 http(s) 主机（为 RSS 图片）——这是合理的产品行为，但没有 byte ceiling。
+- ~~**`PROXY_IMAGE` 无大小/MIME 上限**（`arrayBuffer()` 后直接 base64），
+  而它现在允许任意 http(s) 主机（为 RSS 图片）——这是合理的产品行为，但没有 byte ceiling。~~
+  **已完成 2026-09-13**（队列 #8）：`MAX_IMAGE_BYTES = 8MB` + `isImageMime()`，
+  超限拒绝而不是先编码再丢弃；`tests/proxyImage.test.ts` 的
+  `handleProxyImage — resource ceilings` 四例钉死（含「大但合法」仍要放行的反向断言）。
 - ~~**`toSecureMediaUrl` 仍用 `includes()`** 判小红书域名。~~ **已完成 2026-09-13**：
   实测三个误判（路径里带域名、`xhscdn.com.evil.tld`、`notxhscdn.com`）都会把陌生主机的图
   改写到平台 CDN 上，且列表在 `media.ts` 与 `proxyImage.ts` 各写了一份——已解析化 + 收敛到 `hosts.ts`。
