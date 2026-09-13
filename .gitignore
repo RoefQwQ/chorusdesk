@@ -2,6 +2,9 @@
 .output/
 .wxt/
 node_modules/
+# The release workflow's download-page copy of the built zip (dist/chorus-vX.Y.Z.zip).
+# Produced by `release.yml`; never a source file.
+dist/
 
 # Environment and credentials
 .env

@@ -111,4 +111,122 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/*.zip --title "${GITHUB_REF_NAME}" --generate-notes
+        run: |
+          # Publishing survives an intermittently failing releases endpoint.
+          #
+          # Measured on this repository while writing this step: `POST /releases`
+          # returns HTTP 500 roughly one attempt in three — and the release IS
+          # created anyway, so `gh` exits non-zero having already made it. That is
+          # why the plain one-liner this replaces failed the step on three
+          # consecutive tag runs and left a draft behind each time.
+          #
+          # It is not `--generate-notes`: an A/B of that flag against a literal
+          # `--notes` set gave 3/3 success for BOTH, interleaved through the same
+          # errors. Reads stayed fine and the rate limit was untouched, so this is
+          # GitHub-side. We cannot prevent it; we only have to survive it.
+          #
+          # So the step is a converging state machine rather than a single call.
+          # Each pass makes progress on whatever state the tag is in, and the exit
+          # condition is OBSERVED (a published release carrying the asset), never an
+          # exit code.
+          #
+          # Two traps, both hit for real while building this:
+          #  - `releases/tags/<tag>` answers 404 for a DRAFT, and everything here is
+          #    a draft until published. Guarding creation with it made the loop
+          #    create FIVE duplicate drafts in one run.
+          #  - the list endpoint is NEWEST-first, so picking `head -1` selects the
+          #    most recent empty draft, not the older one already holding the asset.
+          set -u
+          tag="${GITHUB_REF_NAME}"
+          asset="dist/chorus-v${tag#v}.zip"
+          attempts=20
+
+          # The single target release for this tag: the PUBLISHED one if any,
+          # otherwise the OLDEST draft (the one created first, which is the one an
+          # earlier pass may already have attached the asset to).
+          #
+          # Returning one id used by every branch is what makes the loop converge.
+          # An earlier version computed "any" and "published" separately, so a pass
+          # could upload to the oldest draft while testing a newer one and create
+          # yet another — it published correctly but left a stray draft behind.
+          target_id() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases" --jq "
+              [ .[] | select(.tag_name == \"${tag}\") ] as \$r
+              | ( \$r | map(select(.draft == false)) | .[0]
+                  // \$r | sort_by(.id) | .[0] )
+              | .id // empty" 2>/dev/null
+          }
+          published_id() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases" \
+              --jq ".[] | select(.tag_name == \"${tag}\") | select(.draft == false) | .id" 2>/dev/null | head -1
+          }
+          asset_names() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/$1" --jq '.assets[].name' 2>/dev/null || true
+          }
+
+          ok=0
+          for i in $(seq 1 "$attempts"); do
+            # A 5xx READ is not evidence of absence. `target_id` returning empty
+            # during a 500/502 made an earlier version create a duplicate draft
+            # alongside the release it had just made (measured: two releases for
+            # v1.0.0, created one second apart). Re-read before believing "none".
+            target=""
+            for probe in 1 2 3 4 5; do
+              target=$(target_id)
+              [ -n "$target" ] && break
+              sleep 3
+            done
+            pub=$(published_id)
+
+            if [ -n "$pub" ] && [ -n "$(asset_names "$pub")" ]; then
+              echo "published with asset (pass ${i})"
+              ok=1
+              break
+            fi
+
+            if [ -n "$target" ]; then
+              # A release exists (draft, or published without its asset yet).
+              # Never create a second one for this tag.
+              if [ -z "$(asset_names "$target")" ]; then
+                gh release upload "$tag" "$asset" --clobber || true
+              fi
+              if [ -z "$pub" ]; then
+                gh release edit "$tag" --draft=false || true
+              fi
+            else
+              # NOTE: this may report HTTP 500 and still create the release. The
+              # next pass finds it via `target_id` and continues from there, so a
+              # spurious failure costs one pass rather than the whole release.
+              gh release create "$tag" "$asset" \
+                --title "Chorus ${tag}" --generate-notes --draft || true
+            fi
+
+            sleep 5
+          done
+
+          # Delete every DRAFT left for this tag, keeping the published one.
+          #
+          # This is the deterministic half, and it replaces an attempt to make the
+          # create path race-free. GitHub's endpoint 5xxs while still creating the
+          # release, so "did I already create this?" cannot be answered reliably at
+          # the moment of creating — a read that fails during the same outage looks
+          # identical to "no release yet". Rather than keep tightening that guess,
+          # the loop only has to guarantee that ONE release ends up published, and
+          # this sweeps whatever duplicates the retries left behind.
+          #
+          # Side effect worth having: a re-run over an already-published tag is also
+          # left clean, which is what a tag re-push after a failure produces.
+          for id in $(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq ".[] | select(.tag_name == \"${tag}\") | select(.draft == true) | .id" 2>/dev/null || true); do
+            echo "removing leftover draft ${id}"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${id}" -X DELETE || true
+          done
+
+          if [ "$ok" != "1" ]; then
+            echo "::error::the ${tag} release is not published with its asset after ${attempts} passes"
+            gh api "repos/${GITHUB_REPOSITORY}/releases" \
+              --jq '.[] | select(.tag_name == "'"${tag}"'") | "\(.id) draft=\(.draft) assets=\([.assets[].name] | join(","))"' || true
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases/$(published_id)" \
+            --jq '"released \(.tag_name): assets=\([.assets[].name] | join(", "))"' 
