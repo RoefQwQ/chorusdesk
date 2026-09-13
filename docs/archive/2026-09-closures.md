@@ -919,3 +919,436 @@ B23. **分层总评（逐条验证通过）**：12 个 adapter 零 db import（�
 - jsdom 不做布局：几何问题用规则 30 的单文件 HTML 打包在真实排版引擎里量。
 - 脚本化改写必须断言命中数，否则「匹配不到」会产出假绿（规则 26）。
 - 本仓库 `core.autocrlf=true`：签入为 LF，工作区可能是 CRLF，多行锚点会匹配不到。
+
+---
+
+# 第二批拆入（2026-09-14 第三次收束）
+
+> 以下由 `docs/PROJECT_PROGRESS_2026-09.md` 于 2026-09-14 **第三次收束**时拆出，
+> 逐字保留。拆出的是「四.P8」下的**批次叙述**（批次 9 / 8 / 7 / 1 与「上一批」）——
+> 它们是事故经过与实测证据，**不是待办**。
+>
+> 拆出理由与上一次相同：正文里混着 400 余行已完成内容，而正文是**唯一待办入口**，
+> 冷启动读者要读完它们才能知道「现在还剩什么」。正文 1036 → 618 行。
+>
+> **不与代码同步**：其中的行数、测试计数、提交号都是当时的快照；与源码冲突以源码为准。
+> 队列编号、能力字段与修复谓词的**当前状态**见正文的队列总表。
+
+#### 已完成（批次 9：fantia 正文仍显示原始 delta，2026-09-14）
+
+用户第二次报「fantia 正文依旧不是纯文字」（附卡片截图 + 开发者日志）。**第一次诊断错了**，
+按日志重判后根因不同。两次报的是**同一张卡片**，但它不是批次 8 修的那条
+（批次 8 修 4228374；截图是 4236630）。
+
+**日志给出的事实**（`local://paste-2.md`，03:30:37–40）：
+
+```
+fantia/迷夜ゆめ 开始同步（常规） | 上限 10 条，水位线 2026/9/13 11:29:37
+bgFetch: fantia.jp → HTTP 200 | 23313 字符        ← 俱乐部列表成功
+bgFetch: fantia.jp → HTTP 403 | 26 字符           ← 详情请求被拒（共 3 次）
+channelSync: fantia/迷夜ゆめ 同步完成 | 新增 0 条，平台返回 6 条，hasMore=false
+```
+
+**真根因（三条叠加，全部有实测或日志支撑）**
+
+| # | 事实 | 后果 |
+|---|---|---|
+| 1 | 存量行里存的是**原始 delta**（截图逐字：`{"ops":[{"insert":"本編→"},{"attributes":{"link":"…"},"insert":"…"},{"insert":"\n"}]}`） | 卡片渲染原始 JSON。这行是 `fantiaCommentText` 存在**之前**的构建写的 |
+| 2 | 所有 6 条都**在水位线之下**（`新增 0 条，平台返回 6 条`） | 不走新行写入，只走**修复**分支 |
+| 3 | 而修复规则当时要求 `content === title`——**delta 不等于标题** | 规则永不匹配，该行**每次同步都存活**。这才是用户「同步过了还是这样」的机制 |
+| 4 | 详情请求 **403**（会话相关，匿名 200、登录态 403） | 正文与图集都拿不到更新；而这一失败**只记在 `bgFetch` 的 warn 里**，频道仍报「同步完成」 |
+
+**修法**
+
+1. **修复规则改为认「原始 delta」这个真实形态**（`isFantiaBodySuperseded`）：
+   `fantiaCommentText(stored) !== stored` 即判定——**问的是解码器本身会不会改这个字符串**，
+   与缺陷问的是同一个问题。仍保留 `content === title` 那条。`fresh !== stored` 两侧都要求，
+   所以空的正文永远不会把行改写。
+2. **详情请求失败上报为 `degraded` + `warnings`**（规则 13 的既有机制），
+   措辞点名 403 与「正文与图集沿用列表数据」。此前平台拒绝与「账号本来就没内容」在界面上
+   完全一样。
+3. 批次 9 早前的两项改动保留（详情 `comment` 取回、`thumb_micro` 回退、上限 3→6）。
+
+**为什么让修复能生效**：登录态下**列表本身**就带 delta（匿名列表 `comment: null`，
+登录态 23313 字节 > 匿名 18603），所以 `fantiaCommentText` 在**列表路径**就能解出正文，
+不需要那次 403 的详情请求。正文与图集因此**互不阻塞**。
+
+**验证**
+
+- **10 例**于 `tests/fantia.repair.test.ts`（含用户那行的**逐字** delta）+
+  **2 例** `tests/fantia.repair.e2e.test.ts`，其中最关键的一条断言：
+  `fantiaCommentText(存量的 delta) === 新解析的正文`——**这正是「替换是安全的」的全部理由**，
+  若两者不等，修复就是拿一个错正文换另一个。
+- **变异全杀**：去掉 delta 判定臂 → 红；把它放宽成 `body.startsWith('{')` → 红；
+  详情失败不计数 → 「degraded」用例红。
+- 全量 907 例通过；`typecheck` / `lint` 0 问题。
+
+**已知未做 / 需要注意**
+
+- **403 是平台行为，本地无法消除**：匿名访问详情端点 200，登录态 403。
+  代价是**图集**（列表只给一张缩略图）；正文不再受影响。
+- **未在用户会话复验**。用户刷新扩展后，4236630 的正文应显示
+  `本編→https://fantia.jp/posts/3210183`；若仍显示原始 JSON，则说明列表路径也没解到，
+  需要再取一次 `新增 0 条` 后的日志。
+
+---
+
+#### 已完成（批次 8：三个适配器缺陷 + 媒体卡片几何，2026-09-14）
+
+用户报：pixiv 卡片「时间全是刚刚」「图片取不到」，fantia 正文渲染出 `{"ops":…` 原始 JSON，
+小红书图裂，以及 pixiv 部分卡片**只显示一部分图片**。全部按**真实载荷**定位，未靠推断。
+
+**根因与修复**
+
+| 平台 | 根因（实测） | 修复 |
+|---|---|---|
+| pixiv | `/ajax/user/{uid}/profile/all` **只返回 id**。适配器用 ID 线性外推时间（作品 147520202 实际 2026-07-22，公式算成 2026-09-13，再被 `Math.min(Date.now())` 夹成「现在」）；预览写的是 `decorate.php` | 改从 `/ajax/illust/{id}` 读 `createDate`/`uploadDate` 与 `urls.regular/original`；排序移到补全**之后** |
+| pixiv | 补全**每轮上限 3 个**，10 条里 7 条永远拿不到真图 | 上限删掉，改为按**请求**配速（`PIXIV_ENRICH_INTERVAL_MS`）——被计量的是请求，不是作品 |
+| fantia | `comment` 可能是 **Quill delta**（`{"ops":[…]}`），原样写进 `Post.content` | 新增 `fantiaCommentText()` 解码为纯文本 |
+| fantia | 正文与图集的键名**都不存在**：读 `post_content`（实际 `post_contents`）、判 `category === 'photo'`（实际 `photo_gallery`）、找 `photos[].url`（实际 `photo_gallery` 块里的 `post_content_photos_micro` 字符串数组） | 三处键名按真实响应改正 |
+| 小红书 | `__INITIAL_STATE__` 是 **JS 对象字面量而非 JSON**，含 `new Map([])`；旧清洗只处理 `undefined`，整段解析抛异常 → 详情页拿不到 `imageList` → 多图笔记只留封面 | `toJsonObjectLiteral()` 改为**字符串感知扫描**，处理 `new Map/Set/WeakMap/WeakSet/Date`、`NaN`、`±Infinity` |
+
+**`decorate.php` 的更正（重要，我上一轮写错了）**：它 **不是** HTML 页面，实测
+`Content-Type: image/png`、640 588 字节、magic `89 50 4e 47`——**它是能渲染的**。错在别处：
+它是**固定尺寸的装饰外框**，不随作品比例变化。所以该缺陷表现为「图不对」而非「图裂」，
+这也解释了为什么它长期没被当成故障。代码注释已按实测改写。
+
+**pixiv「只显示一部分图片」——与数据库无关**
+
+先读了用户 Chrome 里的 IndexedDB（`chrome-extension_mjeipbjijdjbldfdljijkaofbkbffabc`）：
+**全部 40 条 pixiv 记录的 URL 都是真的 `i.pximg.net`、日期全对**（7/14、7/06、6/29、6/21、
+6/18、6/12，与截图逐条吻合）。所以**不需要修数据**，症状在渲染层。
+
+真因在 `PostCard.vue` 的单图容器：`max-h-[460px]` 把高度封在 460，`object-cover` 再裁。
+在真实渲染引擎里量到（`e2e/media-card-geometry.mjs`）：900×1200 的作品在 **433px 列**下得到
+**433×460** 的框——比例被从 0.75 扭成 0.94，于是裁掉两边。**只有比例低于列宽的竖图受影响**
+（801×1200、900×1200），横图（比例 ≥ 1）从来没事——这正是用户点名特定几张的原因。
+
+改为 `h-auto` + `max-h-[560px]` + `object-contain`。改后同一次实测：`433×560`、
+`object-fit: contain`、**0 张裁切**。
+
+**第二处空白**：卡片在磁盘探测返回前不渲染 `<img>`（只显示脉冲占位图标）。探测会遍历
+`CACHED_IMAGE_EXTENSIONS` 逐个读文件，慢了就一直空白，而且**看起来像"加载中"不像故障**。
+加 `MEDIA_PROBE_DEADLINE_MS = 700`：到点先显示网络图，探测结果回来再升级为本地 blob。
+40 个真实 URL 并发实测：**0 张失败**，中位 2410ms、最慢 2996ms（所以 URL 层没问题）。
+
+**证据与验证**
+
+- **20 例新测试**（pixiv 4 / fantia 7 / 小红书 9），fixture **逐字取自真实接口**
+  （`tests/fixtures/pixiv/`、`tests/fixtures/fantia/`）——这三个适配器此前**一个测试都没有**。
+- **变异 6/6 全杀**。含一条元教训：第一轮变异脚本报「6/6 SURVIVED」，实为 Windows 下
+  `subprocess` 读不到 vitest 输出的**假绿**（规则 26 的原话），改用 shell 重跑后全部 KILLED；
+  且中途有一个变异**未还原**，已核查并修复。
+- 端到端确认详情页路径：`state.note.noteDetailMap[id].note.imageList` 现在可读（修复前为 `null`）。
+- **新探针 `e2e/media-card-geometry.mjs`**（独立 profile，规则 25/28）：播种真实比例的作品，
+  量 holding box / `object-fit` / 是否裁切，有裁切或未加载则退出码 1。
+
+**已知未做**
+
+- **未在用户的真实会话里复验**。当前证据是：数据库逐条核对 + 独立实例实测 + 40 个 URL 全通。
+  需要刷新扩展后实际看一眼。
+- 「空白」的第二机制（探测慢）**未在用户环境复现**，只做了机制分析与上限修复；上面 40 URL
+  实测说明网络层不背这个锅。
+- ~~未提交。~~ 已随 `4218631` 提交（2026-09-14）。
+
+---
+
+#### 已完成（批次 7：小红书历史回溯，2026-09-14）
+
+**#26 小红书深挖只能取到最近一屏** —— **已完成（2026-09-14）**。
+
+**背景**（`docs/XIAOHONGSHU_RESEARCH_2026-09.md`）：主页文档只带一屏（约 30 条），下一页接口
+`user_posted` 需要页面运行时生成的 `X-S` 签名。**签名路线已在 `DOUYIN_RESEARCH` 明确排除**
+（会把扩展变成搬运签名与设备标识的东西），所以能走的只有页面驱动滚动 —— 而这份调查自己写下的
+设计方向是「常规同步保持 `bgFetch`，只有带游标的深挖走页面驱动」。本批实现了那个方向。
+
+**改了什么**
+
+| 文件 | 作用 |
+|---|---|
+| `src/adapters/xiaohongshu/collector.ts` | 注入页面的采集器：滚动**所有**可滚动祖先 + 窗口，从 `__INITIAL_STATE__` 读笔记 |
+| `src/adapters/xiaohongshu/contract.ts` | 校验不可信快照（id 24 位十六进制、时间有限、媒体必须 http(s)） |
+| `src/infrastructure/chrome/messages/xiaohongshuNotes.ts` | `FETCH_XHS_NOTES` handler：标签页生命周期、`world: 'MAIN'`、把「无返回值」当「没跑」并重试 |
+| `src/adapters/xiaohongshu.ts` | 按 `isDeepRequest` 分流；新增页面路径的映射与端点判定 |
+| `entrypoints/dashboard/composables/useDeepSync.ts` | 回溯前确认框（由 `digScrollsUserPage` 驱动，≥3 个账号时加重措辞） |
+| `src/adapters/types.ts` | 新增 `digScrollsUserPage`（缺省 `false`）+ `digRisksUserAccount()` |
+
+**过程中抓到两个我自己的真实缺陷**（都由测试/变异发现，不是推测）：
+
+1. **模块级常量 = 规则 9 的原形态，且只在求值源码时可复现。** collector 一开始把
+   `SCROLL_MIN` / `SETTLE_MS` 等放在模块作用域 —— `executeScript` 只序列化函数本身，
+   注入后这些标识符**不存在**。用 `new Function('return (' + fn.toString() + ')')()` 求值
+   立刻得到 `ReferenceError: SCROLL_MIN is not defined`。这正是 Twitter bearer 那一类
+   （「页面路径从未运行过，且没有任何东西能看出来」），新测试就是这个模板。
+2. **`/作品\s*(\d+)/` 把「作品 1.2万」读成 1** —— 而 `notes.length >= statedTotal` 一旦
+   为真就返回 `hasMore: false`，`channelSync` 随即写入 `__END__`，**永久封死**这个大 V 的
+   历史回溯（规则 10 不可恢复的那个方向）。现在只接受纯整数（含千分位），缩写/小数一律
+   视为**未知**，未知永不构成完整性证据。
+
+**分层的两个判断，都基于实测而非直觉**
+
+- **`backgroundSync` 保持为真、`paginates` 保持为假。** 实测：worker 里 `douyin`/`twitter`
+  在发出任何请求**之前**就拒绝（bgFetch=0），而小红书**照常发出请求**（bgFetch=1）——
+  所以常规同步确实能在 worker 内完成，声明 `false` 会把一个能用的平台从自动同步里摘掉。
+  `paginates` 问的是「平台是否签发真实游标」，注入路径用的是本地偏移，答案仍是否。
+- **单发中断从 `platform === 'douyin'` 改为读 `paginates` 声明。** 该处注释本来就写着
+  「scoped to the single-shot acquisition model」，而小红书加入后，写死名字会让它**每轮
+  重滚同一页四次** —— 在同一批风控最在意的平台上，四倍的自动化信号，换零条新数据。
+
+**验证**
+
+- **15 例新测试**：注入采集器（求值源码）9 + 边界校验 3 + 头部计数 1 + 单发模型 2；
+  另有页面驱动的适配器用例 11 与回溯确认框 5 重写/新增。
+- **变异 5/5 全杀**：模块级常量 → `ReferenceError`；缩写计数 → 读成 1；写死 `'douyin'`
+  单发名 → 小红书滚 5 轮；默认值反向 → 给 bilibili 也弹确认；页面分流去掉 `world:'MAIN'`
+  的等价改动由 `IS_SERVICE_WORKER` 拒绝用例覆盖。
+- 三处**既有测试被本批改动推翻**，均已按新契约重写而非放宽：`xiaohongshu.parse.test.ts`
+  的深挖组（旧断言的是 SSR 本地偏移，那已是死代码）、`platformCapabilities.test.ts` 的
+  「声明与实际一致」（它按**源码文本**正则匹配 `IS_SERVICE_WORKER`，而它自己的姊妹用例
+  正批评这种做法；改为**行为**断言：worker 里是否真的发出请求）。
+
+**仍未验证**（写进 `XIAOHONGSHU_RESEARCH` §9，不要当成已结论）：滚动是否真的让小红书加载出
+第 31 条之后的内容。本批断言的是代码性质（状态增长则收集器增长、三轮不增长即停、常量不能是
+模块级），不是平台行为。要证它得用 `e2e/xhs-scroll-probe.mjs` 跑一次真实已登录账号。
+
+---
+
+#### 已完成（批次 1：状态正确性，2026-09-13）
+
+**CI 红灯根因 —— `dismissDialogs` 竞态（2026-09-13）**
+
+**现象**：40 次 run 里 8 次失败（20%），且**8/8 全部卡在同一步 `backup.export`**。
+失败信息自称 `this is the environment, not the view under test` ——正是这句话让红灯被当成噪音。
+
+**根因**：`dismissDialogs` 只探一次「现在有没有 dialog」，没有就返回。它假定
+后续 dialog 是**同步**入队的（注释原文如此），但导入路径在两者**之间**还 `await` 了
+`backupService.restore()` 与 `reloadData()`：
+
+```ts
+const replace = await dialog.confirm(...)   // ← 门禁在这里应答
+deps.settings.value = await backupService.restore(...)  // ← 异步空窗
+await deps.reloadData()                                 // ← 异步空窗
+await dialog.alert('已恢复为备份快照…')      // ← 空窗之后才入队
+```
+
+探测正好落进空窗 → 返回早 → alert 随后挂载，其 `z-50` 遮罩吞掉下一次点击
+（`mousedown=0 mouseup=0 click=0`，坐标系完全正常——所以它看起来像环境问题）。
+
+**复现**：把那段间隔拉宽到 300ms，同一台机器上
+**旧门禁 3/3 失败**（症状与 CI 逐字一致），**修好后 5/5 通过**；
+900ms 间隔也通过（说明修法不依赖某个具体数值）。
+
+**修法**：不再假设同步。`answered > 0` 之后，要求「连续 `DIALOG_SETTLE_MS` 内没有新 dialog」
+才认定突发结束，总预算 `DIALOG_SETTLE_BUDGET_MS` 封顶（规则 24：量级要显式）。
+
+**#22 `AGENTS.md` 规则瘦身 —— 已按实测改判并完成误归类修正（2026-09-13）**
+
+**原目标（规则 9/28/30 各压到 2–8 行）建立在一个未经验证的前提上，实测后撤销。**
+
+先量准（原队列行写「51/49/53」，我中途一次度量算成 188——度量口径不同，以逐规则 `## n.` →
+下一个 `---` 为准）：规则 9 = **49** 行、规则 28 = **48**、规则 30 = **52**。
+
+再逐条比对 `AGENTS_CASES.md`——结论**与预期相反**：
+
+| 规则 | AGENTS | CASES | 说明 |
+|---|---|---|---|
+| 9 | 49 | 28 | **AGENTS 更长**；4 条操作要点在 CASES 里**一条都没有** |
+| 28 | 48 | 100 | AGENTS 已是精简版 |
+| 30 | 52 | 90 | 同上 |
+
+CASES 自述为「**拆分前的完整原文，冻结**……作用是作证据，**不是约束**」。它存的是事故经过与
+实测数字，**没有规则的操作要点**（「按结果断言而不是按没抛异常」「求值函数源码」「不要持久化
+签名 URL」等只在 AGENTS.md 里）。所以**压到 ≤8 行等于删除唯一副本**，且会把约束写进一个
+自称「不是约束」的冻结文件——与规则 33 是同一类错误。
+
+**真问题只有一处**：规则 9 标题是「页面驱动平台把采集隔离在独立层」，却挂着两条与采集无关的
+不变量（那是「Two further invariants this exposed」的遗留）。按用户决定**只修误归类**：
+
+- **不要持久化签名 CDN URL** → 移入**规则 16**（讲「已写入的行怎么修」，这是「写什么进库」的规则）；
+- **新增平台要把占位前缀加进 `GENERATED_NAME_PREFIXES`** → 移入 **`DEVELOPMENT.md` §6** 的
+  「新增平台」清单——那里**已有更完整的一份**（含双向守卫测试与旧行兜底），规则 9 那份是副本。
+
+规则 9：49 → **38** 行（31 行自己的主题 + 指向新位置的说明）。顺带修掉三处因误归类而指错的引用：
+`tests/urlParser.test.ts` 的注释、`ARCHITECTURE.md` §4.1、`PROJECT_PROGRESS` 二.5。
+
+**没有删掉任何约束**——两条不变量都在新位置，且在更贴题的地方。
+
+**#6 Platform capability 模型 —— 已完成（2026-09-13）**
+
+能力**由适配器自己声明**（用户 2026-09-13 拍板：registry 只汇总/查询，不做第二份真源——与
+`minRequestIntervalMs` / `archivesMedia` 同形，也是规则 2 的形状）。
+
+**三轴，每轴都有真实消费点**（不加没有读取方的字段——这正是当初删掉 `FetchError.retryable` 的理由）：
+
+| 轴 | 缺省 | `false` | 消费点 |
+|---|---|---|---|
+| `backgroundSync` | 是 | `douyin`、`twitter` | dispatch 前拒绝 / autoSync 批量前筛掉 |
+| `paginates` | 是 | `douyin`、`youtube`、`fantia`、`rss`、`xiaohongshu` | `terminalCursorIsStated` / 单发中断 |
+| `archivesMedia` | 是 | `rss` | imageCache / 设置页 |
+| `digScrollsUserPage` | **否** | —（`xiaohongshu` 为 `true`） | 回溯前确认框（2026-09-14 加） |
+
+**修掉的两个真实缺陷**：
+
+1. **popup 关注抖音/Twitter 必然失败**。`SYNC_CHANNEL` **刻意**在 worker 内运行（这样关窗
+   不中断抓取），而这两个平台的采集是页面/消息往返——于是频道被存下、首批动态永远抓不到。
+   现在在 dispatch **之前**按声明拒绝，并把「请在仪表盘手动同步」写进消息。
+2. **`SINGLE_SHOT_ACQUISITION` 是第二真源且已分叉**。`cursorState.ts` 的 `['douyin']` 与适配器
+   各存一份；实测 `youtube` / `rss` **既不返回 `nextCursor` 也不返回 `hasMore`**，同样无法
+   声明「没有更早的了」，却不在名单里——**为它们记录的 `__END__` 被当成平台声明而信任**
+   （规则 10：误判「已到底」不可恢复）。现由 `paginates` 单点派生。
+
+**autoSync 的跳过是记账的，不是静默的**：筛掉后记一条 info，点名跳过了哪些平台。沉默会是
+这个文件刚修过的同一个缺陷形态（分不清「不适用」与「忘了试」）。
+
+**验证**：14 例新测试（映射/缺省语义 3 + 声明与实际行为一致 5 + channelSync 拒绝 4 + autoSync 筛选 2），
+含一条**双向**断言——适配器声明 `backgroundSync:false` 就必须真的检查 `IS_SERVICE_WORKER`，
+所以声明与实现无法各自漂移。**变异 6/6 全杀**：douyin 不声明、cursorState 退回私有名单、
+channelSync 不拒绝、autoSync 不筛、筛了不记日志。两处曾**存活**（消费者无测试），因此补了
+`tests/channelSync.backgroundCapability.test.ts` 与 `tests/autoSync.capability.test.ts`。
+
+**#24 release.yml 与 CI 门禁一致性 —— 已完成（2026-09-13）**
+
+`release.yml` 写着「Same gates as CI: a release must never be the first place a broken build is
+discovered」，然后跑 `npm test`，而 CI 跑 `npm run test:coverage`。**这一字之差是有后果的**：
+`vitest.config.ts` 里的分文件分支阈值**只在 coverage 模式下生效**（`ci.yml` 自己的注释就写着
+这一点），所以那道保护「三个会静默损坏用户数据的模块」的棘轮，**在发布路径上根本不存在**。
+发现方式是人工对读两个文件——**没有任何东西会红**。
+
+**为什么不是「改一个字」就完事**：两个文件各自手工维护一份门禁清单。这和规则 27 缺失的
+模板导入、规则 33 未登记的导出是同一个形状——**清单靠手抄，注释里写着承诺，两边分叉时没有信号**。
+只改那一字，下次加门禁还会只加一边。
+
+**改法**：
+- `release.yml` 的测试步骤改为 `npm run test:coverage`（与 CI 逐字一致）。
+- 新增 `tests/workflows.gateParity.test.ts`：**从两个 workflow 自己的 `run:` 行推导**各自调用了
+  哪些 npm script，然后要求 release 覆盖 CI 的每一个。推导而非硬编码，所以「CI 加了门禁、
+  release 忘了」也会红——否则这张清单自己也会过期。
+- 两处**已测实的合法差异**用 `SATISFIED_BY` **显式声明**，而不是放宽成「大致相等」：
+  - `test:coverage` 只能由 `test:coverage` 满足（单向，`test` 不算）；
+  - `build` 可由 `zip` 满足——**实测**：删掉 `.output/` 后 `npm run zip` 会重新生成
+    `.output/chrome-mv3`（规则 21：不要靠未验证的上游行为）。
+- 另外断言 E2E 的**调用方式**两边逐字相同：那个 `-s "-screen 0 1920x1080x24"` 曾经是真缺陷
+  （`xvfb-run` 默认 1280x1024 比 1440 宽的窗口还窄，窗口边缘的点击会被 X server 丢弃），
+  一份配方两个调用方，不该各写一遍。
+
+**验证**：3 个变异全部被具名断言杀死——
+把 release 改回 `npm test` → `does not run: test:coverage`；删掉 release 的 lint 步骤 →
+`does not run: lint`；把 E2E 调用去掉 `-s` 屏幕参数 →
+`the E2E gate invocation differs between CI and release`。恢复后全绿。
+
+**#2 SyncCoordinator** —— **已完成**。新增 `src/sync/syncCoordinator.ts`。
+
+六条入口（Dashboard 全部刷新 / 创作者 / 单频道 / 深挖、popup 的 `SYNC_CHANNEL`、alarm）
+全部经 `updateChannel`，而那里**没有任何并发锁**——`status: 'updating'` 是写入的字段、
+不是互斥。同一频道可被并发采集，各自持有不同时刻的快照，**后完成的覆盖前面的**，
+`nextCursor` 被旧的覆盖（深挖静默回退/跳段），且**用户看不见**。
+
+- **同频道 single-flight**：加锁点放在 `updateChannel`——这是六条入口唯一的共同交叉点。
+  按调用方各自加 `isSyncing` 看不见别的上下文（alarm 在 SW、popup 在另一个上下文）。
+  第二个调用**加入**第一个并拿到同一个结果，因此一次采集、一次写入。
+- **平台节流改为跨入口共享**：原来 `platformLastFinished` 是 `batchSync` 的**每次调用局部变量**，
+  两个批次并发时各自认为「这个平台从没被请求过」，双双立即发出——恰好在平台即将承受最多请求时
+  击穿了保护下限。现在由 `updateChannel` 在 **finally**（含失败路径）记录，`batchSync` 读共享值。
+
+**#3 RSS identity** —— **已完成**。`<guid>` 按 RSS 规范只在**单个 feed 内**唯一，
+而它被哈希成全库主键（`Post.id` 与 `PostSuppression.postId`）。两个源都用 `<guid>1</guid>`
+是合法的，于是两条内容塌成同一个 Post，且**彻底删除一个会顺带压制另一个**。
+改为 `hash(channelId + guid)`，即身份是 `(feed, item)`。
+
+**存量行**：用**适配器上报**的方式迁移，而不是写一个 Dexie migration。
+关键理由（我第一版做错了）：migration 要从 `originalUrl` 反推新 id，而适配器是从 `guid` 推——
+**两者对「裸数字 guid」的源并不相同**，会产生适配器永远不会再生成的 id。
+现在适配器在解析循环里同时算出「新 id」和「该条目在旧方案下的 id」并一起返回，
+`channelSync` 用它把存量行、它的 suppression、它的 recycle snapshot 一并搬过去——
+**只限于适配器刚返回的那一页**（规则 16）。
+
+**过程中抓到我自己引入的一个真 bug**：迁移把 `isRead: 1` 搬过去之后，
+紧接着的 `bulkPut(enhancedPosts)` 用适配器的新行（`isRead: 0`）把它盖掉了——
+**迁移先搬、写入后抹**。已修：写新行前先读回该 id 的存量状态并合并。
+
+**#7 取消信号** —— **已完成**。`signal: options?.signal ?? abortController.signal`
+是**二选一**，不是组合：只要调用方传了 signal，45 秒期限就失去唯一的取消手段——
+超时拒绝的同时底层请求仍在跑（正是 P1-2 当初要修的形态）。今天没有调用方传 signal，
+所以它一直没暴露——**这个缺陷在等需要它的那个功能**。改为 `composeAbortSignals`
+（`AbortSignal.any` + 手写回退）。
+
+**验证**：三组变异共 **14/14 全杀**，包括「去掉 single-flight」「锁按平台而非频道」
+「不释放锁」「失败时不记录节流」「取消退回二选一」。最后一组第一次**没抓住**——
+我断言的是「调用方 abort 时适配器也 abort」，而 `??` 在那个方向**是对的**；
+真正坏的是「期限还能不能取消」，改断言后才杀掉。
+
+
+
+#### 已完成（上一批）
+
+**#8 传输截断静默 / `PROXY_IMAGE` 无上限** —— **已完成（2026-09-13）**。
+
+**这是从用户日志里挖出来的缺陷，比它表面更大。** 一次「刷新全部」的日志里三个失败，
+其中两个**是同一个 bug**：RSS 源与小红书主页的响应都是**恰好 250,000 字符**——
+`bgFetch` 的上限。
+
+量出来的事实：
+
+| 项 | 数字 |
+|---|---|
+| 用户那个 feed 的真实大小 | **268,021 字符**（10 篇） |
+| 旧上限 | 250,000 → **在 `<img>` 标签中间砍断**：`…m001_45d99f51.png" alt=""&gt;&lt;/p` |
+| 后果 | 结尾的 `</content:encoded></item></channel></rss>` 从未到达 → XML 必然 malformed |
+| 上游设计要保留的量 | 每篇 HTML 60,000 × 10 = **600,000** |
+
+**最后一行是关键**：传输上限（250k）**小于**下游被设计成要保留的量（600k）——
+这个上限本身就不自洽。
+
+**更糟的是它静默**：`readCapped` 砍掉内容后照常返回字符串，调用方无法区分「完整」与「被砍」，
+于是把**我们自己的截断**报成「源返回的内容不是有效 XML」/「页面结构可能已调整」——
+两次都把用户指向错误的排查方向。
+
+**改法**：
+- 上限 250,000 → **1,000,000**（保住那个真实 feed 有 3.7× 余量；本仓实测最大单篇 31,144
+  字符的 32 倍）
+- `readCapped` 返回 `{ text, truncated }`，经由 `BgFetchResult` / `HttpResponse` 一路传下去
+- RSS 与小红书**先查这个标志**：被截断时明说「超过单次请求上限而被截断」，不再诬赖源
+- `bgFetch` 对「HTTP 200 但被截断」也记 `warn`（那是真实降级，只是状态码好看）
+
+**验证**：把用户的真实 feed **逐字抓成 fixture**（361,621 字节、10 篇、尾部完整——
+规则 15/21：真实载荷，不是手写），测试它现在能完整解析；反向再测「砍到 250,000 且带标志」
+时必须说「截断」而**不得**说「不是有效 XML」。4 个变异全部被具名测试杀死
+（含把上限改回 250,000 —— 只有真实 fixture 能抓住它）。
+
+**仍未做**：`PROXY_IMAGE` 自身的 byte/MIME 上限（图片走的是另一条路径，见队列 #8 原文）。
+
+**#1 `restore-all` 语义越界 + #4 单条/批量共享策略** —— **已完成（2026-09-12）**。
+
+**问题**（第二轮审查指出，回代码核实属实）：
+
+```ts
+await db.postSuppressions.clear();   // 无条件
+```
+
+站在回收站里按「全部恢复」，会把**回收站之外**的 `彻底删除` 记录一并解封——而界面
+对「彻底删除」的承诺是「今后同步也不会再出现」。审查的原话最准确：
+**「彻底删除」实际是「暂时永久，直到你以后点另一个按钮」。**
+
+**同一处还有单条/批量不对称**：单条恢复校验父 Channel（`postRepository.ts:91`），
+批量不查，直接 `bulkPut`。v6 迁移会把旧 `deletedPostIds` 的孤儿墓碑搬进 `recycleSnapshots`，
+于是**同一条记录，单条恢复拒绝、批量恢复接受**。
+
+**改法**（用户 2026-09-12 拍板选方案 1「拆两个」）：
+
+- 抽出 `isOrphanSnapshot()`，**单条与批量共用**——不对称本身就是缺陷。
+- `restoreAllDeletedPostIds()` 只动快照：恢复 `postData`、只解除**回收站里这些 id** 的
+  抑制、返回 `{ restored, dropped }`（孤儿计数**上报**而不是静默写回）。
+- 新增 `releaseAllSuppressions()` + `countPermanentlyDeleted()`：解除**所有**抑制是
+  一个**独立命名**的动作，确认框写明「其中 N 条已经彻底删除过，解除后可能重新出现」。
+- UI：回收站内按钮改为「恢复回收站全部动态」，旁边一个更弱的「解除所有删除状态」。
+
+**验证**：4 例跨操作**序列**测试（不是单操作不变量）。两处变异各自被抓住：
+
+- 把 `bulkDelete(ids)` 改回 `clear()` → `restoring the bin does NOT revive an earlier 彻底删除` 失败；
+- 去掉批量路径的孤儿检查 → 两个孤儿用例失败。
+
+**为什么原测试没抓到**（审查的判断正确）：原来 12 个不变量测试是**一条不变量一个 API**，
+逐条全绿，而缺陷从不在单个操作里——是**后续操作悄悄改写了先前操作的结果**。
+批次 1 起，删除域新增测试一律按"操作序列 → 最终状态"写。
+
+---
